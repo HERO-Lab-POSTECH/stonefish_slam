@@ -230,6 +230,9 @@ class Mapping2D:
             borderValue=0
         )
 
+        # Flip horizontally to correct left-right orientation
+        cartesian_img = np.fliplr(cartesian_img)
+
         return cartesian_img
 
     def get_map_bounds(
