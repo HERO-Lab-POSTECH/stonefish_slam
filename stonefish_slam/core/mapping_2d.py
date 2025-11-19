@@ -346,8 +346,12 @@ class Mapping2D:
                     local_y = (x - fan_w / 2) * self.fan_pixel_resolution
 
                     # Transform to global frame (NED convention)
-                    global_x = local_x * cos_theta - local_y * sin_theta + pose.x()
-                    global_y = local_x * sin_theta + local_y * cos_theta + pose.y()
+                    # NED: Z-axis rotation (yaw) is clockwise positive
+                    # Standard 2D rotation: [x'] = [cos -sin][x] + [tx]
+                    #                        [y']   [sin  cos][y]   [ty]
+                    # But NED yaw is clockwise, so sin term signs are FLIPPED
+                    global_x = local_x * cos_theta + local_y * sin_theta + pose.x()
+                    global_y = -local_x * sin_theta + local_y * cos_theta + pose.y()
 
                     # Convert to map coordinates
                     map_x = int((global_x - self.min_x) / self.map_resolution)
