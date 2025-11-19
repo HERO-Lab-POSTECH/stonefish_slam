@@ -334,36 +334,65 @@ class Mapping2D:
             cos_theta = np.cos(theta)
             sin_theta = np.sin(theta)
 
-            # Process fan-shaped image with sampling for performance
-            for y in range(0, fan_h, sample_step):
-                for x in range(0, fan_w, sample_step):
-                    intensity = fan_img[y, x]
-                    if intensity == 0:  # Skip empty pixels
-                        continue
+            # ===== OPTIMIZED: Vectorized processing instead of double for loop =====
+            # Sample the image with downsampling
+            fan_sampled = fan_img[::sample_step, ::sample_step]
+            sampled_h, sampled_w = fan_sampled.shape
 
-                    # Convert pixel to local coordinates (robot frame)
-                    local_x = (fan_h - y) * self.fan_pixel_resolution
-                    local_y = (x - fan_w / 2) * self.fan_pixel_resolution
+            # Create pixel coordinate grids (vectorized)
+            yy, xx = np.meshgrid(
+                np.arange(0, fan_h, sample_step),
+                np.arange(0, fan_w, sample_step),
+                indexing='ij'
+            )
 
-                    # Transform to global frame (NED convention)
-                    # NED: Z-axis rotation (yaw) is clockwise positive
-                    # Standard 2D rotation: [x'] = [cos -sin][x] + [tx]
-                    #                        [y']   [sin  cos][y]   [ty]
-                    # But NED yaw is clockwise, so sin term signs are FLIPPED
-                    global_x = local_x * cos_theta + local_y * sin_theta + pose.x()
-                    global_y = -local_x * sin_theta + local_y * cos_theta + pose.y()
+            # Filter out zero-intensity pixels (vectorized masking)
+            mask = fan_sampled > 0
+            if not np.any(mask):
+                continue
 
-                    # Convert to map coordinates
-                    map_x = int((global_x - self.min_x) / self.map_resolution)
-                    map_y = int((global_y - self.min_y) / self.map_resolution)
+            # Extract valid pixels
+            yy_valid = yy[mask]
+            xx_valid = xx[mask]
+            intensities = fan_sampled[mask]
 
-                    # Add to map if within bounds
-                    if 0 <= map_x < self.map_width and 0 <= map_y < self.map_height:
-                        self.global_map_accum[map_y, map_x] += float(intensity)
-                        self.global_map_count[map_y, map_x] += 1
-                        self.global_map_max[map_y, map_x] = max(
-                            self.global_map_max[map_y, map_x], float(intensity)
-                        )
+            # Convert pixels to local coordinates (vectorized)
+            local_x = (fan_h - yy_valid) * self.fan_pixel_resolution
+            local_y = (xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
+
+            # Transform to global frame (NED convention, vectorized)
+            # NED: Z-axis rotation (yaw) is clockwise positive
+            global_x = local_x * cos_theta + local_y * sin_theta + pose.x()
+            global_y = -local_x * sin_theta + local_y * cos_theta + pose.y()
+
+            # Convert to map coordinates (vectorized)
+            map_x = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
+            map_y = ((global_y - self.min_y) / self.map_resolution).astype(np.int32)
+
+            # Boundary check (vectorized)
+            valid_idx = (
+                (map_x >= 0) & (map_x < self.map_width) &
+                (map_y >= 0) & (map_y < self.map_height)
+            )
+
+            # Extract valid points
+            map_x_valid = map_x[valid_idx]
+            map_y_valid = map_y[valid_idx]
+            intensities_valid = intensities[valid_idx].astype(np.float32)
+
+            # Accumulate to map (fully vectorized with np.add.at)
+            # np.add.at handles duplicate indices correctly (accumulates)
+            linear_indices = map_y_valid * self.map_width + map_x_valid
+            np.add.at(self.global_map_accum.ravel(), linear_indices, intensities_valid)
+            np.add.at(self.global_map_count.ravel(), linear_indices, 1)
+
+            # For max: use np.maximum.at (available in newer NumPy)
+            # Fallback to loop only for max operation (much smaller overhead)
+            for i in range(len(linear_indices)):
+                idx = linear_indices[i]
+                self.global_map_max.ravel()[idx] = max(
+                    self.global_map_max.ravel()[idx], intensities_valid[i]
+                )
 
     def update_global_map(self, buffer_m: float = 30.0) -> None:
         """Update global map from self.keyframes (independent operation mode).
