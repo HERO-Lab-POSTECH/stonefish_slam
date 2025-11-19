@@ -3,8 +3,8 @@ from scipy.interpolate import interp1d
 import cv2
 # import rospy  # ROS2: Not needed
 
-from .utils.topics import *
-from .utils.conversions import r2n
+from stonefish_slam.utils.topics import *
+from stonefish_slam.utils.conversions import r2n
 
 
 class OculusFireMsg(object):

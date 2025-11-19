@@ -2,9 +2,9 @@ import math
 import numpy as np
 from scipy.optimize import root
 
-from .utils import * 
-from .sonar import *
-from . import cfar
+from stonefish_slam.utils import *
+from stonefish_slam.sensors.sonar import *
+from stonefish_slam.cpp import cfar
 
 class CFAR(object):
     """

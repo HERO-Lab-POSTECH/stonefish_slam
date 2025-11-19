@@ -7,7 +7,14 @@ package_name = 'stonefish_slam'
 setup(
     name=package_name,
     version='0.1.0',
-    packages=[package_name, package_name + '.utils'],
+    packages=[
+        package_name,
+        package_name + '.nodes',
+        package_name + '.core',
+        package_name + '.sensors',
+        package_name + '.utils',
+        package_name + '.cpp',
+    ],
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -25,10 +32,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'dead_reckoning_node = stonefish_slam.dead_reckoning_node:main_wrapper',
-            'feature_extraction_node_sim = stonefish_slam.feature_extraction_node_sim:main_wrapper',
-            'slam_node = stonefish_slam.slam_node:main_wrapper',
-            'kalman_node = stonefish_slam.kalman_node:main_wrapper',
+            'dead_reckoning_node = stonefish_slam.nodes.dead_reckoning_node:main_wrapper',
+            'feature_extraction_node_sim = stonefish_slam.nodes.feature_extraction_node_sim:main_wrapper',
+            'slam_node = stonefish_slam.nodes.slam_node:main_wrapper',
+            'kalman_node = stonefish_slam.nodes.kalman_node:main_wrapper',
         ],
     },
 )

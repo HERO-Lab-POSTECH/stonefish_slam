@@ -18,8 +18,8 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 from stonefish_slam.utils.io import *
 from stonefish_slam.utils.conversions import *
 from stonefish_slam.utils.visualization import *
-from stonefish_slam.slam import SLAM, Keyframe
-from stonefish_slam import pcl
+from stonefish_slam.core.slam import SLAM, Keyframe
+from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import *
 
 

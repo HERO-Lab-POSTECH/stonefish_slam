@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
-from stonefish_slam.dead_reckoning import main
+from stonefish_slam.core.dead_reckoning import main
 
 def main_wrapper():
     sys.exit(main())

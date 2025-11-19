@@ -62,25 +62,25 @@ ament_python_install_package(${PROJECT_NAME})
 
 # Install Python executable scripts
 install(PROGRAMS
-  stonefish_slam/dead_reckoning_node.py
+  stonefish_slam/nodes/dead_reckoning_node.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME dead_reckoning_node
 )
 
 install(PROGRAMS
-  stonefish_slam/feature_extraction_node_sim.py
+  stonefish_slam/nodes/feature_extraction_node_sim.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME feature_extraction_node_sim
 )
 
 install(PROGRAMS
-  stonefish_slam/slam_node.py
+  stonefish_slam/nodes/slam_node.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME slam_node
 )
 
 install(PROGRAMS
-  stonefish_slam/kalman_node.py
+  stonefish_slam/nodes/kalman_node.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME kalman_node
 )
