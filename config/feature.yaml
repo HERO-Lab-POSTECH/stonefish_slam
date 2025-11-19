@@ -1,0 +1,39 @@
+# Feature Extraction configuration for ROS2
+feature_extraction_sim_node:
+  ros__parameters:
+    # Vehicle name
+    vehicle_name: 'bluerov2'
+
+    # Sonar image topic
+    sonar_image_topic: '/bluerov2/fls/image'
+
+    # Constant false alarm rate (CFAR) params for feature extraction
+    CFAR:
+      Ntc: 20  # number of training cells (reduced for simulator)
+      Ngc: 10  # number of guard cells
+      Pfa: 0.01  # false alarm rate
+      rank: 10  # matrix rank (Ntc/2 is recommended)
+      alg: 'SOCA'  # method of CFAR, see cfar.cpp for options. SOCA is best.
+
+    # Point cloud filtering params
+    filter:
+      threshold: 80  # the min intensity to be added (0-255, higher = fewer points)
+      resolution: 0.5  # voxel downsampling resolution
+      radius: 1.0  # outlier rejection radius
+      min_points: 5  # outlier rejection min points
+      skip: 5  # process every Nth frame
+
+    # Visualization params
+    visualization:
+      coordinates: 'cartesian'
+      radius: 2.0
+      color: 'green'
+
+    # Sonar parameters (Stonefish FLS from bluerov2.scn)
+    sonar:
+      horizontal_fov: 130.0  # degrees (total horizontal field of view)
+      vertical_fov: 20.0  # degrees
+      num_beams: 512  # number of beams (image width)
+      num_bins: 500  # number of range bins (image height)
+      range_min: 0.5  # minimum range in meters
+      range_max: 20.0  # maximum range in meters

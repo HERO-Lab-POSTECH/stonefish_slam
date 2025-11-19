@@ -1,0 +1,42 @@
+slam_node:
+  ros__parameters:
+    # how often to add keyframes, this can be varied but between 1 and 4 meters is best
+    keyframe_duration: 1.0
+    keyframe_translation: 3.0
+    keyframe_rotation: 0.5236  # 30 degrees in radians
+
+    # SLAM enable flag
+    enable_slam: true
+
+    # define the noise models
+    # x, y, theta in m, m, rad
+    prior_sigmas: [0.1, 0.1, 0.01]
+    odom_sigmas: [0.2, 0.2, 0.02]
+    icp_odom_sigmas: [0.1, 0.1, 0.01]
+
+    # pull in the ICP config (ROS2 - will be set from launch file)
+    # Leave empty here, will be provided as parameter from launch file
+    icp_config: ''
+
+    # Downsample points for ICP/publishing
+    point_resolution: 0.5
+
+    # Sequential scan matching (SSM)
+    ssm.enable: true  # is this module enabled?
+    ssm.min_points: 50  # the min number of points to try SSM
+    ssm.max_translation: 3.0  # the max translation allowed
+    ssm.max_rotation: 0.5236  # 30 degrees in radians
+    ssm.target_frames: 3  # the numeber of frames we compare the current frame to
+
+    # Non-sequential scan matching (Loop Closure)
+    nssm.enable: true  # is this module enabled?
+    nssm.min_st_sep: 15  # the size of the exclusion zone around the most recent keyframe (increased for true loops)
+    nssm.min_points: 150  # min number of points (increased to reduce noise)
+    nssm.max_translation: 5.0  # max translation allowed (decreased from 10.0 - stricter validation)
+    nssm.max_rotation: 0.5236  # 30 degrees in radians (decreased from 60° - stricter validation)
+    nssm.source_frames: 5  # the number of frames to aggratgate when trying a loop closure
+    nssm.cov_samples: 30
+
+    # the PCM params for rejecting outlier loop closures
+    pcm_queue_size: 5  # the sliding window size for PCM
+    min_pcm: 3  # the min number of pairwise consistent loop closures (increased from 2 - stronger outlier rejection)
