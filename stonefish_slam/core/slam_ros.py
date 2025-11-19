@@ -179,7 +179,7 @@ class SLAMNode(SLAM, Node):
         # 2D mapping parameters
         self.declare_parameter('enable_2d_mapping', True)
         self.declare_parameter('map_resolution', 0.1)
-        self.declare_parameter('map_size', [2000, 2000])
+        self.declare_parameter('map_size', [4000, 4000])  # 원본과 동일 (slam_2d.py Line 1019)
         self.declare_parameter('sonar_range', 20.0)
         self.declare_parameter('sonar_fov', 130.0)
         self.declare_parameter('map_update_interval', 1)  # 매 키프레임마다 업데이트

@@ -66,7 +66,7 @@ class Mapping2D:
     def __init__(
         self,
         map_resolution: float = 0.1,
-        map_size: Tuple[int, int] = (2000, 2000),
+        map_size: Tuple[int, int] = (4000, 4000),
         sonar_range: float = 20.0,
         sonar_fov: float = 130.0,
         fan_pixel_resolution: float = 0.05
