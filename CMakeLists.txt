@@ -123,18 +123,47 @@ else()
   message(WARNING "pybind11 or Eigen3 not found, CFAR C++ module will not be built")
 endif()
 
-# PCL module (disabled for now - needs libpointmatcher)
-# if(libpointmatcher_FOUND AND PCL_FOUND AND pybind11_FOUND)
-#   pybind11_add_module(pcl_module stonefish_slam/cpp/pcl.cpp)
-#   target_link_libraries(pcl_module PRIVATE
-#     ${libpointmatcher_LIBRARIES}
-#     ${PCL_LIBRARIES}
-#   )
-#   install(TARGETS pcl_module
-#     LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}
-#     RENAME pcl.so
-#   )
-# endif()
+# PCL module for fast ICP
+if(libpointmatcher_FOUND AND PCL_FOUND AND pybind11_FOUND)
+  message(STATUS "Building PCL module with libpointmatcher and PCL")
+
+  # Get Python include directories
+  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+
+  add_library(pcl_module MODULE stonefish_slam/cpp/pcl.cpp)
+
+  target_link_libraries(pcl_module PRIVATE
+    pybind11::module
+    pybind11::lto
+    ${libpointmatcher_LIBRARIES}
+    ${PCL_LIBRARIES}
+    Python3::Module
+  )
+
+  target_include_directories(pcl_module PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stonefish_slam/cpp
+    ${libpointmatcher_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+    ${pybind11_INCLUDE_DIRS}
+    ${Python3_INCLUDE_DIRS}
+  )
+
+  set_target_properties(pcl_module PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "pcl"
+    SUFFIX ".so"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    CXX_VISIBILITY_PRESET "hidden"
+  )
+
+  install(TARGETS pcl_module
+    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
+  )
+
+  message(STATUS "PCL module will be built with libpointmatcher and PCL ${PCL_VERSION}")
+else()
+  message(WARNING "libpointmatcher, PCL or pybind11 not found, PCL C++ module will not be built")
+endif()
 
 # Install config files
 install(DIRECTORY
