@@ -339,8 +339,11 @@ class Mapping2D:
                         continue
 
                     # Convert pixel to local coordinates (robot frame)
+                    # X: forward (positive = forward)
+                    # Y: right (positive = right, FRD convention from polar_to_cartesian)
                     local_x = (fan_h - y) * self.fan_pixel_resolution
-                    local_y = (x - fan_w / 2) * self.fan_pixel_resolution
+                    # CRITICAL: Negate Y to match FRD coordinate (feature_extraction uses Y=right)
+                    local_y = -(x - fan_w / 2) * self.fan_pixel_resolution
 
                     # Transform to global frame (NED convention)
                     global_x = local_x * cos_theta - local_y * sin_theta + pose.x()

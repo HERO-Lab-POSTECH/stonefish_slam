@@ -6,7 +6,7 @@ slam_node:
     keyframe_rotation: 0.5236  # 30 degrees in radians
 
     # SLAM enable flag
-    enable_slam: true
+    enable_slam: false
 
     # define the noise models
     # x, y, theta in m, m, rad
