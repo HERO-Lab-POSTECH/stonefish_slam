@@ -10,7 +10,7 @@ from tf2_ros import TransformBroadcaster
 import cv_bridge
 from nav_msgs.msg import Odometry
 from message_filters import Subscriber, ApproximateTimeSynchronizer
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, Image
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseWithCovarianceStamped
 
@@ -19,6 +19,7 @@ from stonefish_slam.utils.io import *
 from stonefish_slam.utils.conversions import *
 from stonefish_slam.utils.visualization import *
 from stonefish_slam.core.slam import SLAM, Keyframe
+from stonefish_slam.core.mapping_2d import Mapping2D
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import *
 
@@ -90,6 +91,13 @@ class SLAMNode(SLAM, Node):
 
         # the threading lock
         self.lock = threading.RLock()
+
+        # Mapping initialization (configured in init_node)
+        self.mapper = None
+        self.enable_2d_mapping = False
+        self.map_update_interval = 5
+        self.last_map_update_kf = 0
+        self.bridge = cv_bridge.CvBridge()
 
         # Initialize node parameters and subscribers/publishers
         self.init_node()
@@ -168,6 +176,31 @@ class SLAMNode(SLAM, Node):
         self.pcm_queue_size = self.get_parameter('pcm_queue_size').value
         self.min_pcm = self.get_parameter('min_pcm').value
 
+        # 2D mapping parameters
+        self.declare_parameter('enable_2d_mapping', True)
+        self.declare_parameter('map_resolution', 0.1)
+        self.declare_parameter('map_size', [2000, 2000])
+        self.declare_parameter('sonar_range', 20.0)
+        self.declare_parameter('sonar_fov', 130.0)
+        self.declare_parameter('map_update_interval', 5)
+
+        self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
+        self.map_update_interval = self.get_parameter('map_update_interval').value
+
+        if self.enable_2d_mapping:
+            map_resolution = self.get_parameter('map_resolution').value
+            map_size = tuple(self.get_parameter('map_size').value)
+            sonar_range = self.get_parameter('sonar_range').value
+            sonar_fov = self.get_parameter('sonar_fov').value
+
+            self.mapper = Mapping2D(
+                map_resolution=map_resolution,
+                map_size=map_size,
+                sonar_range=sonar_range,
+                sonar_fov=sonar_fov
+            )
+            self.get_logger().info(f"2D Mapping enabled: resolution={map_resolution}m/px")
+
         # max delay between an incoming point cloud and dead reckoning
         self.feature_odom_sync_max_delay = 0.5
 
@@ -193,18 +226,30 @@ class SLAMNode(SLAM, Node):
         self.get_logger().info(f"Subscribing to feature topic: {SONAR_FEATURE_TOPIC}")
         self.get_logger().info(f"Subscribing to odom topic: {LOCALIZATION_ODOM_TOPIC}")
 
+        # Sonar image subscriber for 2D mapping
+        if self.enable_2d_mapping:
+            self.sonar_sub = Subscriber(self, Image, '/bluerov2/fls/image', qos_profile=qos_sub_profile)
+            self.get_logger().info("Subscribing to sonar image: /bluerov2/fls/image")
+
         # define the sync policy
-        self.time_sync = ApproximateTimeSynchronizer(
-            [self.feature_sub, self.odom_sub],
-            20,
-            self.feature_odom_sync_max_delay
-        )
+        if self.enable_2d_mapping:
+            self.time_sync = ApproximateTimeSynchronizer(
+                [self.feature_sub, self.odom_sub, self.sonar_sub],
+                20,
+                self.feature_odom_sync_max_delay
+            )
+            self.time_sync.registerCallback(self.SLAM_callback_with_mapping)
+            self.get_logger().info("Using 3-way synchronizer (feature + odom + sonar)")
+        else:
+            self.time_sync = ApproximateTimeSynchronizer(
+                [self.feature_sub, self.odom_sub],
+                20,
+                self.feature_odom_sync_max_delay
+            )
+            self.time_sync.registerCallback(self.SLAM_callback)
+            self.get_logger().info("Using 2-way synchronizer (feature + odom)")
 
         self.get_logger().info(f"Created time synchronizer with max delay: {self.feature_odom_sync_max_delay}")
-
-        # register the callback in the sync policy
-        self.time_sync.registerCallback(self.SLAM_callback)
-        self.get_logger().info("Registered SLAM callback")
 
         # pose publisher
         self.pose_pub = self.create_publisher(
@@ -224,6 +269,15 @@ class SLAMNode(SLAM, Node):
         # point cloud publisher topic
         self.cloud_pub = self.create_publisher(
             PointCloud2, SLAM_CLOUD_TOPIC, qos_pub_profile)
+
+        # 2D map publisher
+        if self.enable_2d_mapping:
+            self.map_2d_pub = self.create_publisher(
+                Image,
+                SLAM_NS + 'mapping/map_2d_image',
+                qos_profile=qos_pub_profile
+            )
+            self.get_logger().info(f"Publishing 2D map to: {SLAM_NS}mapping/map_2d_image")
 
         # tf broadcaster to show pose
         self.tf = TransformBroadcaster(self)
@@ -311,6 +365,79 @@ class SLAMNode(SLAM, Node):
         self.current_frame = frame
         self.publish_all()
         self.lock.release()
+
+    def SLAM_callback_with_mapping(self, feature_msg: PointCloud2, odom_msg: Odometry, sonar_msg: Image) -> None:
+        """SLAM callback with 2D mapping support (3-way synchronization).
+
+        Integrates sonar image acquisition into the SLAM pipeline for 2D map generation.
+
+        Args:
+            feature_msg (PointCloud2): the incoming sonar point cloud
+            odom_msg (Odometry): the incoming DVL/IMU state estimate
+            sonar_msg (Image): the incoming sonar image
+        """
+        with self.lock:
+            # 1. Convert sonar image
+            try:
+                sonar_image = self.bridge.imgmsg_to_cv2(sonar_msg, desired_encoding="mono8")
+            except Exception as e:
+                self.get_logger().error(f"Failed to convert sonar image: {e}")
+                sonar_image = None
+
+            # 2. Standard SLAM processing
+            time = feature_msg.header.stamp
+            dr_pose3 = r2g(odom_msg.pose.pose)
+            frame = Keyframe(False, time, dr_pose3)
+
+            # Convert point cloud
+            points = pointcloud2_to_xyz_array(feature_msg)
+            points = np.c_[points[:, 0], points[:, 1]]
+
+            # Check if valid points
+            if len(points) and np.isnan(points[0, 0]):
+                frame.status = False
+            else:
+                frame.status = self.is_keyframe(frame)
+
+            # Set frame twist
+            frame.twist = odom_msg.twist.twist
+
+            # Update keyframe pose from dead reckoning
+            if self.keyframes:
+                dr_odom = self.current_keyframe.dr_pose.between(frame.dr_pose)
+                pose = self.current_keyframe.pose.compose(dr_odom)
+                frame.update(pose)
+
+            # 3. Process keyframe
+            if frame.status:
+                # Add points
+                frame.points = points
+
+                # Add sonar image to frame
+                if sonar_image is not None:
+                    frame.image = sonar_image
+
+                # Sequential scan matching
+                if not self.keyframes:
+                    self.add_prior(frame)
+                else:
+                    self.add_sequential_scan_matching(frame)
+
+                # Update factor graph
+                self.update_factor_graph(frame)
+
+                # Loop closure
+                if self.nssm_params.enable and self.add_nonsequential_scan_matching():
+                    self.update_factor_graph()
+
+                # 4. Update 2D map periodically
+                if (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
+                    self.publish_2d_map()
+                    self.last_map_update_kf = len(self.keyframes)
+
+            # Update current frame and publish
+            self.current_frame = frame
+            self.publish_all()
 
     def publish_all(self) -> None:
         """Publish to all ouput topics
@@ -468,6 +595,41 @@ class SLAMNode(SLAM, Node):
         else:
             cloud_msg.header.frame_id = self.rov_id + "_map"
         self.cloud_pub.publish(cloud_msg)
+
+    def publish_2d_map(self) -> None:
+        """Generate and publish 2D sonar mosaic map.
+
+        Uses the Mapping2D module to create a global 2D map from SLAM keyframes
+        with sonar images. The map is published as a ROS Image message.
+        """
+        if not self.enable_2d_mapping or not self.mapper:
+            return
+
+        if not self.keyframes:
+            return
+
+        # Update global map from SLAM keyframes
+        self.mapper.update_global_map_from_slam(self.keyframes)
+
+        # Get map image
+        map_image = self.mapper.get_map_image()
+        if map_image is None or map_image.size == 0:
+            return
+
+        # Convert to ROS Image message
+        try:
+            image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
+            image_msg.header.stamp = self.get_clock().now().to_msg()
+            image_msg.header.frame_id = "map"
+            self.map_2d_pub.publish(image_msg)
+
+            self.get_logger().info(
+                f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
+                f"{len(self.keyframes)} keyframes",
+                throttle_duration_sec=5.0
+            )
+        except Exception as e:
+            self.get_logger().error(f"Failed to publish map: {e}")
 
 
 def main(args=None):

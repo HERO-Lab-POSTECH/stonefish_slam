@@ -40,3 +40,11 @@ slam_node:
     # the PCM params for rejecting outlier loop closures
     pcm_queue_size: 5  # the sliding window size for PCM
     min_pcm: 3  # the min number of pairwise consistent loop closures (increased from 2 - stronger outlier rejection)
+
+    # 2D Mapping parameters
+    enable_2d_mapping: true
+    map_resolution: 0.1  # meters per pixel
+    map_size: [2000, 2000]  # width, height in pixels
+    sonar_range: 20.0  # meters
+    sonar_fov: 130.0  # degrees
+    map_update_interval: 5  # update map every N keyframes
