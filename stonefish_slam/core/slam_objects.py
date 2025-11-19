@@ -6,10 +6,10 @@ import gtsam
 import numpy as np
 from rclpy.time import Time
 
-from .sonar import OculusProperty
-from .utils.conversions import *
-from .utils.visualization import *
-from .utils.io import *
+from stonefish_slam.sensors.sonar import OculusProperty
+from stonefish_slam.utils.conversions import *
+from stonefish_slam.utils.visualization import *
+from stonefish_slam.utils.io import *
 
 
 class STATUS(Enum):
