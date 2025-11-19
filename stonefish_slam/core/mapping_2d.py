@@ -17,6 +17,7 @@ import numpy as np
 import cv2
 from typing import Optional, Tuple, List, Dict, Any, Union
 import gtsam
+from scipy.interpolate import interp1d
 
 # Type alias for duck typing: SLAM Keyframe objects
 # Must have .pose (gtsam.Pose2) and .image (np.ndarray) attributes
@@ -86,6 +87,9 @@ class Mapping2D:
         self.sonar_fov = sonar_fov
         self.fan_pixel_resolution = fan_pixel_resolution
 
+        # Polar-to-cartesian transformation cache
+        self.p2c_cache = None
+
         # Keyframe storage: List of {'key': int, 'pose': gtsam.Pose2, 'image': np.ndarray}
         self.keyframes: List[Dict] = []
 
@@ -130,10 +134,15 @@ class Mapping2D:
     ) -> np.ndarray:
         """Convert polar sonar image to fan-shaped cartesian image.
 
-        Reference: slam_2d.py Line 942-986
+        Reference: feature_extraction_sim.py Line 172-277 (cv2.remap-based implementation)
 
         Maps polar coordinates (range × bearing) to cartesian fan-shaped image.
-        Uses inverse mapping (cartesian → polar lookup) for efficiency.
+        Uses cached transformation maps with cv2.remap() for high performance.
+
+        Coordinate System:
+            - Stonefish FLS convention: row=0 is FAR (range_max), row=max is NEAR (range_min)
+            - X-axis: forward (range direction)
+            - Y-axis: lateral/port-starboard (negative=left/port, positive=right/starboard)
 
         Args:
             polar_img: Input polar image (range × bearing), shape (num_bins, num_beams)
@@ -148,41 +157,78 @@ class Mapping2D:
         if fov_deg is None:
             fov_deg = self.sonar_fov
 
-        img_h, img_w = polar_img.shape
+        rows, cols = polar_img.shape
 
-        # Calculate output dimensions for fan-shaped image
-        # slam_2d.py Line 955-958
-        fov_rad = np.radians(fov_deg)
-        output_width = int(2 * max_range * np.sin(fov_rad / 2) / self.fan_pixel_resolution)
-        output_height = int(max_range / self.fan_pixel_resolution)
+        # Build or use cached transformation maps (performance optimization)
+        if self.p2c_cache is None:
+            # Calculate range resolution
+            range_min = 0.1  # Typical FLS minimum range
+            range_resolution = (max_range - range_min) / rows
 
-        # Create output image
-        cartesian_img = np.zeros((output_height, output_width), dtype=np.uint8)
+            # Maximum lateral extent based on FOV
+            max_lateral = max_range * np.sin(np.radians(fov_deg / 2.0))
 
-        # Create mapping from cartesian to polar
-        # slam_2d.py Line 964-985
-        # Sample every 2 pixels for speed
-        for y in range(0, output_height, 2):
-            for x in range(0, output_width, 2):
-                # Convert output pixel to physical coordinates
-                x_m = (x - output_width / 2) * self.fan_pixel_resolution
-                y_m = (output_height - y) * self.fan_pixel_resolution  # y increases downward in image
+            # Cartesian image dimensions (same resolution as range)
+            cart_width = int(np.ceil(2 * max_lateral / range_resolution))
+            cart_height = rows
 
-                # Convert to polar coordinates
-                r = np.sqrt(x_m**2 + y_m**2)
-                theta = np.arctan2(x_m, y_m)  # angle from forward direction
+            # Create bearing angle array for each column
+            # col=0 → -FOV/2 (left), col=num_beams-1 → +FOV/2 (right)
+            bearing_angles = np.radians(
+                np.linspace(-fov_deg / 2.0, fov_deg / 2.0, cols)
+            )
 
-                # Check if within sonar FOV
-                if r > max_range or r < 0.1 or abs(theta) > fov_rad / 2:
-                    continue
+            # Create interpolation function: bearing → column index
+            f_bearings = interp1d(
+                bearing_angles,
+                range(cols),
+                kind='linear',
+                bounds_error=False,
+                fill_value=-1,
+                assume_sorted=True
+            )
 
-                # Map to input image coordinates
-                # In polar image: row index corresponds to range
-                row = int((r / max_range) * (img_h - 1))
-                col = int((theta / (fov_rad / 2) * 0.5 + 0.5) * (img_w - 1))
+            # Build cartesian meshgrid (pixel indices)
+            XX, YY = np.meshgrid(range(cart_width), range(cart_height))
 
-                if 0 <= row < img_h and 0 <= col < img_w:
-                    cartesian_img[y, x] = polar_img[row, col]
+            # Convert pixel indices to metric coordinates
+            # CRITICAL: Stonefish FLS row convention is OPPOSITE of Oculus
+            # Stonefish: row=0 (top) is FAR range, row=max (bottom) is NEAR range
+            # Cartesian: YY=0 (top) should be FAR, YY=max (bottom) should be NEAR
+            x_meters = max_range - range_resolution * YY
+
+            # Y: lateral distance - centered at 0
+            y_meters = range_resolution * (-cart_width / 2.0 + XX + 0.5)
+
+            # Convert cartesian (x, y) to polar (r, bearing)
+            r_polar = np.sqrt(np.square(x_meters) + np.square(y_meters))
+            bearing_polar = np.arctan2(y_meters, x_meters)
+
+            # Map polar coordinates to image indices
+            # Range to row index (distance in meters to pixel row)
+            # STONEFISH: row=0 is FAR (range_max), row=rows-1 is NEAR (range_min)
+            map_y = np.asarray((max_range - r_polar) / range_resolution, dtype=np.float32)
+
+            # Bearing to column index (using interpolation)
+            map_x = np.asarray(f_bearings(bearing_polar), dtype=np.float32)
+
+            # Cache the transformation maps
+            self.p2c_cache = {
+                'map_x': map_x,
+                'map_y': map_y,
+                'cart_height': cart_height,
+                'cart_width': cart_width
+            }
+
+        # Use cached maps for fast remapping
+        cartesian_img = cv2.remap(
+            polar_img,
+            self.p2c_cache['map_x'],
+            self.p2c_cache['map_y'],
+            cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0
+        )
 
         return cartesian_img
 
