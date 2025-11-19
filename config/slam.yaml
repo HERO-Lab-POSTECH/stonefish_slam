@@ -22,14 +22,14 @@ slam_node:
     point_resolution: 0.5
 
     # Sequential scan matching (SSM)
-    ssm.enable: true  # is this module enabled?
+    ssm.enable: false  # is this module enabled?
     ssm.min_points: 50  # the min number of points to try SSM
     ssm.max_translation: 3.0  # the max translation allowed
     ssm.max_rotation: 0.5236  # 30 degrees in radians
     ssm.target_frames: 3  # the numeber of frames we compare the current frame to
 
     # Non-sequential scan matching (Loop Closure)
-    nssm.enable: true  # is this module enabled?
+    nssm.enable: false  # is this module enabled?
     nssm.min_st_sep: 15  # the size of the exclusion zone around the most recent keyframe (increased for true loops)
     nssm.min_points: 150  # min number of points (increased to reduce noise)
     nssm.max_translation: 5.0  # max translation allowed (decreased from 10.0 - stricter validation)
@@ -47,4 +47,4 @@ slam_node:
     map_size: [2000, 2000]  # width, height in pixels
     sonar_range: 20.0  # meters
     sonar_fov: 130.0  # degrees
-    map_update_interval: 5  # update map every N keyframes
+    map_update_interval: 1  # update map every N keyframes (1=every keyframe for real-time visualization)
