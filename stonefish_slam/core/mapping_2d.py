@@ -575,14 +575,12 @@ class Mapping2D:
             map_col_valid = map_col[valid_idx]
             intensities_valid = intensities[valid_idx].astype(np.float32)
 
-            # Maximum Intensity Projection (literature standard for sonar)
-            # Keep the brightest value at each pixel (preserves strong signals/objects)
+            # Latest image overlay - just overwrite with newest sonar data
             linear_indices = map_row_valid * self.map_width + map_col_valid
             map_flat = self.global_map_accum.ravel()
 
-            # Vectorized maximum update (much faster than loop)
-            # Use np.maximum.at to update in-place with maximum values
-            np.maximum.at(map_flat, linear_indices, intensities_valid)
+            # Simple overwrite (latest-write-wins)
+            map_flat[linear_indices] = intensities_valid
 
             # Mark this keyframe as processed (incremental update)
             if kf_key is not None:
@@ -652,8 +650,8 @@ class Mapping2D:
     def get_map_image(self) -> np.ndarray:
         """Get current global map as uint8 image.
 
-        Maximum Intensity Projection: Each pixel shows the brightest value observed.
-        No averaging - preserves original sonar intensities and contrast.
+        Latest image overlay: Each pixel shows the most recent sonar observation.
+        Simple overwrite - no normalization, no maximum, just latest data.
 
         Returns:
             Global map image (height × width), uint8, vertically flipped
@@ -661,8 +659,7 @@ class Mapping2D:
         if self.global_map_accum is None:
             return np.zeros((100, 100), dtype=np.uint8)
 
-        # Maximum intensity projection - use accum directly (no division needed)
-        # Convert to uint8 (values already in 0-255 range from sonar data)
+        # Simple direct conversion (latest-write-wins, no processing)
         global_map_uint8 = np.clip(self.global_map_accum, 0, 255).astype(np.uint8)
 
         # Flip vertically for correct orientation in ROS/RViz
