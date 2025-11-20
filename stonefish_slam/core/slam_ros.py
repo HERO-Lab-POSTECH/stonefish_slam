@@ -314,8 +314,10 @@ class SLAMNode(SLAM, Node):
         if icp_config:
             self.icp.loadFromYaml(icp_config)
 
-        # define the robot ID this is not used here, extended in multi-robot SLAM
-        self.rov_id = ""
+        # define the robot ID from node namespace
+        namespace = self.get_namespace()
+        # Remove leading '/' from namespace (e.g., '/bluerov2' → 'bluerov2')
+        self.rov_id = namespace.lstrip('/') if namespace != '/' else ""
 
         # call the configure function
         self.configure()
