@@ -676,9 +676,11 @@ class SLAMNode(SLAM, Node):
                     # Construct source_frame with namespace (use FRD for correct NED mapping)
                     source_frame = 'base_link_frd' if self.rov_id == "" else f"{self.rov_id}/base_link_frd"
 
+                    # Use keyframe.pose directly (more reliable than delayed tf2 lookup)
+                    # tf2 lookup often fails due to async mapping delay exceeding buffer cache
                     self.mapper.update_global_map_from_slam(
                         keyframes_snapshot,
-                        tf2_buffer=self.tf_buffer,
+                        tf2_buffer=None,  # Disabled: use keyframe.pose
                         target_frame='world_ned',
                         source_frame=source_frame
                     )
