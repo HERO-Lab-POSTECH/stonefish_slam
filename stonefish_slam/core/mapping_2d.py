@@ -492,9 +492,9 @@ class Mapping2D:
             # CRITICAL: Correct NED → image coordinate mapping
             # NED: X=North (up), Y=East (right)
             # Image: row (0=top), col (0=left)
-            # North → row (inverted: North increases = row decreases)
+            # North → row (normal: North increases = row increases)
             # East → col (normal: East increases = col increases)
-            map_row = (self.map_height - 1 - ((global_x - self.min_x) / self.map_resolution)).astype(np.int32)
+            map_row = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
             map_col = ((global_y - self.min_y) / self.map_resolution).astype(np.int32)
 
             # Boundary check (vectorized)
