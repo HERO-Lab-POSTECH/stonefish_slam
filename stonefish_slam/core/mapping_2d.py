@@ -96,6 +96,11 @@ class Mapping2D:
         self.logger = logging.getLogger('Mapping2D')
         self.logger.setLevel(logging.INFO)
 
+        # CLAHE for intensity normalization (prevents map darkening over time)
+        # clipLimit: 2.0 = prevents over-amplification
+        # tileGridSize: (8,8) = local histogram equalization
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
         # tf2 lookup statistics
         self.tf2_stats = {'success': 0, 'failed': 0, 'no_timestamp': 0}
 
@@ -352,6 +357,12 @@ class Mapping2D:
                 pose = kf.pose  # Default pose
                 # Use sonar acquisition time if available, otherwise fall back to feature time
                 timestamp = kf.sonar_time if hasattr(kf, 'sonar_time') and kf.sonar_time is not None else kf.time
+
+            # Apply CLAHE to normalize intensity and prevent map darkening
+            # Convert to uint8 if needed
+            if polar_img.dtype != np.uint8:
+                polar_img = np.clip(polar_img, 0, 255).astype(np.uint8)
+            polar_img = self.clahe.apply(polar_img)
 
             # Debug log for keyframe processing
             if timestamp is not None:
