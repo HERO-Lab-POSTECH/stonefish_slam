@@ -1156,7 +1156,7 @@ class SLAM(object):
         # Reject keyframe if angular velocity is too high (motion blur)
         if frame.twist is not None:
             angular_vel_z = abs(frame.twist.angular.z)
-            max_angular_vel = 0.3  # rad/s (~17°/s), reject if rotating faster
+            max_angular_vel = 0.1  # rad/s (~6°/s), reject if rotating faster
             if angular_vel_z > max_angular_vel:
                 return False
 
