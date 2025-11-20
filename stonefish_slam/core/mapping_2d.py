@@ -576,14 +576,11 @@ class Mapping2D:
 
         self._process_keyframes_to_map(valid_keyframes, buffer_m, tf2_buffer, target_frame, source_frame)
 
-    def get_map_image(self, normalize: bool = True) -> np.ndarray:
+    def get_map_image(self) -> np.ndarray:
         """Get current global map as uint8 image.
 
         Uses simple averaging for blending. CLAHE is already applied to each frame
         at storage time, so no additional normalization is needed.
-
-        Args:
-            normalize: Not used anymore (kept for API compatibility)
 
         Returns:
             Global map image (height × width), uint8, vertically flipped
@@ -616,7 +613,7 @@ class Mapping2D:
         Returns:
             Colored map image (height × width × 3), uint8, BGR format
         """
-        grayscale_map = self.get_map_image(normalize=True)
+        grayscale_map = self.get_map_image()
         colored_map = cv2.applyColorMap(grayscale_map, cv2.COLORMAP_JET)
         return colored_map
 
@@ -629,7 +626,7 @@ class Mapping2D:
             filepath: Path to save grayscale map (e.g., '/path/to/2d_map.png')
             save_colored: Whether to also save colored version (default: True)
         """
-        grayscale_map = self.get_map_image(normalize=True)
+        grayscale_map = self.get_map_image()
         cv2.imwrite(filepath, grayscale_map)
 
         if save_colored:
