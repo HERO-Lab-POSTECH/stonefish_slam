@@ -18,6 +18,7 @@ import cv2
 from typing import Optional, Tuple, List, Dict, Any, Union
 import gtsam
 from scipy.interpolate import interp1d
+from rclpy.duration import Duration
 
 # Type alias for duck typing: SLAM Keyframe objects
 # Must have .pose (gtsam.Pose2) and .image (np.ndarray) attributes
@@ -277,7 +278,10 @@ class Mapping2D:
     def _process_keyframes_to_map(
         self,
         keyframes: Union[List[Dict], List[KeyframeType]],
-        buffer_m: float = 30.0
+        buffer_m: float = 30.0,
+        tf2_buffer=None,
+        target_frame: str = 'world_ned',
+        source_frame: str = 'base_link'
     ) -> None:
         """Process keyframes and accumulate into global map (core logic).
 
@@ -287,6 +291,9 @@ class Mapping2D:
         Args:
             keyframes: List of keyframes (dict or SLAM Keyframe objects)
             buffer_m: Buffer margin around trajectory in meters (default: 30.0)
+            tf2_buffer: tf2_ros.Buffer for timestamp-based pose lookup (optional)
+            target_frame: Target frame for tf2 lookup (default: 'world_ned')
+            source_frame: Source frame for tf2 lookup (default: 'base_link')
         """
         if not keyframes:
             return
@@ -318,12 +325,43 @@ class Mapping2D:
             if isinstance(kf, dict):
                 polar_img = kf['image']
                 pose = kf['pose']
+                timestamp = kf.get('time', None)  # For dict mode
             else:
                 # SLAM Keyframe object
                 if not hasattr(kf, 'image') or kf.image is None:
                     continue
                 polar_img = kf.image
-                pose = kf.pose
+                pose = kf.pose  # Default pose
+                timestamp = kf.time if hasattr(kf, 'time') else None
+
+            # Use tf2 to get accurate pose at sonar acquisition time
+            if tf2_buffer is not None and timestamp is not None:
+                try:
+                    # Lookup transform at the exact sonar acquisition time
+                    transform = tf2_buffer.lookup_transform(
+                        target_frame,
+                        source_frame,
+                        timestamp,
+                        timeout=Duration(seconds=0.01)
+                    )
+
+                    # Convert transform to gtsam.Pose2
+                    from stonefish_slam.utils.conversions import r2g, pose322
+                    from geometry_msgs.msg import Pose
+                    ros_pose = Pose()
+                    ros_pose.position.x = transform.transform.translation.x
+                    ros_pose.position.y = transform.transform.translation.y
+                    ros_pose.position.z = transform.transform.translation.z
+                    ros_pose.orientation = transform.transform.rotation
+
+                    pose3 = r2g(ros_pose)
+                    # Extract 2D pose (x, y, yaw)
+                    pose = pose322(pose3)
+
+                except Exception as e:
+                    # Fallback to keyframe pose if tf2 lookup fails
+                    # This can happen if timestamp is outside tf2 buffer range
+                    pass
 
             # Convert polar to fan-shaped cartesian image
             fan_img = self.polar_to_cartesian_image(polar_img, self.sonar_range, self.sonar_fov)
@@ -410,7 +448,10 @@ class Mapping2D:
     def update_global_map_from_slam(
         self,
         slam_keyframes: List[KeyframeType],
-        buffer_m: float = 30.0
+        buffer_m: float = 30.0,
+        tf2_buffer=None,
+        target_frame: str = 'world_ned',
+        source_frame: str = 'base_link'
     ) -> None:
         """Update global map directly from SLAM keyframes (SLAM integration mode).
 
@@ -421,13 +462,16 @@ class Mapping2D:
             slam_keyframes: List of SLAM Keyframe objects
                            Each must have .pose (gtsam.Pose2) and .image (np.ndarray)
             buffer_m: Buffer margin around trajectory in meters (default: 30.0)
+            tf2_buffer: tf2_ros.Buffer for timestamp-based pose lookup (optional)
+            target_frame: Target frame for tf2 lookup (default: 'world_ned')
+            source_frame: Source frame for tf2 lookup (default: 'base_link')
 
         Example:
             >>> from stonefish_slam.core.slam import SLAM
             >>> slam = SLAM(...)
             >>> mapper = Mapping2D(...)
             >>> # After SLAM processes data
-            >>> mapper.update_global_map_from_slam(slam.keyframes)
+            >>> mapper.update_global_map_from_slam(slam.keyframes, tf2_buffer=tf_buffer)
             >>> map_img = mapper.get_map_image()
         """
         # Filter keyframes with valid images
@@ -439,7 +483,7 @@ class Mapping2D:
         if not valid_keyframes:
             return
 
-        self._process_keyframes_to_map(valid_keyframes, buffer_m)
+        self._process_keyframes_to_map(valid_keyframes, buffer_m, tf2_buffer, target_frame, source_frame)
 
     def get_map_image(self, normalize: bool = True) -> np.ndarray:
         """Get current global map as uint8 image.

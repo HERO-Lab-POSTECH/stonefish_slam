@@ -2,11 +2,12 @@
 import threading
 import numpy as np
 import struct
+import queue
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from tf2_ros import TransformBroadcaster
+from tf2_ros import TransformBroadcaster, Buffer, TransformListener
 import cv_bridge
 from nav_msgs.msg import Odometry
 from message_filters import Subscriber, ApproximateTimeSynchronizer
@@ -91,6 +92,15 @@ class SLAMNode(SLAM, Node):
 
         # the threading lock
         self.lock = threading.RLock()
+
+        # TF2 buffer for timestamp synchronization
+        self.tf_buffer = Buffer(cache_time=Duration(seconds=10))
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        # Asynchronous mapping queue
+        self.mapping_queue = queue.Queue(maxsize=10)
+        self.mapping_thread = None
+        self.mapping_active = False
 
         # Mapping initialization (configured in init_node)
         self.mapper = None
@@ -298,6 +308,13 @@ class SLAMNode(SLAM, Node):
         self.configure()
         self.get_logger().info("SLAM node is initialized")
 
+        # Start mapping thread if 2D mapping is enabled
+        if self.enable_2d_mapping:
+            self.mapping_active = True
+            self.mapping_thread = threading.Thread(target=self._mapping_worker, daemon=True)
+            self.mapping_thread.start()
+            self.get_logger().info("Asynchronous mapping thread started")
+
     def SLAM_callback(self, feature_msg: PointCloud2, odom_msg: Odometry) -> None:
         """SLAM call back. Subscibes to the feature msg point cloud and odom msg
             Handles the whole SLAM system and publishes map, poses and constraints
@@ -430,10 +447,17 @@ class SLAMNode(SLAM, Node):
                 if self.nssm_params.enable and self.add_nonsequential_scan_matching():
                     self.update_factor_graph()
 
-                # 4. Update 2D map periodically
-                if (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
-                    self.publish_2d_map()
-                    self.last_map_update_kf = len(self.keyframes)
+                # 4. Update 2D map periodically (non-blocking)
+                if self.enable_2d_mapping and (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
+                    # Create snapshot of keyframes for async processing
+                    keyframes_snapshot = list(self.keyframes)
+
+                    # Add to queue if not full (drop if queue full to prevent backlog)
+                    if not self.mapping_queue.full():
+                        self.mapping_queue.put(keyframes_snapshot)
+                        self.last_map_update_kf = len(self.keyframes)
+                    else:
+                        self.get_logger().warn("Mapping queue full, skipping update", throttle_duration_sec=5.0)
 
             # Update current frame and publish
             self.current_frame = frame
@@ -596,40 +620,59 @@ class SLAMNode(SLAM, Node):
             cloud_msg.header.frame_id = self.rov_id + "_map"
         self.cloud_pub.publish(cloud_msg)
 
-    def publish_2d_map(self) -> None:
-        """Generate and publish 2D sonar mosaic map.
+    def _mapping_worker(self):
+        """Background worker for asynchronous 2D mapping.
 
-        Uses the Mapping2D module to create a global 2D map from SLAM keyframes
-        with sonar images. The map is published as a ROS Image message.
+        Runs in a separate thread to prevent blocking the SLAM callback.
+        Processes mapping requests from the queue using tf2 for accurate pose lookup.
         """
-        if not self.enable_2d_mapping or not self.mapper:
-            return
+        while self.mapping_active and rclpy.ok():
+            try:
+                # Get mapping request from queue (blocks until available)
+                keyframes_snapshot = self.mapping_queue.get(timeout=1.0)
 
-        if not self.keyframes:
-            return
+                if keyframes_snapshot is None:
+                    break
 
-        # Update global map from SLAM keyframes
-        self.mapper.update_global_map_from_slam(self.keyframes)
+                # Perform mapping with tf2 buffer
+                try:
+                    self.mapper.update_global_map_from_slam(
+                        keyframes_snapshot,
+                        tf2_buffer=self.tf_buffer,
+                        target_frame='world_ned',
+                        source_frame='base_link'
+                    )
 
-        # Get map image
-        map_image = self.mapper.get_map_image()
-        if map_image is None or map_image.size == 0:
-            return
+                    # Get and publish map image
+                    map_image = self.mapper.get_map_image()
+                    if map_image is not None and map_image.size > 0:
+                        image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
+                        image_msg.header.stamp = self.get_clock().now().to_msg()
+                        image_msg.header.frame_id = "map"
+                        self.map_2d_pub.publish(image_msg)
 
-        # Convert to ROS Image message
-        try:
-            image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
-            image_msg.header.stamp = self.get_clock().now().to_msg()
-            image_msg.header.frame_id = "map"
-            self.map_2d_pub.publish(image_msg)
+                        self.get_logger().info(
+                            f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
+                            f"{len(keyframes_snapshot)} keyframes",
+                            throttle_duration_sec=5.0
+                        )
+                except Exception as e:
+                    self.get_logger().error(f"Mapping failed: {e}")
 
-            self.get_logger().info(
-                f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
-                f"{len(self.keyframes)} keyframes",
-                throttle_duration_sec=5.0
-            )
-        except Exception as e:
-            self.get_logger().error(f"Failed to publish map: {e}")
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.get_logger().error(f"Mapping worker error: {e}")
+
+    def destroy_node(self):
+        """Cleanup when node is destroyed."""
+        # Stop mapping thread
+        if self.mapping_thread is not None:
+            self.mapping_active = False
+            self.mapping_queue.put(None)  # Signal thread to exit
+            self.mapping_thread.join(timeout=2.0)
+
+        super().destroy_node()
 
 
 def main(args=None):
