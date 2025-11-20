@@ -73,7 +73,7 @@ class Mapping2D:
         sonar_range: float = 20.0,
         sonar_fov: float = 130.0,
         fan_pixel_resolution: float = 0.05,
-        sonar_tilt_deg: float = 10.0
+        sonar_tilt_deg: float = 60.0
     ):
         """Initialize 2D mapping parameters.
 
@@ -83,7 +83,7 @@ class Mapping2D:
             sonar_range: Maximum sonar range in meters (default: 20.0)
             sonar_fov: Sonar field of view in degrees (default: 130.0)
             fan_pixel_resolution: Fan-shaped image resolution in m/pixel (default: 0.05)
-            sonar_tilt_deg: Sonar tilt angle in degrees (downward positive) (default: 10.0)
+            sonar_tilt_deg: Sonar tilt angle in degrees (downward positive) (default: 60.0, matches bluerov2.scn rpy=1.0472)
         """
         self.map_resolution = map_resolution
         self.max_map_size = map_size
