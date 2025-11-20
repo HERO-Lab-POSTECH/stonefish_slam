@@ -486,16 +486,14 @@ class Mapping2D:
             # Transform to global frame (standard 2D rotation + translation)
             # Use same convention as SLAM/ICP and feature extraction
             global_x = local_x * cos_theta - local_y * sin_theta + pose.x()
-            global_y = local_x * sin_theta + local_y * cos_theta + pose.y()
+            # CRITICAL: Negate global_y for correct East direction
+            global_y = -(local_x * sin_theta + local_y * cos_theta) + pose.y()
 
             # Convert to map coordinates (vectorized)
-            # CRITICAL: Correct NED → image coordinate mapping
             # NED: X=North (up), Y=East (right)
             # Image: row (0=top), col (0=left)
-            # North → row (normal: North increases = row increases)
-            # East → col (inverted: East increases = col decreases)
             map_row = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
-            map_col = (self.map_width - 1 - ((global_y - self.min_y) / self.map_resolution)).astype(np.int32)
+            map_col = ((global_y - self.min_y) / self.map_resolution).astype(np.int32)
 
             # Boundary check (vectorized)
             valid_idx = (
