@@ -398,12 +398,12 @@ class Mapping2D:
                     # Update statistics
                     self.tf2_stats['failed'] += 1
 
-                    # Log tf2 lookup failures for debugging
+                    # Log tf2 lookup failures (use debug for common extrapolation errors)
                     error_msg = str(e)
                     if 'Lookup would require extrapolation' in error_msg:
-                        self.logger.warning(
-                            f"tf2 extrapolation needed (timestamp outside buffer range). "
-                            f"Using keyframe pose. Error: {error_msg[:100]}"
+                        # Common when mapping old keyframes, use debug level
+                        self.logger.debug(
+                            f"tf2 extrapolation needed (using keyframe pose): {error_msg[:80]}"
                         )
                     elif 'Could not find transform' in error_msg:
                         self.logger.warning(
