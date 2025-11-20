@@ -314,10 +314,14 @@ class SLAMNode(SLAM, Node):
         if icp_config:
             self.icp.loadFromYaml(icp_config)
 
-        # define the robot ID from node namespace
-        namespace = self.get_namespace()
-        # Remove leading '/' from namespace (e.g., '/bluerov2' → 'bluerov2')
-        self.rov_id = namespace.lstrip('/') if namespace != '/' else ""
+        # Extract robot ID from odometry topic
+        # LOCALIZATION_ODOM_TOPIC = "/bluerov2/odometry" → rov_id = "bluerov2"
+        from stonefish_slam.utils.topics import LOCALIZATION_ODOM_TOPIC
+        if LOCALIZATION_ODOM_TOPIC.startswith('/'):
+            parts = LOCALIZATION_ODOM_TOPIC.split('/')
+            self.rov_id = parts[1] if len(parts) > 1 else ""
+        else:
+            self.rov_id = ""
 
         # call the configure function
         self.configure()
