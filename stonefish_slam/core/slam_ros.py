@@ -316,12 +316,13 @@ class SLAMNode(SLAM, Node):
 
         # Extract robot ID from odometry topic
         # LOCALIZATION_ODOM_TOPIC = "/bluerov2/odometry" → rov_id = "bluerov2"
-        from stonefish_slam.utils.topics import LOCALIZATION_ODOM_TOPIC
         if LOCALIZATION_ODOM_TOPIC.startswith('/'):
             parts = LOCALIZATION_ODOM_TOPIC.split('/')
             self.rov_id = parts[1] if len(parts) > 1 else ""
         else:
             self.rov_id = ""
+
+        self.get_logger().info(f"Detected vehicle ID: '{self.rov_id}' from topic {LOCALIZATION_ODOM_TOPIC}")
 
         # call the configure function
         self.configure()
