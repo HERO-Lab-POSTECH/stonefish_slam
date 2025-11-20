@@ -607,19 +607,10 @@ class Mapping2D:
         else:
             global_map_result = global_map_avg
 
-        # Normalize to 0-255 range for visualization
-        if normalize and np.any(mask):
-            # Use percentile for robust normalization (ignore outliers)
-            low_percentile = np.percentile(global_map_result[mask], 5)
-            high_percentile = np.percentile(global_map_result[mask], 95)
-
-            if high_percentile > low_percentile:
-                global_map_result[mask] = np.clip(
-                    (global_map_result[mask] - low_percentile) / (high_percentile - low_percentile) * 255,
-                    0, 255
-                )
-
-        global_map_uint8 = global_map_result.astype(np.uint8)
+        # Convert to uint8 (0-255 range)
+        # Note: No global normalization to prevent initial map darkening
+        # CLAHE already applied to each frame for local contrast enhancement
+        global_map_uint8 = np.clip(global_map_result, 0, 255).astype(np.uint8)
 
         # Flip vertically for correct orientation in ROS/RViz
         # Note: OpenCV images have origin at top-left, but ROS maps have origin at bottom-left
