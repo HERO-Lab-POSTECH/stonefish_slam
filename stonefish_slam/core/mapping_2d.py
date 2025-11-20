@@ -578,36 +578,38 @@ class Mapping2D:
         variance[mask] = (self.global_map_variance_sum[mask] / self.global_map_count[mask]) - global_map_avg[mask]**2
         variance[variance < 0] = 0  # Numerical stability (fix floating-point errors)
 
-        # Variance-weighted averaging (arXiv:2212.05216)
-        # Higher variance = more information → higher weight
-        mean_variance = variance[mask].mean() if np.any(mask) else 1.0
-        epsilon = 1e-6
-        weight = variance / (mean_variance + epsilon)
-        weight[~mask] = 0
+        # GVM approach (arXiv:2212.05216): Classify pixels by information content
+        # Higher variance = more informative (objects, features)
+        # Lower variance = featureless (flat seafloor, background)
 
-        # Normalize weights (preserve relative importance)
-        weight_sum = weight[mask].sum() if np.any(mask) else 1.0
-        if weight_sum > 0:
-            weight = weight / weight_sum * mask.sum()
+        if np.any(mask):
+            # Adaptive threshold: Use median (50th percentile) to classify pixels
+            variance_threshold = np.percentile(variance[mask], 50)
+
+            # Classify pixels
+            high_info_mask = (variance >= variance_threshold) & mask
+            low_info_mask = (variance < variance_threshold) & mask
+
+            # Selective blending: Emphasize high-information pixels
+            global_map_result = np.zeros_like(global_map_avg)
+            global_map_result[high_info_mask] = global_map_avg[high_info_mask]  # Full intensity
+            global_map_result[low_info_mask] = global_map_avg[low_info_mask] * 0.5  # Dimmed (50%)
         else:
-            weight = mask.astype(np.float32)
-
-        # Apply variance weights to mean intensity
-        global_map_weighted = global_map_avg * weight
+            global_map_result = global_map_avg
 
         # Normalize to 0-255 range for visualization
         if normalize and np.any(mask):
             # Use percentile for robust normalization (ignore outliers)
-            low_percentile = np.percentile(global_map_weighted[mask], 5)
-            high_percentile = np.percentile(global_map_weighted[mask], 95)
+            low_percentile = np.percentile(global_map_result[mask], 5)
+            high_percentile = np.percentile(global_map_result[mask], 95)
 
             if high_percentile > low_percentile:
-                global_map_weighted[mask] = np.clip(
-                    (global_map_weighted[mask] - low_percentile) / (high_percentile - low_percentile) * 255,
+                global_map_result[mask] = np.clip(
+                    (global_map_result[mask] - low_percentile) / (high_percentile - low_percentile) * 255,
                     0, 255
                 )
 
-        global_map_uint8 = global_map_weighted.astype(np.uint8)
+        global_map_uint8 = global_map_result.astype(np.uint8)
 
         # Flip vertically for correct orientation in ROS/RViz
         # Note: OpenCV images have origin at top-left, but ROS maps have origin at bottom-left
