@@ -2,13 +2,16 @@
 
 ROS2-independent core class for creating 2D sonar image mosaics.
 Converts polar sonar images to fan-shaped cartesian and accumulates them into a global map
-using simple averaging with CLAHE preprocessing.
+using weighted incremental update with CLAHE preprocessing (Option 2).
 
 Algorithm:
     1. CLAHE applied once at keyframe storage (clipLimit=2.0, tileGridSize=8x8)
     2. Polar → Cartesian conversion with cv2.remap (cached transformation)
     3. NED coordinate transformation with sonar tilt correction
-    4. Simple accumulation: average = sum / count
+    4. Weighted incremental accumulation: weighted_avg = sum(value * weight) / sum(weight)
+       - Weight = intensity (brighter pixels prioritized)
+       - Incremental update: only new keyframes processed
+       - No full map rebuild: map persists across updates
     5. No global normalization (CLAHE handles local contrast)
 
 Reference:
@@ -35,11 +38,16 @@ KeyframeType = Any
 
 
 class Mapping2D:
-    """2D Sonar Image Mosaic Mapper.
+    """2D Sonar Image Mosaic Mapper (Option 2: Weighted Incremental Update).
 
     Creates a global 2D map by accumulating sonar images from multiple keyframes.
     Converts polar sonar images to fan-shaped cartesian images and transforms them
     to a global coordinate frame using pose estimates.
+
+    **Option 2 Implementation**:
+    - Weighted averaging: intensity-based weights prioritize bright features
+    - Incremental update: processes only new keyframes (no full rebuild)
+    - Map persistence: map data preserved across updates
 
     This class supports two operation modes:
     1. **Independent mode**: Store keyframes internally via add_keyframe() and use
@@ -53,8 +61,10 @@ class Mapping2D:
         sonar_fov (float): Sonar field of view in degrees
         fan_pixel_resolution (float): Resolution of fan-shaped image (m/pixel)
         keyframes (List[Dict]): List of keyframes with pose and sonar image (independent mode)
-        global_map_accum (np.ndarray): Accumulated intensity values
-        global_map_count (np.ndarray): Observation count per pixel
+        global_map_accum (np.ndarray): Accumulated weighted intensity values
+        global_map_weight (np.ndarray): Accumulated weight sum per pixel
+        global_map_count (np.ndarray): Observation count per pixel (debugging)
+        processed_keyframe_keys (set): Set of processed keyframe keys (incremental tracking)
 
     Example (SLAM integration):
         >>> from stonefish_slam.core.slam import SLAM
@@ -126,6 +136,10 @@ class Mapping2D:
         # Global map buffers (initialized when first keyframe is added)
         self.global_map_accum: Optional[np.ndarray] = None
         self.global_map_count: Optional[np.ndarray] = None
+        self.global_map_weight: Optional[np.ndarray] = None  # Weight map for importance-based blending
+
+        # Track processed keyframes for incremental updates (Option 2)
+        self.processed_keyframe_keys: set = set()
 
         # Map bounds (updated when keyframes are added)
         self.min_x: float = 0.0
@@ -325,6 +339,12 @@ class Mapping2D:
         This is a private method that contains the common logic for map generation.
         Used by both update_global_map() and update_global_map_from_slam().
 
+        **Option 2: Incremental Update**:
+        - Only processes new keyframes (tracked via processed_keyframe_keys)
+        - Map initialized once and preserved across updates
+        - Weighted accumulation: sum(intensity * weight) / sum(weight)
+        - Weight = intensity (prioritizes bright features)
+
         Coordinate Transformation Convention:
             - NED frame: X=North, Y=East, Z=Down, yaw=clockwise(+)
             - gtsam.Pose2: yaw is counterclockwise(+) → negated for NED
@@ -355,15 +375,57 @@ class Mapping2D:
             self.map_width = min(self.map_width, max_w)
             self.map_height = min(self.map_height, max_h)
 
-        # Initialize map with float for better blending
-        self.global_map_accum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
-        self.global_map_count = np.zeros((self.map_height, self.map_width), dtype=np.float64)
+        # Option 2: Incremental update - initialize map only once or on resize
+        # Check if map needs initialization or resizing
+        needs_init = (
+            self.global_map_accum is None or
+            self.global_map_accum.shape != (self.map_height, self.map_width)
+        )
+
+        if needs_init:
+            # Save old map data for potential copying (if resizing)
+            old_accum = self.global_map_accum
+            old_weight = self.global_map_weight
+            old_shape = old_accum.shape if old_accum is not None else None
+
+            # Initialize new maps
+            self.global_map_accum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
+            self.global_map_count = np.zeros((self.map_height, self.map_width), dtype=np.float64)
+            self.global_map_weight = np.zeros((self.map_height, self.map_width), dtype=np.float64)
+
+            # Copy overlapping region if resizing (preserve existing map data)
+            if old_accum is not None and old_shape is not None:
+                # Calculate overlap region
+                overlap_h = min(old_shape[0], self.map_height)
+                overlap_w = min(old_shape[1], self.map_width)
+
+                # Copy data from old map to new map
+                self.global_map_accum[:overlap_h, :overlap_w] = old_accum[:overlap_h, :overlap_w]
+                self.global_map_weight[:overlap_h, :overlap_w] = old_weight[:overlap_h, :overlap_w]
+
+                self.logger.info(
+                    f"Map resized from {old_shape} to ({self.map_height}, {self.map_width}). "
+                    f"Preserved data in overlap region ({overlap_h}, {overlap_w})."
+                )
 
         # 3. Transform and add each keyframe's sonar image
         # Adaptive sampling based on number of keyframes
         sample_step = 4 if len(keyframes) > self.keyframe_sample_threshold else 2
 
+        # Track newly processed keyframes in this update
+        newly_processed_count = 0
+
         for kf in keyframes:
+            # Extract keyframe key for tracking (Option 2: incremental update)
+            if isinstance(kf, dict):
+                kf_key = kf['key']
+            else:
+                kf_key = kf.key if hasattr(kf, 'key') else None
+
+            # Skip already processed keyframes (incremental update)
+            if kf_key is not None and kf_key in self.processed_keyframe_keys:
+                continue
+
             # Extract image and pose (duck typing: dict or object)
             if isinstance(kf, dict):
                 polar_img = kf['image']
@@ -516,13 +578,36 @@ class Mapping2D:
             map_col_valid = map_col[valid_idx]
             intensities_valid = intensities[valid_idx].astype(np.float32)
 
-            # Accumulate to map (fully vectorized with np.add.at)
-            # np.add.at handles duplicate indices correctly (accumulates)
+            # Option 2: Weighted incremental update
+            # Compute weights based on intensity (brighter pixels = higher信息 content)
+            # This prioritizes high-intensity features over low-intensity noise
+            weights = intensities_valid.astype(np.float32)
+
+            # Accumulate to map with weights (fully vectorized with np.add.at)
+            # Formula: weighted_avg = sum(value * weight) / sum(weight)
             linear_indices = map_row_valid * self.map_width + map_col_valid
             accum_flat = self.global_map_accum.ravel()
             count_flat = self.global_map_count.ravel()
-            np.add.at(accum_flat, linear_indices, intensities_valid)
+            weight_flat = self.global_map_weight.ravel()
+
+            # Accumulate: intensity * weight
+            np.add.at(accum_flat, linear_indices, intensities_valid * weights)
+            # Track observation count (for debugging)
             np.add.at(count_flat, linear_indices, 1)
+            # Accumulate: weight sum
+            np.add.at(weight_flat, linear_indices, weights)
+
+            # Mark this keyframe as processed (incremental update)
+            if kf_key is not None:
+                self.processed_keyframe_keys.add(kf_key)
+                newly_processed_count += 1
+
+        # Log incremental update statistics
+        if newly_processed_count > 0:
+            self.logger.info(
+                f"Incremental map update: processed {newly_processed_count} new keyframes "
+                f"(total processed: {len(self.processed_keyframe_keys)})"
+            )
 
     def update_global_map(self, buffer_m: float = 30.0) -> None:
         """Update global map from self.keyframes (independent operation mode).
@@ -580,8 +665,10 @@ class Mapping2D:
     def get_map_image(self) -> np.ndarray:
         """Get current global map as uint8 image.
 
-        Uses simple averaging for blending. Each frame already has CLAHE applied,
-        so no additional normalization is needed.
+        Option 2: Uses weighted averaging for blending.
+        Formula: weighted_avg = sum(intensity * weight) / sum(weight)
+
+        Each frame already has CLAHE applied, so no additional normalization is needed.
 
         Returns:
             Global map image (height × width), uint8, vertically flipped
@@ -590,11 +677,13 @@ class Mapping2D:
             return np.zeros((100, 100), dtype=np.uint8)
 
         # Create mask for valid pixels (observed at least once)
-        mask = self.global_map_count > 0
+        # Use weight map instead of count map for validation
+        mask = self.global_map_weight > 0
 
-        # Calculate average intensity: simple blending
+        # Calculate weighted average intensity (Option 2)
+        # weighted_avg = sum(value * weight) / sum(weight)
         global_map_avg = np.zeros((self.map_height, self.map_width), dtype=np.float32)
-        global_map_avg[mask] = self.global_map_accum[mask] / self.global_map_count[mask]
+        global_map_avg[mask] = self.global_map_accum[mask] / self.global_map_weight[mask]
 
         # Convert to uint8 (no CLAHE - already applied per-frame)
         global_map_uint8 = np.clip(global_map_avg, 0, 255).astype(np.uint8)
@@ -640,6 +729,8 @@ class Mapping2D:
         self.keyframes.clear()
         self.global_map_accum = None
         self.global_map_count = None
+        self.global_map_weight = None  # Reset weight map
+        self.processed_keyframe_keys.clear()  # Reset processed keyframe tracking
         self.min_x = 0.0
         self.max_x = 0.0
         self.min_y = 0.0
