@@ -535,8 +535,12 @@ class SLAMNode(SLAM, Node):
         from geometry_msgs.msg import TransformStamped
         t = TransformStamped()
         t.header.stamp = self.current_frame.time
-        t.header.frame_id = "map"
-        t.child_frame_id = "odom"
+        if self.rov_id == "":
+            t.header.frame_id = "map"
+            t.child_frame_id = "odom"
+        else:
+            t.header.frame_id = self.rov_id + "_map"
+            t.child_frame_id = self.rov_id + "_odom"
         t.transform.translation.x = p.x
         t.transform.translation.y = p.y
         t.transform.translation.z = p.z
