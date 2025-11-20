@@ -474,11 +474,10 @@ class Mapping2D:
                 )
                 self._tilt_logged = True
 
-            # Transform to global frame (NED convention, vectorized)
-            # NED: Z-axis rotation (yaw) is clockwise positive
-            # Note: Using base_link_frd for tf2 lookup, so standard rotation matrix applies
-            global_x = local_x * cos_theta + local_y * sin_theta + pose.x()
-            global_y = -local_x * sin_theta + local_y * cos_theta + pose.y()
+            # Transform to global frame (standard 2D rotation + translation)
+            # Reference: krit_slam/slam_2d.py:1069-1070
+            global_x = local_x * cos_theta - local_y * sin_theta + pose.x()
+            global_y = local_x * sin_theta + local_y * cos_theta + pose.y()
 
             # Convert to map coordinates (vectorized)
             map_x = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
