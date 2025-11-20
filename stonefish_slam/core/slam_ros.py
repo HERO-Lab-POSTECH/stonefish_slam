@@ -98,9 +98,17 @@ class SLAMNode(SLAM, Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Asynchronous mapping queue
-        self.mapping_queue = queue.Queue(maxsize=10)
+        self.mapping_queue = queue.Queue(maxsize=50)  # Increased to prevent drops
         self.mapping_thread = None
         self.mapping_active = False
+
+        # Mapping statistics
+        self.mapping_stats = {
+            'keyframes_total': 0,
+            'maps_queued': 0,
+            'maps_processed': 0,
+            'maps_dropped': 0
+        }
 
         # Mapping initialization (configured in init_node)
         self.mapper = None
@@ -192,6 +200,7 @@ class SLAMNode(SLAM, Node):
         self.declare_parameter('map_size', [4000, 4000])  # 원본과 동일 (slam_2d.py Line 1019)
         self.declare_parameter('sonar_range', 20.0)
         self.declare_parameter('sonar_fov', 130.0)
+        self.declare_parameter('sonar_tilt_deg', 10.0)  # Sonar tilt angle
         self.declare_parameter('map_update_interval', 1)  # 매 키프레임마다 업데이트
 
         self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
@@ -202,14 +211,18 @@ class SLAMNode(SLAM, Node):
             map_size = tuple(self.get_parameter('map_size').value)
             sonar_range = self.get_parameter('sonar_range').value
             sonar_fov = self.get_parameter('sonar_fov').value
+            sonar_tilt_deg = self.get_parameter('sonar_tilt_deg').value
 
             self.mapper = Mapping2D(
                 map_resolution=map_resolution,
                 map_size=map_size,
                 sonar_range=sonar_range,
-                sonar_fov=sonar_fov
+                sonar_fov=sonar_fov,
+                sonar_tilt_deg=sonar_tilt_deg
             )
-            self.get_logger().info(f"2D Mapping enabled: resolution={map_resolution}m/px")
+            self.get_logger().info(
+                f"2D Mapping enabled: resolution={map_resolution}m/px, tilt={sonar_tilt_deg}°"
+            )
 
         # max delay between an incoming point cloud and dead reckoning
         self.feature_odom_sync_max_delay = 0.5
@@ -456,8 +469,18 @@ class SLAMNode(SLAM, Node):
                     if not self.mapping_queue.full():
                         self.mapping_queue.put(keyframes_snapshot)
                         self.last_map_update_kf = len(self.keyframes)
+                        self.mapping_stats['maps_queued'] += 1
                     else:
-                        self.get_logger().warn("Mapping queue full, skipping update", throttle_duration_sec=5.0)
+                        self.mapping_stats['maps_dropped'] += 1
+                        self.get_logger().warn(
+                            f"Mapping queue full ({self.mapping_queue.qsize()}/{self.mapping_queue.maxsize}), "
+                            f"skipping update. Stats: queued={self.mapping_stats['maps_queued']}, "
+                            f"dropped={self.mapping_stats['maps_dropped']}",
+                            throttle_duration_sec=5.0
+                        )
+
+                # Track keyframe count
+                self.mapping_stats['keyframes_total'] = len(self.keyframes)
 
             # Update current frame and publish
             self.current_frame = frame
@@ -660,11 +683,24 @@ class SLAMNode(SLAM, Node):
                         image_msg.header.frame_id = "map"
                         self.map_2d_pub.publish(image_msg)
 
-                        self.get_logger().info(
-                            f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
-                            f"{len(keyframes_snapshot)} keyframes",
-                            throttle_duration_sec=5.0
-                        )
+                        # Update statistics
+                        self.mapping_stats['maps_processed'] += 1
+
+                        if self.mapping_stats['maps_processed'] % 5 == 0:  # Every 5 maps
+                            self.get_logger().info(
+                                f"Mapping stats: "
+                                f"KF={self.mapping_stats['keyframes_total']}, "
+                                f"queued={self.mapping_stats['maps_queued']}, "
+                                f"processed={self.mapping_stats['maps_processed']}, "
+                                f"dropped={self.mapping_stats['maps_dropped']}, "
+                                f"queue_size={self.mapping_queue.qsize()}"
+                            )
+                        else:
+                            self.get_logger().info(
+                                f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
+                                f"{len(keyframes_snapshot)} keyframes",
+                                throttle_duration_sec=5.0
+                            )
                 except Exception as e:
                     self.get_logger().error(f"Mapping failed: {e}")
 

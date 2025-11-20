@@ -72,7 +72,8 @@ class Mapping2D:
         map_size: Tuple[int, int] = (4000, 4000),
         sonar_range: float = 20.0,
         sonar_fov: float = 130.0,
-        fan_pixel_resolution: float = 0.05
+        fan_pixel_resolution: float = 0.05,
+        sonar_tilt_deg: float = 10.0
     ):
         """Initialize 2D mapping parameters.
 
@@ -82,16 +83,21 @@ class Mapping2D:
             sonar_range: Maximum sonar range in meters (default: 20.0)
             sonar_fov: Sonar field of view in degrees (default: 130.0)
             fan_pixel_resolution: Fan-shaped image resolution in m/pixel (default: 0.05)
+            sonar_tilt_deg: Sonar tilt angle in degrees (downward positive) (default: 10.0)
         """
         self.map_resolution = map_resolution
         self.max_map_size = map_size
         self.sonar_range = sonar_range
         self.sonar_fov = sonar_fov
         self.fan_pixel_resolution = fan_pixel_resolution
+        self.sonar_tilt_rad = np.deg2rad(sonar_tilt_deg)
 
         # Logger for debugging
         self.logger = logging.getLogger('Mapping2D')
         self.logger.setLevel(logging.INFO)
+
+        # tf2 lookup statistics
+        self.tf2_stats = {'success': 0, 'failed': 0, 'no_timestamp': 0}
 
         # Polar-to-cartesian transformation cache
         self.p2c_cache = None
@@ -383,7 +389,20 @@ class Mapping2D:
 
                         self.logger.debug(f"tf2 lookup success at {timestamp}")
 
+                        # Update statistics
+                        self.tf2_stats['success'] += 1
+
+                        if self.tf2_stats['success'] % 10 == 0:  # Every 10th success
+                            self.logger.info(
+                                f"tf2 stats: success={self.tf2_stats['success']}, "
+                                f"failed={self.tf2_stats['failed']}, "
+                                f"no_timestamp={self.tf2_stats['no_timestamp']}"
+                            )
+
                 except Exception as e:
+                    # Update statistics
+                    self.tf2_stats['failed'] += 1
+
                     # Log tf2 lookup failures for debugging
                     error_msg = str(e)
                     if 'Lookup would require extrapolation' in error_msg:
@@ -401,6 +420,9 @@ class Mapping2D:
                             f"tf2 lookup failed: {error_msg[:200]}. Using keyframe pose."
                         )
                     # Fallback to keyframe pose (pose already set above)
+            else:
+                if timestamp is None:
+                    self.tf2_stats['no_timestamp'] += 1
 
             # Convert polar to fan-shaped cartesian image
             fan_img = self.polar_to_cartesian_image(polar_img, self.sonar_range, self.sonar_fov)
@@ -433,9 +455,23 @@ class Mapping2D:
             xx_valid = xx[mask]
             intensities = fan_sampled[mask]
 
-            # Convert pixels to local coordinates (vectorized)
-            local_x = (fan_h - yy_valid) * self.fan_pixel_resolution
+            # Convert pixels to local coordinates with tilt compensation (vectorized)
+            # Stonefish FLS: row=0 is FAR, row=max is NEAR
+            local_x_raw = (fan_h - yy_valid) * self.fan_pixel_resolution
+
+            # Apply tilt correction (sonar looks slightly downward)
+            # tilt_angle > 0 means downward tilt
+            local_z = local_x_raw * np.sin(self.sonar_tilt_rad)  # Depth component (ignored in 2D)
+            local_x = local_x_raw * np.cos(self.sonar_tilt_rad)  # Horizontal component (used)
             local_y = (xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
+
+            # Log tilt correction info (once per map update)
+            if not hasattr(self, '_tilt_logged'):
+                self.logger.info(
+                    f"Sonar tilt correction: {np.rad2deg(self.sonar_tilt_rad):.1f}° "
+                    f"(range correction factor: {np.cos(self.sonar_tilt_rad):.3f})"
+                )
+                self._tilt_logged = True
 
             # Transform to global frame (NED convention, vectorized)
             # NED: Z-axis rotation (yaw) is clockwise positive
