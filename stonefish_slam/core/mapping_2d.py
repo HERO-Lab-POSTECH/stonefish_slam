@@ -430,7 +430,11 @@ class Mapping2D:
             fan_h, fan_w = fan_img.shape
 
             # Get pose parameters
-            theta = pose.theta()
+            # CRITICAL: Negate theta for NED→ENU conversion
+            # pose.theta() is in ENU convention (counterclockwise positive, math standard)
+            # NED uses clockwise positive yaw (navigation standard)
+            # krit_slam was ENU, current system is NED → negate theta
+            theta = -pose.theta()
             cos_theta = np.cos(theta)
             sin_theta = np.sin(theta)
 
@@ -456,7 +460,8 @@ class Mapping2D:
             xx_valid = xx[mask]
             intensities = fan_sampled[mask]
 
-            # Convert pixels to local coordinates with tilt compensation (vectorized)
+            # Convert pixels to local coordinates (krit_slam method)
+            # Fan image is cartesian-like, use pixel * resolution
             # Stonefish FLS: row=0 is FAR, row=max is NEAR
             local_x_raw = (fan_h - yy_valid) * self.fan_pixel_resolution
 
@@ -464,10 +469,7 @@ class Mapping2D:
             # tilt_angle > 0 means downward tilt
             local_z = local_x_raw * np.sin(self.sonar_tilt_rad)  # Depth component (ignored in 2D)
             local_x = local_x_raw * np.cos(self.sonar_tilt_rad)  # Horizontal component (used)
-            # CRITICAL FIX: Invert Y-axis for base_link_frd frame compatibility
-            # base_link_frd: Y=right (+), left (-)
-            # Fan image: col increases → right, but we need to invert for proper mapping
-            local_y = -(xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
+            local_y = (xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
 
             # Log tilt correction info (once per map update)
             if not hasattr(self, '_tilt_logged'):
@@ -478,7 +480,7 @@ class Mapping2D:
                 self._tilt_logged = True
 
             # Transform to global frame (standard 2D rotation + translation)
-            # Reference: krit_slam/slam_2d.py:1069-1070
+            # Use same convention as SLAM/ICP and feature extraction
             global_x = local_x * cos_theta - local_y * sin_theta + pose.x()
             global_y = local_x * sin_theta + local_y * cos_theta + pose.y()
 
