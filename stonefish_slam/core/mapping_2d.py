@@ -343,7 +343,8 @@ class Mapping2D:
                     continue
                 polar_img = kf.image
                 pose = kf.pose  # Default pose
-                timestamp = kf.time if hasattr(kf, 'time') else None
+                # Use sonar acquisition time if available, otherwise fall back to feature time
+                timestamp = kf.sonar_time if hasattr(kf, 'sonar_time') and kf.sonar_time is not None else kf.time
 
             # Debug log for keyframe processing
             if timestamp is not None:

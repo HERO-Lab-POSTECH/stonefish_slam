@@ -113,6 +113,7 @@ class Keyframe(object):
         self.twist = None  # twist message for publishing odom
 
         self.image = None  # image with this keyframe
+        self.sonar_time = None  # sonar image acquisition timestamp (for accurate mapping)
         self.vertical_images = []
         self.horizontal_images = []
 

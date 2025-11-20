@@ -443,9 +443,10 @@ class SLAMNode(SLAM, Node):
                 # Add points
                 frame.points = points
 
-                # Add sonar image to frame
+                # Add sonar image to frame with acquisition timestamp
                 if sonar_image is not None:
                     frame.image = sonar_image
+                    frame.sonar_time = sonar_msg.header.stamp  # Store sonar acquisition time for mapping
 
                 # Sequential scan matching
                 if not self.keyframes:
