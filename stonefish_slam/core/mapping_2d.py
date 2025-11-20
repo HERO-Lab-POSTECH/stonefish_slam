@@ -365,47 +365,34 @@ class Mapping2D:
             # Use tf2 to get accurate pose at sonar acquisition time
             if tf2_buffer is not None and timestamp is not None:
                 try:
-                    # Validate timestamp type
-                    from rclpy.time import Time
-                    if not isinstance(timestamp, Time):
-                        self.logger.warning(
-                            f"Invalid timestamp type: {type(timestamp).__name__}, "
-                            f"expected rclpy.time.Time. Using keyframe pose."
+                    # Lookup transform at the exact sonar acquisition time
+                    transform = tf2_buffer.lookup_transform(
+                        target_frame,
+                        source_frame,
+                        timestamp,
+                        timeout=Duration(seconds=0.1)
+                    )
+
+                    # Convert transform to gtsam.Pose2
+                    from stonefish_slam.utils.conversions import r2g, pose322
+                    from geometry_msgs.msg import Pose
+                    ros_pose = Pose()
+                    ros_pose.position.x = transform.transform.translation.x
+                    ros_pose.position.y = transform.transform.translation.y
+                    ros_pose.position.z = transform.transform.translation.z
+                    ros_pose.orientation = transform.transform.rotation
+
+                    pose3 = r2g(ros_pose)
+                    pose = pose322(pose3)  # Extract 2D pose (x, y, yaw)
+
+                    # Update statistics
+                    self.tf2_stats['success'] += 1
+
+                    if self.tf2_stats['success'] % 10 == 0:
+                        self.logger.info(
+                            f"tf2 stats: success={self.tf2_stats['success']}, "
+                            f"failed={self.tf2_stats['failed']}"
                         )
-                        # Fall through to use keyframe pose
-                    else:
-                        # Lookup transform at the exact sonar acquisition time
-                        transform = tf2_buffer.lookup_transform(
-                            target_frame,
-                            source_frame,
-                            timestamp,
-                            timeout=Duration(seconds=0.1)  # Increased from 0.01
-                        )
-
-                        # Convert transform to gtsam.Pose2
-                        from stonefish_slam.utils.conversions import r2g, pose322
-                        from geometry_msgs.msg import Pose
-                        ros_pose = Pose()
-                        ros_pose.position.x = transform.transform.translation.x
-                        ros_pose.position.y = transform.transform.translation.y
-                        ros_pose.position.z = transform.transform.translation.z
-                        ros_pose.orientation = transform.transform.rotation
-
-                        pose3 = r2g(ros_pose)
-                        # Extract 2D pose (x, y, yaw)
-                        pose = pose322(pose3)
-
-                        self.logger.debug(f"tf2 lookup success at {timestamp}")
-
-                        # Update statistics
-                        self.tf2_stats['success'] += 1
-
-                        if self.tf2_stats['success'] % 10 == 0:  # Every 10th success
-                            self.logger.info(
-                                f"tf2 stats: success={self.tf2_stats['success']}, "
-                                f"failed={self.tf2_stats['failed']}, "
-                                f"no_timestamp={self.tf2_stats['no_timestamp']}"
-                            )
 
                 except Exception as e:
                     # Update statistics
