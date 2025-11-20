@@ -422,7 +422,8 @@ class SLAMNode(SLAM, Node):
                 sonar_image = None
 
             # 2. Standard SLAM processing
-            time = feature_msg.header.stamp
+            # Use sonar timestamp for consistency (feature + mapping use same time)
+            time = sonar_msg.header.stamp
             dr_pose3 = r2g(odom_msg.pose.pose)
             frame = Keyframe(False, time, dr_pose3)
 

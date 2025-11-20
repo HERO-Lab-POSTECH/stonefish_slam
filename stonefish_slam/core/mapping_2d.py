@@ -134,9 +134,8 @@ class Mapping2D:
         self.keyframes: List[Dict] = []
 
         # Global map buffers (initialized when first keyframe is added)
-        self.global_map_accum: Optional[np.ndarray] = None
-        self.global_map_count: Optional[np.ndarray] = None
-        self.global_map_weight: Optional[np.ndarray] = None  # Weight map for importance-based blending
+        self.global_map_accum: Optional[np.ndarray] = None  # Latest-write-wins overlay map
+        self.global_map_count: Optional[np.ndarray] = None  # Observation count (for debugging)
 
         # Track processed keyframes for incremental updates (Option 2)
         self.processed_keyframe_keys: set = set()
@@ -382,13 +381,12 @@ class Mapping2D:
         if needs_init:
             # Save old map data for potential copying (if resizing)
             old_accum = self.global_map_accum
-            old_weight = self.global_map_weight
+            old_count = self.global_map_count
             old_shape = old_accum.shape if old_accum is not None else None
 
-            # Initialize new maps
+            # Initialize new map (simple overlay - no weight needed)
             self.global_map_accum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
             self.global_map_count = np.zeros((self.map_height, self.map_width), dtype=np.float64)
-            self.global_map_weight = np.zeros((self.map_height, self.map_width), dtype=np.float64)
 
             # Copy overlapping region if resizing (preserve existing map data)
             if old_accum is not None and old_shape is not None:
@@ -398,7 +396,8 @@ class Mapping2D:
 
                 # Copy data from old map to new map
                 self.global_map_accum[:overlap_h, :overlap_w] = old_accum[:overlap_h, :overlap_w]
-                self.global_map_weight[:overlap_h, :overlap_w] = old_weight[:overlap_h, :overlap_w]
+                if old_count is not None:
+                    self.global_map_count[:overlap_h, :overlap_w] = old_count[:overlap_h, :overlap_w]
 
                 self.logger.info(
                     f"Map resized from {old_shape} to ({self.map_height}, {self.map_width}). "
@@ -578,9 +577,11 @@ class Mapping2D:
             # Latest image overlay - just overwrite with newest sonar data
             linear_indices = map_row_valid * self.map_width + map_col_valid
             map_flat = self.global_map_accum.ravel()
+            count_flat = self.global_map_count.ravel()
 
             # Simple overwrite (latest-write-wins)
             map_flat[linear_indices] = intensities_valid
+            np.add.at(count_flat, linear_indices, 1)  # Track observation count
 
             # Mark this keyframe as processed (incremental update)
             if kf_key is not None:
@@ -703,7 +704,6 @@ class Mapping2D:
         self.keyframes.clear()
         self.global_map_accum = None
         self.global_map_count = None
-        self.global_map_weight = None  # Reset weight map
         self.processed_keyframe_keys.clear()  # Reset processed keyframe tracking
         self.min_x = 0.0
         self.max_x = 0.0
