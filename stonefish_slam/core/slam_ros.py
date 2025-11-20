@@ -93,8 +93,8 @@ class SLAMNode(SLAM, Node):
         # the threading lock
         self.lock = threading.RLock()
 
-        # TF2 buffer for timestamp synchronization
-        self.tf_buffer = Buffer(cache_time=Duration(seconds=10))
+        # TF2 buffer for timestamp synchronization (30s cache for delayed mapping)
+        self.tf_buffer = Buffer(cache_time=Duration(seconds=30))
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Asynchronous mapping queue
