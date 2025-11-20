@@ -15,6 +15,7 @@ Reference:
 
 import numpy as np
 import cv2
+import logging
 from typing import Optional, Tuple, List, Dict, Any, Union
 import gtsam
 from scipy.interpolate import interp1d
@@ -87,6 +88,10 @@ class Mapping2D:
         self.sonar_range = sonar_range
         self.sonar_fov = sonar_fov
         self.fan_pixel_resolution = fan_pixel_resolution
+
+        # Logger for debugging
+        self.logger = logging.getLogger('Mapping2D')
+        self.logger.setLevel(logging.INFO)
 
         # Polar-to-cartesian transformation cache
         self.p2c_cache = None
@@ -334,34 +339,68 @@ class Mapping2D:
                 pose = kf.pose  # Default pose
                 timestamp = kf.time if hasattr(kf, 'time') else None
 
+            # Debug log for keyframe processing
+            if timestamp is not None:
+                from rclpy.time import Time
+                self.logger.debug(
+                    f"Processing keyframe: pose=({pose.x():.2f}, {pose.y():.2f}), "
+                    f"timestamp_type={type(timestamp).__name__}, "
+                    f"tf2_available={tf2_buffer is not None}"
+                )
+
             # Use tf2 to get accurate pose at sonar acquisition time
             if tf2_buffer is not None and timestamp is not None:
                 try:
-                    # Lookup transform at the exact sonar acquisition time
-                    transform = tf2_buffer.lookup_transform(
-                        target_frame,
-                        source_frame,
-                        timestamp,
-                        timeout=Duration(seconds=0.01)
-                    )
+                    # Validate timestamp type
+                    from rclpy.time import Time
+                    if not isinstance(timestamp, Time):
+                        self.logger.warning(
+                            f"Invalid timestamp type: {type(timestamp).__name__}, "
+                            f"expected rclpy.time.Time. Using keyframe pose."
+                        )
+                        # Fall through to use keyframe pose
+                    else:
+                        # Lookup transform at the exact sonar acquisition time
+                        transform = tf2_buffer.lookup_transform(
+                            target_frame,
+                            source_frame,
+                            timestamp,
+                            timeout=Duration(seconds=0.1)  # Increased from 0.01
+                        )
 
-                    # Convert transform to gtsam.Pose2
-                    from stonefish_slam.utils.conversions import r2g, pose322
-                    from geometry_msgs.msg import Pose
-                    ros_pose = Pose()
-                    ros_pose.position.x = transform.transform.translation.x
-                    ros_pose.position.y = transform.transform.translation.y
-                    ros_pose.position.z = transform.transform.translation.z
-                    ros_pose.orientation = transform.transform.rotation
+                        # Convert transform to gtsam.Pose2
+                        from stonefish_slam.utils.conversions import r2g, pose322
+                        from geometry_msgs.msg import Pose
+                        ros_pose = Pose()
+                        ros_pose.position.x = transform.transform.translation.x
+                        ros_pose.position.y = transform.transform.translation.y
+                        ros_pose.position.z = transform.transform.translation.z
+                        ros_pose.orientation = transform.transform.rotation
 
-                    pose3 = r2g(ros_pose)
-                    # Extract 2D pose (x, y, yaw)
-                    pose = pose322(pose3)
+                        pose3 = r2g(ros_pose)
+                        # Extract 2D pose (x, y, yaw)
+                        pose = pose322(pose3)
+
+                        self.logger.debug(f"tf2 lookup success at {timestamp}")
 
                 except Exception as e:
-                    # Fallback to keyframe pose if tf2 lookup fails
-                    # This can happen if timestamp is outside tf2 buffer range
-                    pass
+                    # Log tf2 lookup failures for debugging
+                    error_msg = str(e)
+                    if 'Lookup would require extrapolation' in error_msg:
+                        self.logger.warning(
+                            f"tf2 extrapolation needed (timestamp outside buffer range). "
+                            f"Using keyframe pose. Error: {error_msg[:100]}"
+                        )
+                    elif 'Could not find transform' in error_msg:
+                        self.logger.warning(
+                            f"Transform not available ({target_frame} → {source_frame}). "
+                            f"Using keyframe pose."
+                        )
+                    else:
+                        self.logger.warning(
+                            f"tf2 lookup failed: {error_msg[:200]}. Using keyframe pose."
+                        )
+                    # Fallback to keyframe pose (pose already set above)
 
             # Convert polar to fan-shaped cartesian image
             fan_img = self.polar_to_cartesian_image(polar_img, self.sonar_range, self.sonar_fov)

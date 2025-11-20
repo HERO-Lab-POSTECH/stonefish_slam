@@ -105,7 +105,7 @@ class SLAMNode(SLAM, Node):
         # Mapping initialization (configured in init_node)
         self.mapper = None
         self.enable_2d_mapping = False
-        self.map_update_interval = 5  # 5 키프레임마다 업데이트 (성능 최적화)
+        self.map_update_interval = 1  # 매 키프레임마다 업데이트
         self.last_map_update_kf = 0
         self.bridge = cv_bridge.CvBridge()
 
@@ -192,7 +192,7 @@ class SLAMNode(SLAM, Node):
         self.declare_parameter('map_size', [4000, 4000])  # 원본과 동일 (slam_2d.py Line 1019)
         self.declare_parameter('sonar_range', 20.0)
         self.declare_parameter('sonar_fov', 130.0)
-        self.declare_parameter('map_update_interval', 5)  # 5 키프레임마다 업데이트 (성능 최적화)
+        self.declare_parameter('map_update_interval', 1)  # 매 키프레임마다 업데이트
 
         self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
         self.map_update_interval = self.get_parameter('map_update_interval').value
@@ -626,6 +626,8 @@ class SLAMNode(SLAM, Node):
         Runs in a separate thread to prevent blocking the SLAM callback.
         Processes mapping requests from the queue using tf2 for accurate pose lookup.
         """
+        self.get_logger().info("Mapping worker thread started, waiting for requests...")
+
         while self.mapping_active and rclpy.ok():
             try:
                 # Get mapping request from queue (blocks until available)
@@ -633,6 +635,10 @@ class SLAMNode(SLAM, Node):
 
                 if keyframes_snapshot is None:
                     break
+
+                self.get_logger().info(
+                    f"[Mapping] Processing {len(keyframes_snapshot)} keyframes"
+                )
 
                 # Perform mapping with tf2 buffer
                 try:
