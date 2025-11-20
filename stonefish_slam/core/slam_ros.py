@@ -666,8 +666,8 @@ class SLAMNode(SLAM, Node):
 
                 # Perform mapping with tf2 buffer
                 try:
-                    # Construct source_frame with namespace
-                    source_frame = 'base_link' if self.rov_id == "" else f"{self.rov_id}/base_link"
+                    # Construct source_frame with namespace (use FRD for correct NED mapping)
+                    source_frame = 'base_link_frd' if self.rov_id == "" else f"{self.rov_id}/base_link_frd"
 
                     self.mapper.update_global_map_from_slam(
                         keyframes_snapshot,
