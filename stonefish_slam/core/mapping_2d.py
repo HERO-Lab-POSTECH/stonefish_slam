@@ -165,12 +165,9 @@ class Mapping2D:
             pose: Robot pose as gtsam.Pose2 (x, y, theta in NED frame)
             sonar_image: Polar sonar image (num_bins × num_beams), uint8 or float
         """
-        # Convert to uint8 if needed
+        # Convert to uint8 if needed (no CLAHE)
         if sonar_image.dtype != np.uint8:
             sonar_image = np.clip(sonar_image, 0, 255).astype(np.uint8)
-
-        # Apply CLAHE to each frame independently (Option 1)
-        sonar_image = self.clahe.apply(sonar_image)
 
         keyframe = {
             'key': key,
