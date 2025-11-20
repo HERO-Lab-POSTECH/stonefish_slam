@@ -1140,6 +1140,7 @@ class SLAM(object):
     def is_keyframe(self, frame: Keyframe) -> bool:
         """Check if a Keyframe object meets the conditions to be a SLAM keyframe.
         If the vehicle has moved enough. Either rotation or translation.
+        Rejects frames during rapid rotation to prevent sonar motion blur.
 
         Args:
             frame (Keyframe): the keyframe we want to check.
@@ -1151,6 +1152,13 @@ class SLAM(object):
         # if there are no keyframes in our SLAM solution, this is the first one
         if not self.keyframes:
             return True
+
+        # Reject keyframe if angular velocity is too high (motion blur)
+        if frame.twist is not None:
+            angular_vel_z = abs(frame.twist.angular.z)
+            max_angular_vel = 0.3  # rad/s (~17°/s), reject if rotating faster
+            if angular_vel_z > max_angular_vel:
+                return False
 
         # check for time (ROS2: Time message has sec and nanosec fields)
         # Convert to total nanoseconds for comparison
