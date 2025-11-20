@@ -299,6 +299,12 @@ class Mapping2D:
         This is a private method that contains the common logic for map generation.
         Used by both update_global_map() and update_global_map_from_slam().
 
+        Coordinate Transformation Convention:
+            - NED frame: X=North, Y=East, Z=Down, yaw=clockwise(+)
+            - gtsam.Pose2: yaw is counterclockwise(+) → negated for NED
+            - Image mapping: rows=X(North), cols=Y(East)
+            - Y-axis negation applied for correct East direction
+
         Args:
             keyframes: List of keyframes (dict or SLAM Keyframe objects)
             buffer_m: Buffer margin around trajectory in meters (default: 30.0)
@@ -312,11 +318,8 @@ class Mapping2D:
         # 1. Calculate global map bounds
         self.min_x, self.max_x, self.min_y, self.max_y = self.get_map_bounds(keyframes, buffer_m)
 
-        # 2. Create global map
-        # CRITICAL: Correct mapping for NED coordinates to image
-        # Image: row (height) = vertical, col (width) = horizontal
-        # NED: X = North (up), Y = East (right)
-        # Therefore: width = Y range (East), height = X range (North)
+        # 2. Calculate map dimensions
+        # NED→Image mapping: X(North)→rows(height), Y(East)→cols(width)
         self.map_width = int((self.max_y - self.min_y) / self.map_resolution)   # Y (East) → cols
         self.map_height = int((self.max_x - self.min_x) / self.map_resolution)  # X (North) → rows
 
@@ -429,53 +432,46 @@ class Mapping2D:
                 if timestamp is None:
                     self.tf2_stats['no_timestamp'] += 1
 
-            # Convert polar to fan-shaped cartesian image
+            # ===== STEP 1: Convert polar sonar to fan-shaped cartesian =====
             fan_img = self.polar_to_cartesian_image(polar_img, self.sonar_range, self.sonar_fov)
             fan_h, fan_w = fan_img.shape
 
-            # Get pose parameters
-            # CRITICAL: Negate theta for NED→ENU conversion
-            # pose.theta() is in ENU convention (counterclockwise positive, math standard)
-            # NED uses clockwise positive yaw (navigation standard)
-            # krit_slam was ENU, current system is NED → negate theta
+            # ===== STEP 2: Prepare rotation matrix (NED convention) =====
+            # NED uses clockwise yaw (navigation), gtsam uses counterclockwise (math) → negate
             theta = -pose.theta()
             cos_theta = np.cos(theta)
             sin_theta = np.sin(theta)
 
-            # ===== OPTIMIZED: Vectorized processing instead of double for loop =====
-            # Sample the image with downsampling
+            # ===== STEP 3: Downsample and extract valid pixels (vectorized) =====
             fan_sampled = fan_img[::sample_step, ::sample_step]
             sampled_h, sampled_w = fan_sampled.shape
 
-            # Create pixel coordinate grids (vectorized)
+            # Create pixel coordinate grids
             yy, xx = np.meshgrid(
                 np.arange(0, fan_h, sample_step),
                 np.arange(0, fan_w, sample_step),
                 indexing='ij'
             )
 
-            # Filter out zero-intensity pixels (vectorized masking)
+            # Filter zero-intensity pixels
             mask = fan_sampled > 0
             if not np.any(mask):
                 continue
 
-            # Extract valid pixels
             yy_valid = yy[mask]
             xx_valid = xx[mask]
             intensities = fan_sampled[mask]
 
-            # Convert pixels to local coordinates (krit_slam method)
-            # Fan image is cartesian-like, use pixel * resolution
+            # ===== STEP 4: Convert pixels to local coordinates (body frame) =====
             # Stonefish FLS: row=0 is FAR, row=max is NEAR
             local_x_raw = (fan_h - yy_valid) * self.fan_pixel_resolution
 
-            # Apply tilt correction (sonar looks slightly downward)
-            # tilt_angle > 0 means downward tilt
-            local_z = local_x_raw * np.sin(self.sonar_tilt_rad)  # Depth component (ignored in 2D)
-            local_x = local_x_raw * np.cos(self.sonar_tilt_rad)  # Horizontal component (used)
+            # Apply sonar tilt correction (downward tilt projects range to horizontal plane)
+            local_z = local_x_raw * np.sin(self.sonar_tilt_rad)  # Depth (ignored in 2D)
+            local_x = local_x_raw * np.cos(self.sonar_tilt_rad)  # Horizontal range
             local_y = (xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
 
-            # Log tilt correction info (once per map update)
+            # Log tilt info once
             if not hasattr(self, '_tilt_logged'):
                 self.logger.info(
                     f"Sonar tilt correction: {np.rad2deg(self.sonar_tilt_rad):.1f}° "
@@ -483,15 +479,14 @@ class Mapping2D:
                 )
                 self._tilt_logged = True
 
-            # Transform to global frame (standard 2D rotation + translation)
-            # Use same convention as SLAM/ICP and feature extraction
+            # ===== STEP 5: Transform to global NED frame =====
+            # Standard 2D rotation + translation
             global_x = local_x * cos_theta - local_y * sin_theta + pose.x()
-            # CRITICAL: Negate global_y for correct East direction
+            # Y-axis negation required for correct NED East direction mapping
             global_y = -(local_x * sin_theta + local_y * cos_theta) + pose.y()
 
-            # Convert to map coordinates (vectorized)
-            # NED: X=North (up), Y=East (right)
-            # Image: row (0=top), col (0=left)
+            # ===== STEP 6: Convert to map pixel coordinates =====
+            # NED→Image mapping: X(North)→rows, Y(East)→cols
             map_row = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
             map_col = ((global_y - self.min_y) / self.map_resolution).astype(np.int32)
 
