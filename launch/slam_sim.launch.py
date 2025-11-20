@@ -2,7 +2,7 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, TextSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
@@ -75,16 +75,19 @@ def generate_launch_description():
         ]
     )
 
-    # Static TF: world_ned -> map (identity transform)
+    # Static TF: world_ned -> {vehicle_name}_map (identity transform)
     # Stonefish simulator uses world_ned as the root frame
-    # SLAM uses map as the global frame, so we connect them with identity transform
+    # SLAM uses {vehicle_name}_map as the global frame, so we connect them with identity transform
     world_ned_to_map_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        name='world_ned_to_map_tf_publisher',
-        arguments=['--x', '0', '--y', '0', '--z', '0',
-                   '--roll', '0', '--pitch', '0', '--yaw', '0',
-                   '--frame-id', 'world_ned', '--child-frame-id', 'map']
+        name='world_ned_to_vehicle_map_tf_publisher',
+        arguments=[
+            '--x', '0', '--y', '0', '--z', '0',
+            '--roll', '0', '--pitch', '0', '--yaw', '0',
+            '--frame-id', 'world_ned',
+            '--child-frame-id', [LaunchConfiguration('vehicle_name'), TextSubstitution(text='_map')]
+        ]
     )
 
     # RViz node (conditional)

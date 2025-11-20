@@ -591,9 +591,8 @@ class Mapping2D:
             low_info_mask = (variance < variance_threshold) & mask
 
             # Selective blending: Emphasize high-information pixels
-            global_map_result = np.zeros_like(global_map_avg)
-            global_map_result[high_info_mask] = global_map_avg[high_info_mask]  # Full intensity
-            global_map_result[low_info_mask] = global_map_avg[low_info_mask] * 0.5  # Dimmed (50%)
+            # Note: Do not dim low-info pixels to prevent map darkening over time
+            global_map_result = global_map_avg.copy()
         else:
             global_map_result = global_map_avg
 
