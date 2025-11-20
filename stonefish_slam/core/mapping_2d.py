@@ -476,8 +476,9 @@ class Mapping2D:
 
             # Transform to global frame (NED convention, vectorized)
             # NED: Z-axis rotation (yaw) is clockwise positive
+            # Note: Using base_link_frd for tf2 lookup, so standard rotation matrix applies
             global_x = local_x * cos_theta + local_y * sin_theta + pose.x()
-            global_y = local_x * sin_theta - local_y * cos_theta + pose.y()  # Fixed Y-axis sign
+            global_y = -local_x * sin_theta + local_y * cos_theta + pose.y()
 
             # Convert to map coordinates (vectorized)
             map_x = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
