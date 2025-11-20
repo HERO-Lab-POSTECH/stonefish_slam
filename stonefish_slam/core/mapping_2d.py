@@ -313,8 +313,12 @@ class Mapping2D:
         self.min_x, self.max_x, self.min_y, self.max_y = self.get_map_bounds(keyframes, buffer_m)
 
         # 2. Create global map
-        self.map_width = int((self.max_x - self.min_x) / self.map_resolution)
-        self.map_height = int((self.max_y - self.min_y) / self.map_resolution)
+        # CRITICAL: Correct mapping for NED coordinates to image
+        # Image: row (height) = vertical, col (width) = horizontal
+        # NED: X = North (up), Y = East (right)
+        # Therefore: width = Y range (East), height = X range (North)
+        self.map_width = int((self.max_y - self.min_y) / self.map_resolution)   # Y (East) → cols
+        self.map_height = int((self.max_x - self.min_x) / self.map_resolution)  # X (North) → rows
 
         # Limit map size to prevent memory issues
         max_w, max_h = self.max_map_size
@@ -485,23 +489,28 @@ class Mapping2D:
             global_y = local_x * sin_theta + local_y * cos_theta + pose.y()
 
             # Convert to map coordinates (vectorized)
-            map_x = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
-            map_y = ((global_y - self.min_y) / self.map_resolution).astype(np.int32)
+            # CRITICAL: Correct NED → image coordinate mapping
+            # NED: X=North (up), Y=East (right)
+            # Image: row (0=top), col (0=left)
+            # North → row (inverted: North increases = row decreases)
+            # East → col (normal: East increases = col increases)
+            map_row = (self.map_height - 1 - ((global_x - self.min_x) / self.map_resolution)).astype(np.int32)
+            map_col = ((global_y - self.min_y) / self.map_resolution).astype(np.int32)
 
             # Boundary check (vectorized)
             valid_idx = (
-                (map_x >= 0) & (map_x < self.map_width) &
-                (map_y >= 0) & (map_y < self.map_height)
+                (map_row >= 0) & (map_row < self.map_height) &
+                (map_col >= 0) & (map_col < self.map_width)
             )
 
             # Extract valid points
-            map_x_valid = map_x[valid_idx]
-            map_y_valid = map_y[valid_idx]
+            map_row_valid = map_row[valid_idx]
+            map_col_valid = map_col[valid_idx]
             intensities_valid = intensities[valid_idx].astype(np.float32)
 
             # Accumulate to map (fully vectorized with np.add.at)
             # np.add.at handles duplicate indices correctly (accumulates)
-            linear_indices = map_y_valid * self.map_width + map_x_valid
+            linear_indices = map_row_valid * self.map_width + map_col_valid
             np.add.at(self.global_map_accum.ravel(), linear_indices, intensities_valid)
             np.add.at(self.global_map_count.ravel(), linear_indices, 1)
 
