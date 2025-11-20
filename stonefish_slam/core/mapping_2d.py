@@ -575,24 +575,14 @@ class Mapping2D:
             map_col_valid = map_col[valid_idx]
             intensities_valid = intensities[valid_idx].astype(np.float32)
 
-            # Option 2: Weighted incremental update
-            # Compute weights based on intensity (brighter pixels = higher信息 content)
-            # This prioritizes high-intensity features over low-intensity noise
-            weights = intensities_valid.astype(np.float32)
-
-            # Accumulate to map with weights (fully vectorized with np.add.at)
-            # Formula: weighted_avg = sum(value * weight) / sum(weight)
+            # Maximum Intensity Projection (literature standard for sonar)
+            # Keep the brightest value at each pixel (preserves strong signals/objects)
             linear_indices = map_row_valid * self.map_width + map_col_valid
-            accum_flat = self.global_map_accum.ravel()
-            count_flat = self.global_map_count.ravel()
-            weight_flat = self.global_map_weight.ravel()
+            map_flat = self.global_map_accum.ravel()
 
-            # Accumulate: intensity * weight
-            np.add.at(accum_flat, linear_indices, intensities_valid * weights)
-            # Track observation count (for debugging)
-            np.add.at(count_flat, linear_indices, 1)
-            # Accumulate: weight sum
-            np.add.at(weight_flat, linear_indices, weights)
+            # Update with maximum intensity (no averaging - prevents gray wash-out)
+            for i, idx in enumerate(linear_indices):
+                map_flat[idx] = max(map_flat[idx], intensities_valid[i])
 
             # Mark this keyframe as processed (incremental update)
             if kf_key is not None:
@@ -662,10 +652,8 @@ class Mapping2D:
     def get_map_image(self) -> np.ndarray:
         """Get current global map as uint8 image.
 
-        Option 2: Uses weighted averaging for blending.
-        Formula: weighted_avg = sum(intensity * weight) / sum(weight)
-
-        Each frame already has CLAHE applied, so no additional normalization is needed.
+        Maximum Intensity Projection: Each pixel shows the brightest value observed.
+        No averaging - preserves original sonar intensities and contrast.
 
         Returns:
             Global map image (height × width), uint8, vertically flipped
@@ -673,17 +661,9 @@ class Mapping2D:
         if self.global_map_accum is None:
             return np.zeros((100, 100), dtype=np.uint8)
 
-        # Create mask for valid pixels (observed at least once)
-        # Use weight map instead of count map for validation
-        mask = self.global_map_weight > 0
-
-        # Calculate weighted average intensity (Option 2)
-        # weighted_avg = sum(value * weight) / sum(weight)
-        global_map_avg = np.zeros((self.map_height, self.map_width), dtype=np.float32)
-        global_map_avg[mask] = self.global_map_accum[mask] / self.global_map_weight[mask]
-
-        # Convert to uint8 (no CLAHE - already applied per-frame)
-        global_map_uint8 = np.clip(global_map_avg, 0, 255).astype(np.uint8)
+        # Maximum intensity projection - use accum directly (no division needed)
+        # Convert to uint8 (values already in 0-255 range from sonar data)
+        global_map_uint8 = np.clip(self.global_map_accum, 0, 255).astype(np.uint8)
 
         # Flip vertically for correct orientation in ROS/RViz
         # Note: OpenCV images have origin at top-left, but ROS maps have origin at bottom-left
