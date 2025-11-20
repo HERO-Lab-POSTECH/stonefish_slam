@@ -580,9 +580,9 @@ class Mapping2D:
             linear_indices = map_row_valid * self.map_width + map_col_valid
             map_flat = self.global_map_accum.ravel()
 
-            # Update with maximum intensity (no averaging - prevents gray wash-out)
-            for i, idx in enumerate(linear_indices):
-                map_flat[idx] = max(map_flat[idx], intensities_valid[i])
+            # Vectorized maximum update (much faster than loop)
+            # Use np.maximum.at to update in-place with maximum values
+            np.maximum.at(map_flat, linear_indices, intensities_valid)
 
             # Mark this keyframe as processed (incremental update)
             if kf_key is not None:
