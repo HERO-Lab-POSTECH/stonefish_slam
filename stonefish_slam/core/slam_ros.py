@@ -470,12 +470,13 @@ class SLAMNode(SLAM, Node):
 
                 # 4. Update 2D map periodically (non-blocking)
                 if self.enable_2d_mapping and (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
-                    # Create snapshot of keyframes for async processing
-                    keyframes_snapshot = list(self.keyframes)
+                    # Send only new keyframes (incremental update) - much faster than full snapshot
+                    # mapping_2d.py uses processed_keyframe_keys to skip already processed ones
+                    new_keyframes = list(self.keyframes[self.last_map_update_kf:])
 
                     # Add to queue if not full (drop if queue full to prevent backlog)
-                    if not self.mapping_queue.full():
-                        self.mapping_queue.put(keyframes_snapshot)
+                    if not self.mapping_queue.full() and new_keyframes:
+                        self.mapping_queue.put(new_keyframes)
                         self.last_map_update_kf = len(self.keyframes)
                         self.mapping_stats['maps_queued'] += 1
                     else:
