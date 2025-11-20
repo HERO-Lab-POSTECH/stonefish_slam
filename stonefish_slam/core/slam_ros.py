@@ -642,11 +642,14 @@ class SLAMNode(SLAM, Node):
 
                 # Perform mapping with tf2 buffer
                 try:
+                    # Construct source_frame with namespace
+                    source_frame = 'base_link' if self.rov_id == "" else f"{self.rov_id}/base_link"
+
                     self.mapper.update_global_map_from_slam(
                         keyframes_snapshot,
                         tf2_buffer=self.tf_buffer,
                         target_frame='world_ned',
-                        source_frame='base_link'
+                        source_frame=source_frame
                     )
 
                     # Get and publish map image
