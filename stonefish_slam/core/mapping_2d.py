@@ -1,7 +1,15 @@
 """2D Sonar Image Mosaic Mapping Module.
 
 ROS2-independent core class for creating 2D sonar image mosaics.
-Converts polar sonar images to fan-shaped cartesian and accumulates them into a global map.
+Converts polar sonar images to fan-shaped cartesian and accumulates them into a global map
+using simple averaging with CLAHE preprocessing.
+
+Algorithm:
+    1. CLAHE applied once at keyframe storage (clipLimit=2.0, tileGridSize=8x8)
+    2. Polar → Cartesian conversion with cv2.remap (cached transformation)
+    3. NED coordinate transformation with sonar tilt correction
+    4. Simple accumulation: average = sum / count
+    5. No global normalization (CLAHE handles local contrast)
 
 Reference:
     slam_2d.py (krit_slam):
@@ -47,7 +55,6 @@ class Mapping2D:
         keyframes (List[Dict]): List of keyframes with pose and sonar image (independent mode)
         global_map_accum (np.ndarray): Accumulated intensity values
         global_map_count (np.ndarray): Observation count per pixel
-        global_map_variance_sum (np.ndarray): Sum of squared intensities for variance calculation
 
     Example (SLAM integration):
         >>> from stonefish_slam.core.slam import SLAM
@@ -73,7 +80,9 @@ class Mapping2D:
         sonar_range: float = 20.0,
         sonar_fov: float = 130.0,
         fan_pixel_resolution: float = 0.05,
-        sonar_tilt_deg: float = 30.0
+        sonar_tilt_deg: float = 30.0,
+        range_min: float = 0.1,
+        keyframe_sample_threshold: int = 50
     ):
         """Initialize 2D mapping parameters.
 
@@ -84,6 +93,8 @@ class Mapping2D:
             sonar_fov: Sonar field of view in degrees (default: 130.0)
             fan_pixel_resolution: Fan-shaped image resolution in m/pixel (default: 0.05)
             sonar_tilt_deg: Sonar tilt angle in degrees (0=vertical down, 30=tilted) (default: 30.0)
+            range_min: Minimum sonar range in meters (default: 0.1)
+            keyframe_sample_threshold: Threshold for adaptive sampling (default: 50)
         """
         self.map_resolution = map_resolution
         self.max_map_size = map_size
@@ -91,6 +102,8 @@ class Mapping2D:
         self.sonar_fov = sonar_fov
         self.fan_pixel_resolution = fan_pixel_resolution
         self.sonar_tilt_rad = np.deg2rad(sonar_tilt_deg)
+        self.range_min = range_min
+        self.keyframe_sample_threshold = keyframe_sample_threshold
 
         # Logger for debugging
         self.logger = logging.getLogger('Mapping2D')
@@ -113,7 +126,6 @@ class Mapping2D:
         # Global map buffers (initialized when first keyframe is added)
         self.global_map_accum: Optional[np.ndarray] = None
         self.global_map_count: Optional[np.ndarray] = None
-        self.global_map_variance_sum: Optional[np.ndarray] = None
 
         # Map bounds (updated when keyframes are added)
         self.min_x: float = 0.0
@@ -131,15 +143,24 @@ class Mapping2D:
     ) -> None:
         """Add a keyframe with sonar image.
 
+        CLAHE is applied once at storage time for consistent intensity normalization.
+
         Args:
             key: Keyframe index
             pose: Robot pose as gtsam.Pose2 (x, y, theta in NED frame)
             sonar_image: Polar sonar image (num_bins × num_beams), uint8 or float
         """
+        # Convert to uint8 if needed
+        if sonar_image.dtype != np.uint8:
+            sonar_image = np.clip(sonar_image, 0, 255).astype(np.uint8)
+
+        # Apply CLAHE once at storage time
+        sonar_image = self.clahe.apply(sonar_image)
+
         keyframe = {
             'key': key,
             'pose': pose,
-            'image': sonar_image.astype(np.uint8) if sonar_image.dtype != np.uint8 else sonar_image
+            'image': sonar_image
         }
         self.keyframes.append(keyframe)
 
@@ -179,8 +200,7 @@ class Mapping2D:
         # Build or use cached transformation maps (performance optimization)
         if self.p2c_cache is None:
             # Calculate range resolution
-            range_min = 0.1  # Typical FLS minimum range
-            range_resolution = (max_range - range_min) / rows
+            range_resolution = (max_range - self.range_min) / rows
 
             # Maximum lateral extent based on FOV
             max_lateral = max_range * np.sin(np.radians(fov_deg / 2.0))
@@ -337,11 +357,10 @@ class Mapping2D:
         # Initialize map with float for better blending
         self.global_map_accum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
         self.global_map_count = np.zeros((self.map_height, self.map_width), dtype=np.float64)
-        self.global_map_variance_sum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
 
         # 3. Transform and add each keyframe's sonar image
         # Adaptive sampling based on number of keyframes
-        sample_step = 4 if len(keyframes) > 50 else 2
+        sample_step = 4 if len(keyframes) > self.keyframe_sample_threshold else 2
 
         for kf in keyframes:
             # Extract image and pose (duck typing: dict or object)
@@ -358,11 +377,8 @@ class Mapping2D:
                 # Use sonar acquisition time if available, otherwise fall back to feature time
                 timestamp = kf.sonar_time if hasattr(kf, 'sonar_time') and kf.sonar_time is not None else kf.time
 
-            # Apply CLAHE to normalize intensity and prevent map darkening
-            # Convert to uint8 if needed
-            if polar_img.dtype != np.uint8:
-                polar_img = np.clip(polar_img, 0, 255).astype(np.uint8)
-            polar_img = self.clahe.apply(polar_img)
+            # CLAHE is already applied in add_keyframe() or when storing keyframes
+            # No additional preprocessing needed here
 
             # Debug log for keyframe processing
             if timestamp is not None:
@@ -502,12 +518,10 @@ class Mapping2D:
             # Accumulate to map (fully vectorized with np.add.at)
             # np.add.at handles duplicate indices correctly (accumulates)
             linear_indices = map_row_valid * self.map_width + map_col_valid
-            np.add.at(self.global_map_accum.ravel(), linear_indices, intensities_valid)
-            np.add.at(self.global_map_count.ravel(), linear_indices, 1)
-
-            # Variance accumulation: sum of squared intensities for variance calculation
-            # Variance formula: σ² = E[X²] - E[X]²
-            np.add.at(self.global_map_variance_sum.ravel(), linear_indices, intensities_valid**2)
+            accum_flat = self.global_map_accum.ravel()
+            count_flat = self.global_map_count.ravel()
+            np.add.at(accum_flat, linear_indices, intensities_valid)
+            np.add.at(count_flat, linear_indices, 1)
 
     def update_global_map(self, buffer_m: float = 30.0) -> None:
         """Update global map from self.keyframes (independent operation mode).
@@ -565,11 +579,11 @@ class Mapping2D:
     def get_map_image(self, normalize: bool = True) -> np.ndarray:
         """Get current global map as uint8 image.
 
-        Uses variance-weighted averaging based on arXiv:2212.05216.
-        Higher variance pixels receive higher weight (more information content).
+        Uses simple averaging for blending. CLAHE is already applied to each frame
+        at storage time, so no additional normalization is needed.
 
         Args:
-            normalize: Whether to normalize to 0-255 range (default: True)
+            normalize: Not used anymore (kept for API compatibility)
 
         Returns:
             Global map image (height × width), uint8, vertically flipped
@@ -580,46 +594,13 @@ class Mapping2D:
         # Create mask for valid pixels (observed at least once)
         mask = self.global_map_count > 0
 
-        # Calculate mean intensity: μ = E[X]
+        # Calculate average intensity: simple blending
         global_map_avg = np.zeros((self.map_height, self.map_width), dtype=np.float32)
         global_map_avg[mask] = self.global_map_accum[mask] / self.global_map_count[mask]
 
-        # Calculate variance: σ² = E[X²] - E[X]²
-        variance = np.zeros((self.map_height, self.map_width), dtype=np.float32)
-        variance[mask] = (self.global_map_variance_sum[mask] / self.global_map_count[mask]) - global_map_avg[mask]**2
-        variance[variance < 0] = 0  # Numerical stability (fix floating-point errors)
-
-        # GVM approach (arXiv:2212.05216): Classify pixels by information content
-        # Higher variance = more informative (objects, features)
-        # Lower variance = featureless (flat seafloor, background)
-
-        if np.any(mask):
-            # Adaptive threshold: Use median (50th percentile) to classify pixels
-            variance_threshold = np.percentile(variance[mask], 50)
-
-            # Classify pixels
-            high_info_mask = (variance >= variance_threshold) & mask
-            low_info_mask = (variance < variance_threshold) & mask
-
-            # Selective blending: Emphasize high-information pixels
-            # Note: Do not dim low-info pixels to prevent map darkening over time
-            global_map_result = global_map_avg.copy()
-        else:
-            global_map_result = global_map_avg
-
-        # Normalize to 0-255 range for visualization
-        if normalize and np.any(mask):
-            # Use percentile for robust normalization (ignore outliers)
-            low_percentile = np.percentile(global_map_result[mask], 5)
-            high_percentile = np.percentile(global_map_result[mask], 95)
-
-            if high_percentile > low_percentile:
-                global_map_result[mask] = np.clip(
-                    (global_map_result[mask] - low_percentile) / (high_percentile - low_percentile) * 255,
-                    0, 255
-                )
-
-        global_map_uint8 = global_map_result.astype(np.uint8)
+        # Convert to uint8 without normalization
+        # CLAHE already applied to each frame at storage time
+        global_map_uint8 = np.clip(global_map_avg, 0, 255).astype(np.uint8)
 
         # Flip vertically for correct orientation in ROS/RViz
         # Note: OpenCV images have origin at top-left, but ROS maps have origin at bottom-left
@@ -662,7 +643,6 @@ class Mapping2D:
         self.keyframes.clear()
         self.global_map_accum = None
         self.global_map_count = None
-        self.global_map_variance_sum = None
         self.min_x = 0.0
         self.max_x = 0.0
         self.min_y = 0.0
