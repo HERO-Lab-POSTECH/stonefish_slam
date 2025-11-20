@@ -47,7 +47,7 @@ class Mapping2D:
         keyframes (List[Dict]): List of keyframes with pose and sonar image (independent mode)
         global_map_accum (np.ndarray): Accumulated intensity values
         global_map_count (np.ndarray): Observation count per pixel
-        global_map_max (np.ndarray): Maximum intensity per pixel
+        global_map_variance_sum (np.ndarray): Sum of squared intensities for variance calculation
 
     Example (SLAM integration):
         >>> from stonefish_slam.core.slam import SLAM
@@ -108,7 +108,7 @@ class Mapping2D:
         # Global map buffers (initialized when first keyframe is added)
         self.global_map_accum: Optional[np.ndarray] = None
         self.global_map_count: Optional[np.ndarray] = None
-        self.global_map_max: Optional[np.ndarray] = None
+        self.global_map_variance_sum: Optional[np.ndarray] = None
 
         # Map bounds (updated when keyframes are added)
         self.min_x: float = 0.0
@@ -332,7 +332,7 @@ class Mapping2D:
         # Initialize map with float for better blending
         self.global_map_accum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
         self.global_map_count = np.zeros((self.map_height, self.map_width), dtype=np.float64)
-        self.global_map_max = np.zeros((self.map_height, self.map_width), dtype=np.float32)
+        self.global_map_variance_sum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
 
         # 3. Transform and add each keyframe's sonar image
         # Adaptive sampling based on number of keyframes
@@ -494,13 +494,9 @@ class Mapping2D:
             np.add.at(self.global_map_accum.ravel(), linear_indices, intensities_valid)
             np.add.at(self.global_map_count.ravel(), linear_indices, 1)
 
-            # For max: use np.maximum.at (available in newer NumPy)
-            # Fallback to loop only for max operation (much smaller overhead)
-            for i in range(len(linear_indices)):
-                idx = linear_indices[i]
-                self.global_map_max.ravel()[idx] = max(
-                    self.global_map_max.ravel()[idx], intensities_valid[i]
-                )
+            # Variance accumulation: sum of squared intensities for variance calculation
+            # Variance formula: σ² = E[X²] - E[X]²
+            np.add.at(self.global_map_variance_sum.ravel(), linear_indices, intensities_valid**2)
 
     def update_global_map(self, buffer_m: float = 30.0) -> None:
         """Update global map from self.keyframes (independent operation mode).
@@ -558,11 +554,8 @@ class Mapping2D:
     def get_map_image(self, normalize: bool = True) -> np.ndarray:
         """Get current global map as uint8 image.
 
-        Reference: slam_2d.py Line 1082-1111
-
-        Blends average and max intensity (alpha=0.7 for average),
-        normalizes using percentile clipping, and flips vertically
-        for ROS coordinate convention.
+        Uses variance-weighted averaging based on arXiv:2212.05216.
+        Higher variance pixels receive higher weight (more information content).
 
         Args:
             normalize: Whether to normalize to 0-255 range (default: True)
@@ -573,37 +566,50 @@ class Mapping2D:
         if self.global_map_accum is None:
             return np.zeros((100, 100), dtype=np.uint8)
 
-        # 4. Process the accumulated values
-        # slam_2d.py Line 1083-1092
+        # Create mask for valid pixels (observed at least once)
         mask = self.global_map_count > 0
 
-        # Calculate average intensity
+        # Calculate mean intensity: μ = E[X]
         global_map_avg = np.zeros((self.map_height, self.map_width), dtype=np.float32)
         global_map_avg[mask] = self.global_map_accum[mask] / self.global_map_count[mask]
 
-        # Blend average and max for better visualization (preserve strong reflections)
-        # slam_2d.py Line 1089-1092
-        alpha = 0.7  # Weight for average (0.7 average, 0.3 max)
-        global_map_blended = np.zeros((self.map_height, self.map_width), dtype=np.float32)
-        global_map_blended[mask] = alpha * global_map_avg[mask] + (1 - alpha) * self.global_map_max[mask]
+        # Calculate variance: σ² = E[X²] - E[X]²
+        variance = np.zeros((self.map_height, self.map_width), dtype=np.float32)
+        variance[mask] = (self.global_map_variance_sum[mask] / self.global_map_count[mask]) - global_map_avg[mask]**2
+        variance[variance < 0] = 0  # Numerical stability (fix floating-point errors)
 
-        # Normalize to 0-255 range for better visualization
-        # slam_2d.py Line 1094-1105
+        # Variance-weighted averaging (arXiv:2212.05216)
+        # Higher variance = more information → higher weight
+        mean_variance = variance[mask].mean() if np.any(mask) else 1.0
+        epsilon = 1e-6
+        weight = variance / (mean_variance + epsilon)
+        weight[~mask] = 0
+
+        # Normalize weights (preserve relative importance)
+        weight_sum = weight[mask].sum() if np.any(mask) else 1.0
+        if weight_sum > 0:
+            weight = weight / weight_sum * mask.sum()
+        else:
+            weight = mask.astype(np.float32)
+
+        # Apply variance weights to mean intensity
+        global_map_weighted = global_map_avg * weight
+
+        # Normalize to 0-255 range for visualization
         if normalize and np.any(mask):
             # Use percentile for robust normalization (ignore outliers)
-            low_percentile = np.percentile(global_map_blended[mask], 5)
-            high_percentile = np.percentile(global_map_blended[mask], 95)
+            low_percentile = np.percentile(global_map_weighted[mask], 5)
+            high_percentile = np.percentile(global_map_weighted[mask], 95)
 
             if high_percentile > low_percentile:
-                global_map_blended[mask] = np.clip(
-                    (global_map_blended[mask] - low_percentile) / (high_percentile - low_percentile) * 255,
+                global_map_weighted[mask] = np.clip(
+                    (global_map_weighted[mask] - low_percentile) / (high_percentile - low_percentile) * 255,
                     0, 255
                 )
 
-        global_map_uint8 = global_map_blended.astype(np.uint8)
+        global_map_uint8 = global_map_weighted.astype(np.uint8)
 
         # Flip vertically for correct orientation in ROS/RViz
-        # slam_2d.py Line 1111
         # Note: OpenCV images have origin at top-left, but ROS maps have origin at bottom-left
         global_map_flipped = np.flipud(global_map_uint8)
 
@@ -644,7 +650,7 @@ class Mapping2D:
         self.keyframes.clear()
         self.global_map_accum = None
         self.global_map_count = None
-        self.global_map_max = None
+        self.global_map_variance_sum = None
         self.min_x = 0.0
         self.max_x = 0.0
         self.min_y = 0.0
