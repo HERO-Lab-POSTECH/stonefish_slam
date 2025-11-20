@@ -143,17 +143,20 @@ class Mapping2D:
     ) -> None:
         """Add a keyframe with sonar image.
 
-        Note: No CLAHE applied here. CLAHE is applied to the final map in get_map_image()
-        to ensure consistent intensity across all frames.
+        CLAHE is applied to each frame independently for consistent local contrast.
+        Final map uses simple averaging without additional normalization.
 
         Args:
             key: Keyframe index
             pose: Robot pose as gtsam.Pose2 (x, y, theta in NED frame)
             sonar_image: Polar sonar image (num_bins × num_beams), uint8 or float
         """
-        # Convert to uint8 if needed (no CLAHE here)
+        # Convert to uint8 if needed
         if sonar_image.dtype != np.uint8:
             sonar_image = np.clip(sonar_image, 0, 255).astype(np.uint8)
+
+        # Apply CLAHE to each frame independently (Option 1)
+        sonar_image = self.clahe.apply(sonar_image)
 
         keyframe = {
             'key': key,
@@ -577,8 +580,8 @@ class Mapping2D:
     def get_map_image(self) -> np.ndarray:
         """Get current global map as uint8 image.
 
-        Uses simple averaging for blending. CLAHE is applied to the final map
-        to ensure consistent intensity across all frames.
+        Uses simple averaging for blending. Each frame already has CLAHE applied,
+        so no additional normalization is needed.
 
         Returns:
             Global map image (height × width), uint8, vertically flipped
@@ -593,11 +596,8 @@ class Mapping2D:
         global_map_avg = np.zeros((self.map_height, self.map_width), dtype=np.float32)
         global_map_avg[mask] = self.global_map_accum[mask] / self.global_map_count[mask]
 
-        # Convert to uint8
+        # Convert to uint8 (no CLAHE - already applied per-frame)
         global_map_uint8 = np.clip(global_map_avg, 0, 255).astype(np.uint8)
-
-        # Apply CLAHE to the final map for consistent contrast enhancement
-        global_map_uint8 = self.clahe.apply(global_map_uint8)
 
         # Flip vertically for correct orientation in ROS/RViz
         # Note: OpenCV images have origin at top-left, but ROS maps have origin at bottom-left
