@@ -493,9 +493,9 @@ class Mapping2D:
             # NED: X=North (up), Y=East (right)
             # Image: row (0=top), col (0=left)
             # North → row (normal: North increases = row increases)
-            # East → col (normal: East increases = col increases)
+            # East → col (inverted: East increases = col decreases)
             map_row = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
-            map_col = ((global_y - self.min_y) / self.map_resolution).astype(np.int32)
+            map_col = (self.map_width - 1 - ((global_y - self.min_y) / self.map_resolution)).astype(np.int32)
 
             # Boundary check (vectorized)
             valid_idx = (
