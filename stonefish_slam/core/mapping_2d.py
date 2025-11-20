@@ -464,7 +464,10 @@ class Mapping2D:
             # tilt_angle > 0 means downward tilt
             local_z = local_x_raw * np.sin(self.sonar_tilt_rad)  # Depth component (ignored in 2D)
             local_x = local_x_raw * np.cos(self.sonar_tilt_rad)  # Horizontal component (used)
-            local_y = (xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
+            # CRITICAL FIX: Invert Y-axis for base_link_frd frame compatibility
+            # base_link_frd: Y=right (+), left (-)
+            # Fan image: col increases → right, but we need to invert for proper mapping
+            local_y = -(xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
 
             # Log tilt correction info (once per map update)
             if not hasattr(self, '_tilt_logged'):
