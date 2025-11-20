@@ -200,7 +200,7 @@ class SLAMNode(SLAM, Node):
         self.declare_parameter('map_size', [4000, 4000])  # 원본과 동일 (slam_2d.py Line 1019)
         self.declare_parameter('sonar_range', 20.0)
         self.declare_parameter('sonar_fov', 130.0)
-        self.declare_parameter('sonar_tilt_deg', 10.0)  # Sonar tilt angle
+        self.declare_parameter('sonar_tilt_deg', 30.0)  # Sonar tilt angle (BlueROV2 FLS: 60° roll = 30° from horizontal)
         self.declare_parameter('map_update_interval', 1)  # 매 키프레임마다 업데이트
 
         self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
