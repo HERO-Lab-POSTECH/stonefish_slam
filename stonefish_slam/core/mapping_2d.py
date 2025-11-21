@@ -360,16 +360,10 @@ class Mapping2D:
         # 1. Calculate current bounds from all keyframes
         new_min_x, new_max_x, new_min_y, new_max_y = self.get_map_bounds(keyframes, buffer_m)
 
-        # 2. Calculate new map dimensions
+        # 2. Calculate new map dimensions (dynamic, no limit)
         # NED→Image mapping: X(North)→rows(height), Y(East)→cols(width)
         new_map_width = int((new_max_y - new_min_y) / self.map_resolution)   # Y (East) → cols
         new_map_height = int((new_max_x - new_min_x) / self.map_resolution)  # X (North) → rows
-
-        # Limit map size to prevent memory issues
-        max_w, max_h = self.max_map_size
-        if new_map_width > max_w or new_map_height > max_h:
-            new_map_width = min(new_map_width, max_w)
-            new_map_height = min(new_map_height, max_h)
 
         # Check if map needs initialization or resizing
         needs_resize = (

@@ -211,9 +211,9 @@ class SLAMNode(SLAM, Node):
         sonar_bins = self.get_parameter('sonar_bins').value
         sonar_tilt_deg = self.get_parameter('sonar_tilt_deg').value
 
-        # Calculate map resolution automatically: (range × cos(tilt)) / bins
-        import math
-        map_resolution = (sonar_range * math.cos(math.radians(sonar_tilt_deg))) / sonar_bins
+        # Calculate map resolution (sonar radial resolution)
+        # Tilt correction is already applied in coordinate transformation
+        map_resolution = sonar_range / sonar_bins
 
         if self.enable_2d_mapping:
             map_size = tuple(self.get_parameter('map_size').value)
