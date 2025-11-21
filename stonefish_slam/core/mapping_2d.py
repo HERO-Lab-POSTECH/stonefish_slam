@@ -357,19 +357,29 @@ class Mapping2D:
         if not keyframes:
             return
 
-        # 1. Calculate global map bounds
-        self.min_x, self.max_x, self.min_y, self.max_y = self.get_map_bounds(keyframes, buffer_m)
+        # 1. Use fixed bounds (initialized once) for consistent pixel mapping
+        # Incremental update requires stable coordinate frame
+        if self.global_map_accum is None:
+            # First initialization: calculate bounds from initial keyframes
+            self.min_x, self.max_x, self.min_y, self.max_y = self.get_map_bounds(keyframes, buffer_m)
 
-        # 2. Calculate map dimensions
-        # NED→Image mapping: X(North)→rows(height), Y(East)→cols(width)
-        self.map_width = int((self.max_y - self.min_y) / self.map_resolution)   # Y (East) → cols
-        self.map_height = int((self.max_x - self.min_x) / self.map_resolution)  # X (North) → rows
+            # 2. Calculate map dimensions
+            # NED→Image mapping: X(North)→rows(height), Y(East)→cols(width)
+            self.map_width = int((self.max_y - self.min_y) / self.map_resolution)   # Y (East) → cols
+            self.map_height = int((self.max_x - self.min_x) / self.map_resolution)  # X (North) → rows
 
-        # Limit map size to prevent memory issues
-        max_w, max_h = self.max_map_size
-        if self.map_width > max_w or self.map_height > max_h:
-            self.map_width = min(self.map_width, max_w)
-            self.map_height = min(self.map_height, max_h)
+            # Limit map size to prevent memory issues
+            max_w, max_h = self.max_map_size
+            if self.map_width > max_w or self.map_height > max_h:
+                self.map_width = min(self.map_width, max_w)
+                self.map_height = min(self.map_height, max_h)
+
+            self.logger.info(
+                f"Map bounds fixed: X=[{self.min_x:.1f}, {self.max_x:.1f}], "
+                f"Y=[{self.min_y:.1f}, {self.max_y:.1f}], "
+                f"size=({self.map_height}, {self.map_width})"
+            )
+        # else: Use existing bounds (no recalculation)
 
         # Option 2: Incremental update - initialize map only once or on resize
         # Check if map needs initialization or resizing

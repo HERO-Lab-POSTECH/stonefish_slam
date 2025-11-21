@@ -196,22 +196,28 @@ class SLAMNode(SLAM, Node):
 
         # 2D mapping parameters
         self.declare_parameter('enable_2d_mapping', True)
-        self.declare_parameter('map_resolution', 0.1)
-        self.declare_parameter('map_size', [4000, 4000])  # 원본과 동일 (slam_2d.py Line 1019)
-        self.declare_parameter('sonar_range', 20.0)
+        # Sonar parameters from BlueROV2 FLS (bluerov2.scn Line 272-273)
+        self.declare_parameter('sonar_range', 30.0)  # range_max from scenario
+        self.declare_parameter('sonar_bins', 500)  # bins from scenario
         self.declare_parameter('sonar_fov', 130.0)
-        self.declare_parameter('sonar_tilt_deg', 30.0)  # Sonar tilt angle (BlueROV2 FLS: 60° roll = 30° from horizontal)
+        self.declare_parameter('sonar_tilt_deg', 30.0)  # FLS: 60° roll = 30° from horizontal
+        self.declare_parameter('map_size', [4000, 4000])
         self.declare_parameter('map_update_interval', 1)  # 매 키프레임마다 업데이트
 
         self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
         self.map_update_interval = self.get_parameter('map_update_interval').value
 
+        sonar_range = self.get_parameter('sonar_range').value
+        sonar_bins = self.get_parameter('sonar_bins').value
+        sonar_tilt_deg = self.get_parameter('sonar_tilt_deg').value
+
+        # Calculate map resolution automatically: (range × cos(tilt)) / bins
+        import math
+        map_resolution = (sonar_range * math.cos(math.radians(sonar_tilt_deg))) / sonar_bins
+
         if self.enable_2d_mapping:
-            map_resolution = self.get_parameter('map_resolution').value
             map_size = tuple(self.get_parameter('map_size').value)
-            sonar_range = self.get_parameter('sonar_range').value
             sonar_fov = self.get_parameter('sonar_fov').value
-            sonar_tilt_deg = self.get_parameter('sonar_tilt_deg').value
 
             self.mapper = Mapping2D(
                 map_resolution=map_resolution,
