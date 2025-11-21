@@ -357,62 +357,73 @@ class Mapping2D:
         if not keyframes:
             return
 
-        # 1. Use fixed bounds (initialized once) for consistent pixel mapping
-        # Incremental update requires stable coordinate frame
-        if self.global_map_accum is None:
-            # First initialization: calculate bounds from initial keyframes
-            self.min_x, self.max_x, self.min_y, self.max_y = self.get_map_bounds(keyframes, buffer_m)
+        # 1. Calculate current bounds from all keyframes
+        new_min_x, new_max_x, new_min_y, new_max_y = self.get_map_bounds(keyframes, buffer_m)
 
-            # 2. Calculate map dimensions
-            # NED→Image mapping: X(North)→rows(height), Y(East)→cols(width)
-            self.map_width = int((self.max_y - self.min_y) / self.map_resolution)   # Y (East) → cols
-            self.map_height = int((self.max_x - self.min_x) / self.map_resolution)  # X (North) → rows
+        # 2. Calculate new map dimensions
+        # NED→Image mapping: X(North)→rows(height), Y(East)→cols(width)
+        new_map_width = int((new_max_y - new_min_y) / self.map_resolution)   # Y (East) → cols
+        new_map_height = int((new_max_x - new_min_x) / self.map_resolution)  # X (North) → rows
 
-            # Limit map size to prevent memory issues
-            max_w, max_h = self.max_map_size
-            if self.map_width > max_w or self.map_height > max_h:
-                self.map_width = min(self.map_width, max_w)
-                self.map_height = min(self.map_height, max_h)
+        # Limit map size to prevent memory issues
+        max_w, max_h = self.max_map_size
+        if new_map_width > max_w or new_map_height > max_h:
+            new_map_width = min(new_map_width, max_w)
+            new_map_height = min(new_map_height, max_h)
 
-            self.logger.info(
-                f"Map bounds fixed: X=[{self.min_x:.1f}, {self.max_x:.1f}], "
-                f"Y=[{self.min_y:.1f}, {self.max_y:.1f}], "
-                f"size=({self.map_height}, {self.map_width})"
-            )
-        # else: Use existing bounds (no recalculation)
-
-        # Option 2: Incremental update - initialize map only once or on resize
         # Check if map needs initialization or resizing
-        needs_init = (
+        needs_resize = (
             self.global_map_accum is None or
-            self.global_map_accum.shape != (self.map_height, self.map_width)
+            new_min_x != self.min_x or new_max_x != self.max_x or
+            new_min_y != self.min_y or new_max_y != self.max_y
         )
 
-        if needs_init:
-            # Save old map data for potential copying (if resizing)
+        if needs_resize:
+            # Save old map and bounds
             old_accum = self.global_map_accum
             old_count = self.global_map_count
-            old_shape = old_accum.shape if old_accum is not None else None
+            old_min_x, old_max_x = self.min_x, self.max_x
+            old_min_y, old_max_y = self.min_y, self.max_y
 
-            # Initialize new map (simple overlay - no weight needed)
-            self.global_map_accum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
-            self.global_map_count = np.zeros((self.map_height, self.map_width), dtype=np.float64)
+            # Update bounds and dimensions
+            self.min_x, self.max_x = new_min_x, new_max_x
+            self.min_y, self.max_y = new_min_y, new_max_y
+            self.map_width = new_map_width
+            self.map_height = new_map_height
 
-            # Copy overlapping region if resizing (preserve existing map data)
-            if old_accum is not None and old_shape is not None:
-                # Calculate overlap region
-                overlap_h = min(old_shape[0], self.map_height)
-                overlap_w = min(old_shape[1], self.map_width)
+            # Initialize new map
+            new_accum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
+            new_count = np.zeros((self.map_height, self.map_width), dtype=np.float64)
 
-                # Copy data from old map to new map
-                self.global_map_accum[:overlap_h, :overlap_w] = old_accum[:overlap_h, :overlap_w]
-                if old_count is not None:
-                    self.global_map_count[:overlap_h, :overlap_w] = old_count[:overlap_h, :overlap_w]
+            # Option B: Pixel remap - copy old data with coordinate transformation
+            if old_accum is not None:
+                old_h, old_w = old_accum.shape
+
+                # For each pixel in old map, calculate world coordinate and map to new pixel
+                for old_row in range(old_h):
+                    for old_col in range(old_w):
+                        if old_accum[old_row, old_col] > 0:
+                            # Old pixel → world coordinate (using old bounds)
+                            world_x = old_min_x + old_row * self.map_resolution
+                            world_y = old_min_y + old_col * self.map_resolution
+
+                            # World coordinate → new pixel (using new bounds)
+                            new_row = int((world_x - self.min_x) / self.map_resolution)
+                            new_col = int((world_y - self.min_y) / self.map_resolution)
+
+                            # Copy if within new bounds
+                            if 0 <= new_row < self.map_height and 0 <= new_col < self.map_width:
+                                new_accum[new_row, new_col] = old_accum[old_row, old_col]
+                                new_count[new_row, new_col] = old_count[old_row, old_col] if old_count is not None else 0
 
                 self.logger.info(
-                    f"Map resized from {old_shape} to ({self.map_height}, {self.map_width}). "
-                    f"Preserved data in overlap region ({overlap_h}, {overlap_w})."
+                    f"Map resized with pixel remap: "
+                    f"bounds X=[{self.min_x:.1f}, {self.max_x:.1f}], Y=[{self.min_y:.1f}, {self.max_y:.1f}], "
+                    f"size=({self.map_height}, {self.map_width})"
                 )
+
+            self.global_map_accum = new_accum
+            self.global_map_count = new_count
 
         # 3. Transform and add each keyframe's sonar image
         # Adaptive sampling based on number of keyframes
