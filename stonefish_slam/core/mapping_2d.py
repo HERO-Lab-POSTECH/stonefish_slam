@@ -395,29 +395,35 @@ class Mapping2D:
             new_accum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
             new_count = np.zeros((self.map_height, self.map_width), dtype=np.float64)
 
-            # Option B: Pixel remap - copy old data with coordinate transformation
+            # Option B: Vectorized pixel remap - copy old data with coordinate transformation
             if old_accum is not None:
                 old_h, old_w = old_accum.shape
 
-                # For each pixel in old map, calculate world coordinate and map to new pixel
-                for old_row in range(old_h):
-                    for old_col in range(old_w):
-                        if old_accum[old_row, old_col] > 0:
-                            # Old pixel → world coordinate (using old bounds)
-                            world_x = old_min_x + old_row * self.map_resolution
-                            world_y = old_min_y + old_col * self.map_resolution
+                # Create coordinate grids for old map
+                old_rows, old_cols = np.meshgrid(np.arange(old_h), np.arange(old_w), indexing='ij')
 
-                            # World coordinate → new pixel (using new bounds)
-                            new_row = int((world_x - self.min_x) / self.map_resolution)
-                            new_col = int((world_y - self.min_y) / self.map_resolution)
+                # Old pixel → world coordinate (using old bounds)
+                world_x = old_min_x + old_rows * self.map_resolution
+                world_y = old_min_y + old_cols * self.map_resolution
 
-                            # Copy if within new bounds
-                            if 0 <= new_row < self.map_height and 0 <= new_col < self.map_width:
-                                new_accum[new_row, new_col] = old_accum[old_row, old_col]
-                                new_count[new_row, new_col] = old_count[old_row, old_col] if old_count is not None else 0
+                # World coordinate → new pixel (using new bounds)
+                new_rows = ((world_x - self.min_x) / self.map_resolution).astype(np.int32)
+                new_cols = ((world_y - self.min_y) / self.map_resolution).astype(np.int32)
+
+                # Mask for valid pixels (non-zero and within new bounds)
+                valid_mask = (
+                    (old_accum > 0) &
+                    (new_rows >= 0) & (new_rows < self.map_height) &
+                    (new_cols >= 0) & (new_cols < self.map_width)
+                )
+
+                # Copy valid pixels
+                new_accum[new_rows[valid_mask], new_cols[valid_mask]] = old_accum[valid_mask]
+                if old_count is not None:
+                    new_count[new_rows[valid_mask], new_cols[valid_mask]] = old_count[valid_mask]
 
                 self.logger.info(
-                    f"Map resized with pixel remap: "
+                    f"Map resized with vectorized pixel remap: "
                     f"bounds X=[{self.min_x:.1f}, {self.max_x:.1f}], Y=[{self.min_y:.1f}, {self.max_y:.1f}], "
                     f"size=({self.map_height}, {self.map_width})"
                 )
