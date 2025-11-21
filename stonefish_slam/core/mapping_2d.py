@@ -357,73 +357,58 @@ class Mapping2D:
         if not keyframes:
             return
 
-        # 1. Calculate current bounds from all keyframes
-        new_min_x, new_max_x, new_min_y, new_max_y = self.get_map_bounds(keyframes, buffer_m)
+        # 1. Initialize or expand bounds incrementally (fast - only check new keyframes)
+        if self.global_map_accum is None:
+            # First initialization: calculate from all keyframes
+            self.min_x, self.max_x, self.min_y, self.max_y = self.get_map_bounds(keyframes, buffer_m)
+        else:
+            # Incremental bounds expansion: only check new keyframes (fast!)
+            for kf in keyframes:
+                # Extract keyframe key
+                if isinstance(kf, dict):
+                    kf_key = kf['key']
+                    pose = kf['pose']
+                else:
+                    kf_key = kf.key if hasattr(kf, 'key') else None
+                    pose = kf.pose
 
-        # 2. Calculate new map dimensions (dynamic, no limit)
-        # NED→Image mapping: X(North)→rows(height), Y(East)→cols(width)
-        new_map_width = int((new_max_y - new_min_y) / self.map_resolution)   # Y (East) → cols
-        new_map_height = int((new_max_x - new_min_x) / self.map_resolution)  # X (North) → rows
+                # Skip already processed
+                if kf_key is not None and kf_key in self.processed_keyframe_keys:
+                    continue
 
-        # Check if map needs initialization or resizing
-        needs_resize = (
-            self.global_map_accum is None or
-            new_min_x != self.min_x or new_max_x != self.max_x or
-            new_min_y != self.min_y or new_max_y != self.max_y
-        )
+                # Expand bounds if needed
+                x, y = pose.x(), pose.y()
+                self.min_x = min(self.min_x, x - buffer_m)
+                self.max_x = max(self.max_x, x + buffer_m)
+                self.min_y = min(self.min_y, y - buffer_m)
+                self.max_y = max(self.max_y, y + buffer_m)
 
-        if needs_resize:
-            # Save old map and bounds
-            old_accum = self.global_map_accum
-            old_count = self.global_map_count
-            old_min_x, old_max_x = self.min_x, self.max_x
-            old_min_y, old_max_y = self.min_y, self.max_y
+        # 2. Calculate map dimensions
+        new_map_width = int((self.max_y - self.min_y) / self.map_resolution)
+        new_map_height = int((self.max_x - self.min_x) / self.map_resolution)
 
-            # Update bounds and dimensions
-            self.min_x, self.max_x = new_min_x, new_max_x
-            self.min_y, self.max_y = new_min_y, new_max_y
+        # 3. Resize map if dimensions changed (fast padding)
+        if self.global_map_accum is None:
+            # First initialization
+            self.global_map_accum = np.zeros((new_map_height, new_map_width), dtype=np.float64)
+            self.global_map_count = np.zeros((new_map_height, new_map_width), dtype=np.float64)
             self.map_width = new_map_width
             self.map_height = new_map_height
+            self.logger.info(f"Map initialized: ({new_map_height}, {new_map_width})")
+        elif self.global_map_accum.shape != (new_map_height, new_map_width):
+            # Expand map with zero-padding (faster than creating new array)
+            pad_height = new_map_height - self.map_height
+            pad_width = new_map_width - self.map_width
 
-            # Initialize new map
-            new_accum = np.zeros((self.map_height, self.map_width), dtype=np.float64)
-            new_count = np.zeros((self.map_height, self.map_width), dtype=np.float64)
+            if pad_height > 0 or pad_width > 0:
+                pad_h = max(0, pad_height)
+                pad_w = max(0, pad_width)
+                self.global_map_accum = np.pad(self.global_map_accum, ((0, pad_h), (0, pad_w)), mode='constant')
+                self.global_map_count = np.pad(self.global_map_count, ((0, pad_h), (0, pad_w)), mode='constant')
+                self.map_width = new_map_width
+                self.map_height = new_map_height
+                self.logger.info(f"Map auto-expanded to ({new_map_height}, {new_map_width})")
 
-            # Option B: Vectorized pixel remap - copy old data with coordinate transformation
-            if old_accum is not None:
-                old_h, old_w = old_accum.shape
-
-                # Create coordinate grids for old map
-                old_rows, old_cols = np.meshgrid(np.arange(old_h), np.arange(old_w), indexing='ij')
-
-                # Old pixel → world coordinate (using old bounds)
-                world_x = old_min_x + old_rows * self.map_resolution
-                world_y = old_min_y + old_cols * self.map_resolution
-
-                # World coordinate → new pixel (using new bounds)
-                new_rows = ((world_x - self.min_x) / self.map_resolution).astype(np.int32)
-                new_cols = ((world_y - self.min_y) / self.map_resolution).astype(np.int32)
-
-                # Mask for valid pixels (non-zero and within new bounds)
-                valid_mask = (
-                    (old_accum > 0) &
-                    (new_rows >= 0) & (new_rows < self.map_height) &
-                    (new_cols >= 0) & (new_cols < self.map_width)
-                )
-
-                # Copy valid pixels
-                new_accum[new_rows[valid_mask], new_cols[valid_mask]] = old_accum[valid_mask]
-                if old_count is not None:
-                    new_count[new_rows[valid_mask], new_cols[valid_mask]] = old_count[valid_mask]
-
-                self.logger.info(
-                    f"Map resized with vectorized pixel remap: "
-                    f"bounds X=[{self.min_x:.1f}, {self.max_x:.1f}], Y=[{self.min_y:.1f}, {self.max_y:.1f}], "
-                    f"size=({self.map_height}, {self.map_width})"
-                )
-
-            self.global_map_accum = new_accum
-            self.global_map_count = new_count
 
         # 3. Transform and add each keyframe's sonar image
         # Adaptive sampling based on number of keyframes
