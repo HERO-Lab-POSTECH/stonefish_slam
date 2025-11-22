@@ -628,14 +628,19 @@ class Mapping2D:
                         f"pose=({pose.x():.1f}, {pose.y():.1f})"
                     )
 
-            # Latest image overlay - just overwrite with newest sonar data
+            # EMA fusion - blend new observations with previous values
             if len(intensities_valid) > 0:
                 linear_indices = map_row_valid * self.map_width + map_col_valid
                 map_flat = self.global_map_accum.ravel()
                 count_flat = self.global_map_count.ravel()
 
-                # Simple overwrite (latest-write-wins)
-                map_flat[linear_indices] = intensities_valid
+                # Exponential Moving Average (alpha=0.15)
+                # Balances noise reduction (past data) with new information
+                alpha = 0.15  # Fusion weight (0.1-0.3 range, 0.15 = ~6-7 frames effective)
+                old_intensities = map_flat[linear_indices]
+                new_intensities = alpha * intensities_valid + (1.0 - alpha) * old_intensities
+
+                map_flat[linear_indices] = new_intensities
                 np.add.at(count_flat, linear_indices, 1)  # Track observation count
 
             # Mark this keyframe as processed (incremental update)
