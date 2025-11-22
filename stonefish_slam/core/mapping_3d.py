@@ -579,9 +579,10 @@ class SonarMapping3D:
                 last_hit_idx = r_idx
                 high_intensity_indices.append(r_idx)
 
-        # If no hit found, entire ray is free space up to max range
+        # If no hit found, skip this ray entirely (no information)
         if first_hit_idx == -1:
-            first_hit_idx = len(intensity_profile)  # Process entire ray as free
+            # No reflection: don't update as free space (we don't know if it's free or just out of range)
+            return
 
         # Calculate vertical aperture parameters
         half_aperture = self.vertical_aperture / 2
@@ -631,6 +632,10 @@ class SonarMapping3D:
         for r_idx in high_intensity_indices:
             # Calculate actual range (add min_range offset)
             range_m = self.min_range + r_idx * self.range_resolution
+
+            # Debug: Print first few occupied ranges
+            if self.frame_count == 0 and len(high_intensity_indices) <= 10:
+                print(f"  Occupied: r_idx={r_idx}, range_m={range_m:.3f}m")
 
             # Skip out-of-range (should not happen with correct calculation)
             if range_m > self.max_range:
