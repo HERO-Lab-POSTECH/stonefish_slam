@@ -538,9 +538,17 @@ class Mapping2D:
             xx_valid = xx[mask]
 
             # Convert VALID pixels to local coordinates (use actual range_resolution)
-            local_x_raw = (fan_h - yy_valid) * range_resolution
+            # TODO: Apply vehicle pitch correction for more accurate distance calculation
+            # Current: Uses fixed sonar_tilt (30°) regardless of vehicle pitch
+            # Issue: If vehicle pitch = 10°, actual sonar tilt = 20°, causing ~8.5% distance error
+            # Solution: actual_tilt = self.sonar_tilt_rad - pose3.rotation().pitch()
+            #           local_x = local_x_raw * np.cos(actual_tilt)
+            # Requires: Preserve pose3 (gtsam.Pose3) instead of only pose (gtsam.Pose2)
+
+            # Use pixel center (+ 0.5 offset) for consistency with polar_to_cartesian
+            local_x_raw = (fan_h - yy_valid - 0.5) * range_resolution
             local_x = local_x_raw * np.cos(self.sonar_tilt_rad)
-            local_y = (xx_valid - fan_w / 2.0) * range_resolution
+            local_y = (xx_valid - fan_w / 2.0 + 0.5) * range_resolution
 
             # Transform to global coordinates
             theta = -pose.theta()
