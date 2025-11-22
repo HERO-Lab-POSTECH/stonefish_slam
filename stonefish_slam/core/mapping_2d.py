@@ -564,12 +564,19 @@ class Mapping2D:
             # Debug: log mapping statistics
             total_pixels = len(intensities)
             valid_pixels = len(intensities_valid)
-            if total_pixels > 0 and valid_pixels > 0:
-                self.logger.info(
-                    f"Keyframe mapping: total={total_pixels}, valid={valid_pixels} "
-                    f"({100*valid_pixels/total_pixels:.1f}%), "
-                    f"intensity=[{intensities_valid.min():.1f}, {intensities_valid.max():.1f}]"
-                )
+            if total_pixels > 0:
+                if valid_pixels > 0:
+                    self.logger.info(
+                        f"Keyframe mapping: total={total_pixels}, valid={valid_pixels} "
+                        f"({100*valid_pixels/total_pixels:.1f}%), "
+                        f"intensity=[{intensities_valid.min():.1f}, {intensities_valid.max():.1f}]"
+                    )
+                else:
+                    self.logger.warning(
+                        f"Keyframe mapping: total={total_pixels}, valid=0 (0.0%) - ALL PIXELS OUT OF BOUNDS! "
+                        f"map_bounds=({self.min_x:.1f}, {self.max_x:.1f}, {self.min_y:.1f}, {self.max_y:.1f}), "
+                        f"pose=({pose.x():.1f}, {pose.y():.1f})"
+                    )
 
             # Latest image overlay - just overwrite with newest sonar data
             if len(intensities_valid) > 0:
@@ -580,11 +587,6 @@ class Mapping2D:
                 # Simple overwrite (latest-write-wins)
                 map_flat[linear_indices] = intensities_valid
                 np.add.at(count_flat, linear_indices, 1)  # Track observation count
-            else:
-                self.logger.warning(
-                    f"No valid pixels in keyframe: map_bounds=({self.min_x:.1f}, {self.max_x:.1f}, {self.min_y:.1f}, {self.max_y:.1f}), "
-                    f"pose=({pose.x():.1f}, {pose.y():.1f})"
-                )
 
             # Mark this keyframe as processed (incremental update)
             if kf_key is not None:
