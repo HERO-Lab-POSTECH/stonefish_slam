@@ -302,6 +302,13 @@ class SLAMNode(SLAM, Node):
             depth=10
         )
 
+        # QoS profile for PointCloud2 (RELIABLE for RViz compatibility)
+        qos_pointcloud_pub_profile = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
         # define the subsrcibing topics
         self.feature_sub = Subscriber(self, PointCloud2, SONAR_FEATURE_TOPIC, qos_profile=qos_sub_profile)
         self.odom_sub = Subscriber(self, Odometry, LOCALIZATION_ODOM_TOPIC, qos_profile=qos_sub_profile)
@@ -368,9 +375,9 @@ class SLAMNode(SLAM, Node):
             self.map_3d_pub = self.create_publisher(
                 PointCloud2,
                 SLAM_NS + 'mapping/map_3d_pointcloud',
-                qos_profile=qos_image_pub_profile
+                qos_profile=qos_pointcloud_pub_profile
             )
-            self.get_logger().info(f"Publishing 3D map to: {SLAM_NS}mapping/map_3d_pointcloud (QoS: BEST_EFFORT)")
+            self.get_logger().info(f"Publishing 3D map to: {SLAM_NS}mapping/map_3d_pointcloud (QoS: RELIABLE)")
 
         # tf broadcaster to show pose
         self.tf = TransformBroadcaster(self)
