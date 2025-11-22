@@ -486,11 +486,22 @@ class SLAMNode(SLAM, Node):
 
                         # Get and publish map image immediately
                         map_image = self.mapper.get_map_image()
+                        self.get_logger().info(
+                            f"get_map_image() returned: shape={map_image.shape if map_image is not None else None}, "
+                            f"size={map_image.size if map_image is not None else 0}"
+                        )
+
                         if map_image is not None and map_image.size > 0:
+                            self.get_logger().info(f"Converting to ROS Image message...")
                             image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
                             image_msg.header.stamp = self.get_clock().now().to_msg()
                             image_msg.header.frame_id = "map"
+
+                            self.get_logger().info(
+                                f"Publishing to {self.map_2d_pub.topic_name if hasattr(self.map_2d_pub, 'topic_name') else 'unknown'}"
+                            )
                             self.map_2d_pub.publish(image_msg)
+                            self.get_logger().info("publish() called successfully")
 
                             self.get_logger().info(
                                 f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
@@ -498,6 +509,8 @@ class SLAMNode(SLAM, Node):
                                 f"bounds=X[{self.mapper.min_x:.1f},{self.mapper.max_x:.1f}] "
                                 f"Y[{self.mapper.min_y:.1f},{self.mapper.max_y:.1f}]"
                             )
+                        else:
+                            self.get_logger().error(f"Map image is None or empty! Cannot publish.")
 
                         self.last_map_update_kf = len(self.keyframes)
 
