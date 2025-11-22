@@ -374,11 +374,18 @@ class Mapping2D:
             x0, y0 = first_pose.x(), first_pose.y()
 
             # Set initial bounds centered at first keyframe (50x50m, will expand dynamically)
+            # Apply grid alignment to ensure bounds are exact multiples of resolution
             INITIAL_MAP_SIZE = 50.0
-            self.min_x = x0 - INITIAL_MAP_SIZE/2
-            self.max_x = x0 + INITIAL_MAP_SIZE/2
-            self.min_y = y0 - INITIAL_MAP_SIZE/2
-            self.max_y = y0 + INITIAL_MAP_SIZE/2
+            target_min_x = x0 - INITIAL_MAP_SIZE / 2
+            target_max_x = x0 + INITIAL_MAP_SIZE / 2
+            target_min_y = y0 - INITIAL_MAP_SIZE / 2
+            target_max_y = y0 + INITIAL_MAP_SIZE / 2
+
+            # Snap to resolution grid (same as _expand_map)
+            self.min_x = np.floor(target_min_x / self.map_resolution) * self.map_resolution
+            self.max_x = np.ceil(target_max_x / self.map_resolution) * self.map_resolution
+            self.min_y = np.floor(target_min_y / self.map_resolution) * self.map_resolution
+            self.max_y = np.ceil(target_max_y / self.map_resolution) * self.map_resolution
 
             # Calculate initial map dimensions
             new_map_width = int((self.max_y - self.min_y) / self.map_resolution)
