@@ -250,26 +250,21 @@ class HierarchicalOctree:
         """
         Recursively collect occupied voxels
 
-        Early termination: if node log-odds below threshold, skip entire subtree
-
         Args:
             node: Current OctNode
             min_log_odds: Minimum log-odds threshold
             occupied: List to append results to
             depth: Current tree depth
         """
-        # Early termination: if node log-odds below threshold, skip subtree
-        if node.log_odds <= min_log_odds:
-            return
-
         # If leaf or at max depth
         if depth >= self.max_depth or node.is_leaf():
+            # Only check threshold at leaf nodes
             if node.log_odds > min_log_odds:
                 probability = 1.0 / (1.0 + np.exp(-node.log_odds))
                 occupied.append((node.center.copy(), probability))
             return
 
-        # Recurse into children
+        # Recurse into children (internal nodes don't have meaningful log_odds)
         for child in node.children:
             if child is not None:
                 self._collect_occupied(child, min_log_odds, occupied, depth + 1)
