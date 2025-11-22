@@ -564,11 +564,12 @@ class Mapping2D:
             # Debug: log mapping statistics
             total_pixels = len(intensities)
             valid_pixels = len(intensities_valid)
-            if total_pixels > 0:
-                self.logger.debug(
+            if total_pixels > 0 and valid_pixels > 0:
+                self.logger.info(
                     f"Keyframe mapping: total={total_pixels}, valid={valid_pixels} "
                     f"({100*valid_pixels/total_pixels:.1f}%), "
-                    f"intensity=[{intensities_valid.min():.1f}, {intensities_valid.max():.1f}]"
+                    f"intensity=[{intensities_valid.min():.1f}, {intensities_valid.max():.1f}]",
+                    throttle_duration_sec=2.0
                 )
 
             # Latest image overlay - just overwrite with newest sonar data
