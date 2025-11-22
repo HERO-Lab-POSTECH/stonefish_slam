@@ -264,7 +264,7 @@ class SonarMapping3D:
             'image_height': 500,          # Sonar image height (ranges)
             # Sonar mounting (BlueROV2 actual mounting, FRD frame)
             'sonar_position': [0.25, 0.0, 0.08],  # meters from base_link
-            'sonar_tilt': 0.5236,          # 30° downward (radians)
+            'sonar_tilt': -0.5236,         # 30° downward (negative pitch in FRD)
             # Octree parameters
             'voxel_resolution': 0.05,      # 5cm voxels (recommended default)
             'min_probability': 0.6,        # Minimum probability for occupied
@@ -372,7 +372,8 @@ class SonarMapping3D:
         """
         T = np.eye(4)
         # Rotation: tilt downward (pitch rotation around Y axis)
-        rot = R.from_euler('y', tilt_rad)  # Pitch around Y axis
+        # tilt_rad is negative for downward tilt in FRD frame
+        rot = R.from_euler('y', tilt_rad)  # Pitch around Y axis (tilt_rad already negative)
         T[:3, :3] = rot.as_matrix()
         T[:3, 3] = position
         return T
@@ -630,12 +631,12 @@ class SonarMapping3D:
             if polar_img is None:
                 continue
 
-            # Convert gtsam.Pose2 to simple pose dict for processing
-            # (we'll use x, y, yaw from Pose2, assume z=0, roll=0, pitch=0)
+            # Convert gtsam.Pose2/Pose3 to simple pose dict for processing
+            # Use x, y, yaw from Pose2, z from Pose3, assume roll=0, pitch=0
             pose_dict = {
                 'position': {'x': kf.pose.x(),
                             'y': kf.pose.y(),
-                            'z': 0.0},  # Assume planar motion
+                            'z': kf.pose3.z()},  # Use actual depth from Pose3
                 'orientation': {'x': 0.0, 'y': 0.0,
                                'z': np.sin(kf.pose.theta()/2),
                                'w': np.cos(kf.pose.theta()/2)}
