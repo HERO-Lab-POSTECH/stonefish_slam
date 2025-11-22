@@ -119,9 +119,13 @@ class Mapping2D:
         self.keyframe_sample_threshold = keyframe_sample_threshold
         self.intensity_threshold = intensity_threshold
 
-        # Logger for debugging
-        self.logger = logging.getLogger('Mapping2D')
-        self.logger.setLevel(logging.INFO)
+        # Logger for debugging (supports both ROS and Python logging)
+        self.ros_logger = ros_logger
+        if ros_logger is not None:
+            self.logger = ros_logger
+        else:
+            self.logger = logging.getLogger('Mapping2D')
+            self.logger.setLevel(logging.INFO)
 
         # tf2 lookup statistics
         self.tf2_stats = {'success': 0, 'failed': 0, 'no_timestamp': 0}
@@ -369,25 +373,25 @@ class Mapping2D:
                 first_pose = first_kf.pose
             x0, y0 = first_pose.x(), first_pose.y()
 
-            # Set fixed bounds centered at first keyframe (200x200m)
-            MAP_SIZE = 200.0
-            self.min_x = x0 - MAP_SIZE/2
-            self.max_x = x0 + MAP_SIZE/2
-            self.min_y = y0 - MAP_SIZE/2
-            self.max_y = y0 + MAP_SIZE/2
+            # Set initial bounds centered at first keyframe (50x50m, will expand dynamically)
+            INITIAL_MAP_SIZE = 50.0
+            self.min_x = x0 - INITIAL_MAP_SIZE/2
+            self.max_x = x0 + INITIAL_MAP_SIZE/2
+            self.min_y = y0 - INITIAL_MAP_SIZE/2
+            self.max_y = y0 + INITIAL_MAP_SIZE/2
 
-            # Calculate fixed map dimensions
+            # Calculate initial map dimensions
             new_map_width = int((self.max_y - self.min_y) / self.map_resolution)
             new_map_height = int((self.max_x - self.min_x) / self.map_resolution)
 
-            # Initialize fixed-size map
+            # Initialize map (will expand dynamically as needed)
             self.global_map_accum = np.zeros((new_map_height, new_map_width), dtype=np.float64)
             self.global_map_count = np.zeros((new_map_height, new_map_width), dtype=np.float64)
             self.map_width = new_map_width
             self.map_height = new_map_height
 
             self.logger.info(
-                f"[FIXED MAP] Initialized: {new_map_width}x{new_map_height} pixels (200x200m), "
+                f"[Dynamic Map] Initialized: {new_map_width}x{new_map_height} pixels ({INITIAL_MAP_SIZE}x{INITIAL_MAP_SIZE}m), "
                 f"centered at first keyframe pose ({x0:.2f}, {y0:.2f}), "
                 f"bounds X=[{self.min_x:.1f}, {self.max_x:.1f}], Y=[{self.min_y:.1f}, {self.max_y:.1f}]"
             )
@@ -519,18 +523,43 @@ class Mapping2D:
             if not np.any(mask):
                 continue
 
+            # ===== Check if map expansion is needed (using only valid pixels) =====
             yy_valid = yy[mask]
             xx_valid = xx[mask]
+
+            # Convert VALID pixels to local coordinates
+            local_x_raw = (fan_h - yy_valid) * self.fan_pixel_resolution
+            local_x = local_x_raw * np.cos(self.sonar_tilt_rad)
+            local_y = (xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
+
+            # Transform to global coordinates
+            theta = -pose.theta()
+            cos_theta = np.cos(theta)
+            sin_theta = np.sin(theta)
+            global_x_preview = local_x * cos_theta - local_y * sin_theta + pose.x()
+            global_y_preview = -(local_x * sin_theta + local_y * cos_theta) + pose.y()
+
+            # Get min/max extents of VALID sonar data only
+            sonar_min_x = np.min(global_x_preview)
+            sonar_max_x = np.max(global_x_preview)
+            sonar_min_y = np.min(global_y_preview)
+            sonar_max_y = np.max(global_y_preview)
+
+            # Check if expansion is needed
+            needs_expansion = (
+                sonar_min_x < self.min_x or sonar_max_x > self.max_x or
+                sonar_min_y < self.min_y or sonar_max_y > self.max_y
+            )
+
+            if needs_expansion:
+                self._expand_map(sonar_min_x, sonar_max_x, sonar_min_y, sonar_max_y)
+
             intensities = fan_sampled[mask]
 
-            # ===== STEP 4: Convert pixels to local coordinates (body frame) =====
-            # Stonefish FLS: row=0 is FAR, row=max is NEAR
-            local_x_raw = (fan_h - yy_valid) * self.fan_pixel_resolution
-
-            # Apply sonar tilt correction (downward tilt projects range to horizontal plane)
-            local_z = local_x_raw * np.sin(self.sonar_tilt_rad)  # Depth (ignored in 2D)
-            local_x = local_x_raw * np.cos(self.sonar_tilt_rad)  # Horizontal range
-            local_y = (xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
+            # ===== STEP 4 & 5: Use already computed global coordinates =====
+            # (Already computed in expansion check above)
+            global_x = global_x_preview
+            global_y = global_y_preview
 
             # Log tilt info once
             if not hasattr(self, '_tilt_logged'):
@@ -539,12 +568,6 @@ class Mapping2D:
                     f"(range correction factor: {np.cos(self.sonar_tilt_rad):.3f})"
                 )
                 self._tilt_logged = True
-
-            # ===== STEP 5: Transform to global NED frame =====
-            # Standard 2D rotation + translation
-            global_x = local_x * cos_theta - local_y * sin_theta + pose.x()
-            # Y-axis negation required for correct NED East direction mapping
-            global_y = -(local_x * sin_theta + local_y * cos_theta) + pose.y()
 
             # ===== STEP 6: Convert to map pixel coordinates =====
             # NED→Image mapping: X(North)→rows, Y(East)→cols
@@ -696,6 +719,67 @@ class Mapping2D:
         global_map_flipped = np.flipud(global_map_uint8)
 
         return global_map_flipped
+
+    def _expand_map(self, sonar_min_x: float, sonar_max_x: float,
+                    sonar_min_y: float, sonar_max_y: float) -> None:
+        """Expand map using numpy padding to accommodate new sonar data.
+
+        This method expands the map boundaries when new sonar data extends beyond
+        current map limits. Uses np.pad() to efficiently grow the map while preserving
+        existing data and maintaining exact world-to-pixel coordinate consistency.
+
+        Args:
+            sonar_min_x: Minimum global X coordinate of sonar image
+            sonar_max_x: Maximum global X coordinate of sonar image
+            sonar_min_y: Minimum global Y coordinate of sonar image
+            sonar_max_y: Maximum global Y coordinate of sonar image
+        """
+        # Calculate required padding in meters (add 5m buffer)
+        pad_north_m = max(0, self.min_x - sonar_min_x + 5.0)
+        pad_south_m = max(0, sonar_max_x - self.max_x + 5.0)
+        pad_west_m = max(0, self.min_y - sonar_min_y + 5.0)
+        pad_east_m = max(0, sonar_max_y - self.max_y + 5.0)
+
+        # Convert to pixels
+        pad_top_px = int(np.ceil(pad_north_m / self.map_resolution))
+        pad_bottom_px = int(np.ceil(pad_south_m / self.map_resolution))
+        pad_left_px = int(np.ceil(pad_west_m / self.map_resolution))
+        pad_right_px = int(np.ceil(pad_east_m / self.map_resolution))
+
+        # If no expansion needed, return early
+        if pad_top_px == 0 and pad_bottom_px == 0 and pad_left_px == 0 and pad_right_px == 0:
+            return
+
+        # Store old dimensions for logging
+        old_height, old_width = self.map_height, self.map_width
+
+        # Expand both accumulator and count maps
+        self.global_map_accum = np.pad(
+            self.global_map_accum,
+            ((pad_top_px, pad_bottom_px), (pad_left_px, pad_right_px)),
+            mode='constant', constant_values=0
+        )
+        self.global_map_count = np.pad(
+            self.global_map_count,
+            ((pad_top_px, pad_bottom_px), (pad_left_px, pad_right_px)),
+            mode='constant', constant_values=0
+        )
+
+        # Update bounds (CRITICAL for world-to-pixel consistency)
+        self.min_x -= pad_top_px * self.map_resolution
+        self.max_x += pad_bottom_px * self.map_resolution
+        self.min_y -= pad_left_px * self.map_resolution
+        self.max_y += pad_right_px * self.map_resolution
+
+        # Update map dimensions
+        self.map_height, self.map_width = self.global_map_accum.shape
+
+        # Log expansion
+        if self.logger:
+            self.logger.info(
+                f"[Mapping] Map expanded: {old_height}x{old_width} -> {self.map_height}x{self.map_width} "
+                f"(padding: top={pad_top_px}, bottom={pad_bottom_px}, left={pad_left_px}, right={pad_right_px})"
+            )
 
     def get_colored_map(self) -> np.ndarray:
         """Get colored visualization of the global map.
