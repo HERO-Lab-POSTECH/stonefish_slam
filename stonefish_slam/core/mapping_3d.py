@@ -581,8 +581,8 @@ class SonarMapping3D:
         # Update free space before first hit (with sparse sampling)
         free_sampling_step = 2  # Reduced from 10 to 2 for better coverage (0.12m intervals)
         for r_idx in range(0, first_hit_idx, free_sampling_step):
-            # Calculate actual range (add min_range offset)
-            range_m = self.min_range + r_idx * self.range_resolution
+            # Calculate actual range (FLS image: row 0 = far, row max = near)
+            range_m = self.max_range - r_idx * self.range_resolution
 
             # Calculate vertical spread at this range
             vertical_spread = range_m * np.tan(half_aperture)
@@ -623,8 +623,8 @@ class SonarMapping3D:
         # Update occupied regions ONLY
         # Process only the high intensity (occupied) regions we found
         for r_idx in high_intensity_indices:
-            # Calculate actual range (add min_range offset)
-            range_m = self.min_range + r_idx * self.range_resolution
+            # Calculate actual range (FLS image: row 0 = far, row max = near)
+            range_m = self.max_range - r_idx * self.range_resolution
 
             # Skip out-of-range (should not happen with correct calculation)
             if range_m > self.max_range:
