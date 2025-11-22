@@ -2,17 +2,16 @@
 
 ROS2-independent core class for creating 2D sonar image mosaics.
 Converts polar sonar images to fan-shaped cartesian and accumulates them into a global map
-using weighted incremental update with CLAHE preprocessing (Option 2).
+using simple overlay (latest-write-wins).
 
 Algorithm:
-    1. CLAHE applied once at keyframe storage (clipLimit=2.0, tileGridSize=8x8)
-    2. Polar → Cartesian conversion with cv2.remap (cached transformation)
-    3. NED coordinate transformation with sonar tilt correction
-    4. Weighted incremental accumulation: weighted_avg = sum(value * weight) / sum(weight)
-       - Weight = intensity (brighter pixels prioritized)
+    1. Polar → Cartesian conversion with cv2.remap (cached transformation)
+    2. NED coordinate transformation with sonar tilt correction
+    3. Simple overlay: each new frame overwrites previous values at the same location
+       - No preprocessing (raw sonar intensity)
+       - No weighted averaging
        - Incremental update: only new keyframes processed
        - No full map rebuild: map persists across updates
-    5. No global normalization (CLAHE handles local contrast)
 
 Reference:
     slam_2d.py (krit_slam):
@@ -38,14 +37,15 @@ KeyframeType = Any
 
 
 class Mapping2D:
-    """2D Sonar Image Mosaic Mapper (Option 2: Weighted Incremental Update).
+    """2D Sonar Image Mosaic Mapper (Simple Overlay).
 
     Creates a global 2D map by accumulating sonar images from multiple keyframes.
     Converts polar sonar images to fan-shaped cartesian images and transforms them
     to a global coordinate frame using pose estimates.
 
-    **Option 2 Implementation**:
-    - Weighted averaging: intensity-based weights prioritize bright features
+    **Implementation**:
+    - Simple overlay: latest sonar data overwrites previous values
+    - No image preprocessing (raw intensity)
     - Incremental update: processes only new keyframes (no full rebuild)
     - Map persistence: map data preserved across updates
 
@@ -119,11 +119,6 @@ class Mapping2D:
         self.logger = logging.getLogger('Mapping2D')
         self.logger.setLevel(logging.INFO)
 
-        # CLAHE for intensity normalization (prevents map darkening over time)
-        # clipLimit: 2.0 = prevents over-amplification
-        # tileGridSize: (8,8) = local histogram equalization
-        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-
         # tf2 lookup statistics
         self.tf2_stats = {'success': 0, 'failed': 0, 'no_timestamp': 0}
 
@@ -156,15 +151,14 @@ class Mapping2D:
     ) -> None:
         """Add a keyframe with sonar image.
 
-        CLAHE is applied to each frame independently for consistent local contrast.
-        Final map uses simple averaging without additional normalization.
+        No preprocessing applied - raw sonar intensity is stored.
 
         Args:
             key: Keyframe index
             pose: Robot pose as gtsam.Pose2 (x, y, theta in NED frame)
             sonar_image: Polar sonar image (num_bins × num_beams), uint8 or float
         """
-        # Convert to uint8 if needed (no CLAHE)
+        # Convert to uint8 if needed
         if sonar_image.dtype != np.uint8:
             sonar_image = np.clip(sonar_image, 0, 255).astype(np.uint8)
 
@@ -335,11 +329,11 @@ class Mapping2D:
         This is a private method that contains the common logic for map generation.
         Used by both update_global_map() and update_global_map_from_slam().
 
-        **Option 2: Incremental Update**:
+        **Simple Overlay Implementation**:
         - Only processes new keyframes (tracked via processed_keyframe_keys)
         - Map initialized once and preserved across updates
-        - Weighted accumulation: sum(intensity * weight) / sum(weight)
-        - Weight = intensity (prioritizes bright features)
+        - Latest-write-wins: each pixel shows most recent sonar observation
+        - No preprocessing or weighting
 
         Coordinate Transformation Convention:
             - NED frame: X=North, Y=East, Z=Down, yaw=clockwise(+)
@@ -357,31 +351,19 @@ class Mapping2D:
         if not keyframes:
             return
 
-        # 1. Initialize or expand bounds incrementally (fast - only check new keyframes)
+        # 1. Initialize bounds once (no expansion - use very large fixed bounds)
         if self.global_map_accum is None:
-            # First initialization: calculate from all keyframes
-            self.min_x, self.max_x, self.min_y, self.max_y = self.get_map_bounds(keyframes, buffer_m)
-        else:
-            # Incremental bounds expansion: only check new keyframes (fast!)
-            for kf in keyframes:
-                # Extract keyframe key
-                if isinstance(kf, dict):
-                    kf_key = kf['key']
-                    pose = kf['pose']
-                else:
-                    kf_key = kf.key if hasattr(kf, 'key') else None
-                    pose = kf.pose
+            # Calculate initial center from first keyframes
+            init_bounds = self.get_map_bounds(keyframes, buffer_m)
+            center_x = (init_bounds[0] + init_bounds[1]) / 2.0
+            center_y = (init_bounds[2] + init_bounds[3]) / 2.0
 
-                # Skip already processed
-                if kf_key is not None and kf_key in self.processed_keyframe_keys:
-                    continue
-
-                # Expand bounds if needed
-                x, y = pose.x(), pose.y()
-                self.min_x = min(self.min_x, x - buffer_m)
-                self.max_x = max(self.max_x, x + buffer_m)
-                self.min_y = min(self.min_y, y - buffer_m)
-                self.max_y = max(self.max_y, y + buffer_m)
+            # Create very large fixed map (1km × 1km centered on initial position)
+            map_half_size = 500.0
+            self.min_x = center_x - map_half_size
+            self.max_x = center_x + map_half_size
+            self.min_y = center_y - map_half_size
+            self.max_y = center_y + map_half_size
 
         # 2. Calculate map dimensions
         new_map_width = int((self.max_y - self.min_y) / self.map_resolution)
@@ -442,8 +424,7 @@ class Mapping2D:
                 # Use sonar acquisition time if available, otherwise fall back to feature time
                 timestamp = kf.sonar_time if hasattr(kf, 'sonar_time') and kf.sonar_time is not None else kf.time
 
-            # CLAHE is already applied in add_keyframe() or when storing keyframes
-            # No additional preprocessing needed here
+            # No preprocessing - use raw sonar intensity
 
             # Debug log for keyframe processing
             if timestamp is not None:
