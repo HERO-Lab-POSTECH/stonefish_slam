@@ -201,9 +201,10 @@ class SLAMNode(SLAM, Node):
         sonar_bins = self.get_parameter('sonar_bins').value
         sonar_tilt_deg = self.get_parameter('sonar_tilt_deg').value
 
-        # Calculate map resolution (sonar radial resolution)
-        # Tilt correction is already applied in coordinate transformation
-        map_resolution = sonar_range / sonar_bins
+        # Fixed map resolution for DDS message size compatibility
+        # Auto-calculated: sonar_range / sonar_bins = 30/500 = 0.06m → 3333x3333 pixels (11MB)
+        # Fixed: 0.2m → 1000x1000 pixels (1MB) - reduces message size by 10x
+        map_resolution = 0.2  # Fixed resolution for 200x200m map
 
         if self.enable_2d_mapping:
             map_size = tuple(self.get_parameter('map_size').value)
