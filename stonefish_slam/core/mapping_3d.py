@@ -580,7 +580,6 @@ class SonarMapping3D:
 
         # Update free space before first hit (with sparse sampling)
         free_sampling_step = 2  # Reduced from 10 to 2 for better coverage (0.12m intervals)
-        free_voxel_count = 0
         for r_idx in range(0, first_hit_idx, free_sampling_step):
             # Calculate actual range (add min_range offset)
             range_m = self.min_range + r_idx * self.range_resolution
@@ -615,20 +614,14 @@ class SonarMapping3D:
                 # Get voxel key and accumulate update
                 voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
 
-                # Accumulate free space updates
+                # Accumulate log-odds updates (no type distinction)
                 if voxel_key not in voxel_updates:
-                    voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0, 'type': 'free'}
+                    voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0}
                 voxel_updates[voxel_key]['sum'] += self.octree.log_odds_free
                 voxel_updates[voxel_key]['count'] += 1
-                free_voxel_count += 1
-
-        # DEBUG: Print free space summary
-        if self.frame_count == 0 and abs(bearing_angle) < 0.5:
-            print(f"  Free space voxels created: {free_voxel_count}")
 
         # Update occupied regions ONLY
         # Process only the high intensity (occupied) regions we found
-        occupied_voxel_count = 0
         for r_idx in high_intensity_indices:
             # Calculate actual range (add min_range offset)
             range_m = self.min_range + r_idx * self.range_resolution
@@ -672,23 +665,20 @@ class SonarMapping3D:
                 # Get voxel key and accumulate update
                 voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
 
-                # Accumulate occupied updates
+                # Accumulate log-odds updates (no type distinction - just add)
                 if voxel_key not in voxel_updates:
-                    voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0, 'type': 'occupied'}
-                elif voxel_updates[voxel_key]['type'] == 'free':
-                    # If previously marked as free, switch to occupied (occupied has priority)
-                    voxel_updates[voxel_key]['type'] = 'occupied'
-                    voxel_updates[voxel_key]['sum'] = 0.0  # Reset sum for occupied
-                    voxel_updates[voxel_key]['count'] = 0
-
+                    voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0}
                 voxel_updates[voxel_key]['sum'] += log_odds_update
                 voxel_updates[voxel_key]['count'] += 1
-                occupied_voxel_count += 1
 
-        # DEBUG: Print occupied summary
+        # DEBUG: Print voxel summary
         if self.frame_count == 0 and abs(bearing_angle) < 0.5:
-            print(f"  Occupied voxels created: {occupied_voxel_count}")
-            print(f"  Total voxels in this ray: {free_voxel_count + occupied_voxel_count}")
+            print(f"  Total unique voxels in this ray: {len(voxel_updates)}")
+            # Sample a few voxels
+            for i, (key, info) in enumerate(list(voxel_updates.items())[:3]):
+                avg = info['sum'] / info['count']
+                prob = 1.0 / (1.0 + np.exp(-avg))
+                print(f"    Voxel sample {i}: avg_log_odds={avg:.2f}, prob={prob:.3f}, count={info['count']}")
 
     def process_sonar_image(self, polar_image, robot_pose):
         """
@@ -743,11 +733,9 @@ class SonarMapping3D:
             # Calculate average update
             avg_update = update_info['sum'] / update_info['count']
 
-            # Apply the averaged update
-            if update_info['type'] == 'occupied':
-                self.octree.update_voxel(update_info['point'], avg_update, adaptive=self.octree.adaptive_update)
-            else:  # free
-                self.octree.update_voxel(update_info['point'], avg_update, adaptive=False)
+            # Apply update (adaptive only if positive log-odds = occupied)
+            adaptive = (avg_update > 0)
+            self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
 
             # Debug: Log some statistics (commented out - too verbose)
             # if np.random.random() < 0.001:  # Sample 0.1% for better debugging
