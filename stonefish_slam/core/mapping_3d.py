@@ -626,10 +626,10 @@ class SonarMapping3D:
                 if self.frame_count == 0 and r_idx == 0 and v_step == 0:
                     print(f"    FREE: sonar_origin={sonar_origin_world}, pt_world={pt_world[:3]}, actual_range={actual_range:.3f}m, min_range={self.min_range}m")
 
-                if actual_range < self.min_range:
+                if actual_range <= self.min_range:
                     if self.frame_count == 0 and r_idx < 5:
-                        print(f"    SKIPPED FREE: actual_range={actual_range:.3f}m < min_range={self.min_range}m")
-                    continue  # Skip points too close to sonar
+                        print(f"    SKIPPED FREE: actual_range={actual_range:.3f}m <= min_range={self.min_range}m")
+                    continue  # Skip points at or below min_range
 
                 # Get voxel key and accumulate update
                 voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
@@ -684,10 +684,10 @@ class SonarMapping3D:
                 if self.frame_count == 0 and len(high_intensity_indices) <= 3 and v_step == 0:
                     print(f"    OCCUPIED: r_idx={r_idx}, range_m={range_m:.3f}m, actual_range={actual_range:.3f}m, min_range={self.min_range}m")
 
-                if actual_range < self.min_range:
+                if actual_range <= self.min_range:
                     if self.frame_count == 0:
-                        print(f"    SKIPPED OCCUPIED: actual_range={actual_range:.3f}m < min_range={self.min_range}m")
-                    continue  # Skip points too close to sonar
+                        print(f"    SKIPPED OCCUPIED: actual_range={actual_range:.3f}m <= min_range={self.min_range}m")
+                    continue  # Skip points at or below min_range
 
                 # Get voxel key and accumulate update
                 voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
