@@ -460,6 +460,11 @@ class SLAMNode(SLAM, Node):
 
             # Update factor graph
             self.update_factor_graph(frame)
+            self.get_logger().info(
+                f"Keyframe added: #{len(self.keyframes)}, "
+                f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f}), "
+                f"has_image={frame.image is not None}"
+            )
 
             # Loop closure
             if self.nssm_params.enable and self.add_nonsequential_scan_matching():
