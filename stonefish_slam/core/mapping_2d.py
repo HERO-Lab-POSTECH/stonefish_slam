@@ -638,7 +638,15 @@ class Mapping2D:
                 # Balances noise reduction (past data) with new information
                 alpha = 0.15  # Fusion weight (0.1-0.3 range, 0.15 = ~6-7 frames effective)
                 old_intensities = map_flat[linear_indices]
-                new_intensities = alpha * intensities_valid + (1.0 - alpha) * old_intensities
+
+                # First observation: use new value directly (avoid dark initialization)
+                # Subsequent observations: blend with EMA
+                first_observation_mask = (old_intensities == 0)
+                new_intensities = np.where(
+                    first_observation_mask,
+                    intensities_valid,  # First time: use new value as-is
+                    alpha * intensities_valid + (1.0 - alpha) * old_intensities  # EMA fusion
+                )
 
                 map_flat[linear_indices] = new_intensities
                 np.add.at(count_flat, linear_indices, 1)  # Track observation count
