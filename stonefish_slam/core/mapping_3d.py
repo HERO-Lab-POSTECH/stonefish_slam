@@ -117,8 +117,8 @@ class HierarchicalOctree:
             size = (2 ** max_depth) * resolution
 
         if center is None:
-            # Default center at positive octant origin
-            center = [size/2, size/2, size/2]
+            # Default center at world origin to cover negative coordinates
+            center = [0.0, 0.0, 0.0]
 
         self.root = OctNode(center, size)
 
