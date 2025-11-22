@@ -691,10 +691,11 @@ class SLAMNode(SLAM, Node):
                     # Use keyframe.pose directly (more reliable than delayed tf2 lookup)
                     # tf2 lookup often fails due to async mapping delay exceeding buffer cache
                     self.mapper.update_global_map_from_slam(
-                        keyframes_snapshot,
+                        keyframes_snapshot,  # New keyframes to process
                         tf2_buffer=None,  # Disabled: use keyframe.pose
                         target_frame='world_ned',
-                        source_frame=source_frame
+                        source_frame=source_frame,
+                        all_slam_keyframes=self.keyframes  # Complete list for bounds calculation
                     )
 
                     # Get and publish map image

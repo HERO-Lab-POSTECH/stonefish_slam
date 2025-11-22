@@ -128,6 +128,10 @@ class Mapping2D:
         # Keyframe storage: List of {'key': int, 'pose': gtsam.Pose2, 'image': np.ndarray}
         self.keyframes: List[Dict] = []
 
+        # SLAM keyframe reference (for SLAM integration mode)
+        # Stores reference to all SLAM keyframes for bounds calculation
+        self.all_slam_keyframes: List[KeyframeType] = []
+
         # Global map buffers (initialized when first keyframe is added)
         self.global_map_accum: Optional[np.ndarray] = None  # Latest-write-wins overlay map
         self.global_map_count: Optional[np.ndarray] = None  # Observation count (for debugging)
@@ -351,8 +355,14 @@ class Mapping2D:
         if not keyframes:
             return
 
-        # 1. Calculate required bounds from all keyframes (dynamic expansion)
-        current_bounds = self.get_map_bounds(keyframes, buffer_m)
+        # 1. Calculate required bounds from ALL keyframes (not just new ones)
+        # Use all_slam_keyframes if available (SLAM mode), otherwise use self.keyframes
+        # This ensures map bounds are stable and based on entire trajectory
+        all_keyframes_for_bounds = self.all_slam_keyframes if self.all_slam_keyframes else self.keyframes
+        if not all_keyframes_for_bounds:
+            all_keyframes_for_bounds = keyframes  # Fallback to new keyframes
+
+        current_bounds = self.get_map_bounds(all_keyframes_for_bounds, buffer_m)
         min_x_req, max_x_req, min_y_req, max_y_req = current_bounds
 
         # 2. Initialize or expand bounds
@@ -650,7 +660,8 @@ class Mapping2D:
         buffer_m: float = 30.0,
         tf2_buffer=None,
         target_frame: str = 'world_ned',
-        source_frame: str = 'base_link'
+        source_frame: str = 'base_link',
+        all_slam_keyframes: Optional[List[KeyframeType]] = None
     ) -> None:
         """Update global map directly from SLAM keyframes (SLAM integration mode).
 
@@ -658,22 +669,35 @@ class Mapping2D:
         The SLAM manages keyframe lifecycle, and this mapper only references them.
 
         Args:
-            slam_keyframes: List of SLAM Keyframe objects
+            slam_keyframes: List of new SLAM Keyframe objects to process
                            Each must have .pose (gtsam.Pose2) and .image (np.ndarray)
             buffer_m: Buffer margin around trajectory in meters (default: 30.0)
             tf2_buffer: tf2_ros.Buffer for timestamp-based pose lookup (optional)
             target_frame: Target frame for tf2 lookup (default: 'world_ned')
             source_frame: Source frame for tf2 lookup (default: 'base_link')
+            all_slam_keyframes: Complete list of all SLAM keyframes (for bounds calculation)
+                               If None, uses slam_keyframes (default: None)
 
         Example:
             >>> from stonefish_slam.core.slam import SLAM
             >>> slam = SLAM(...)
             >>> mapper = Mapping2D(...)
             >>> # After SLAM processes data
-            >>> mapper.update_global_map_from_slam(slam.keyframes, tf2_buffer=tf_buffer)
+            >>> mapper.update_global_map_from_slam(
+            >>>     new_keyframes,
+            >>>     all_slam_keyframes=slam.keyframes,
+            >>>     tf2_buffer=tf_buffer
+            >>> )
             >>> map_img = mapper.get_map_image()
         """
-        # Filter keyframes with valid images
+        # Update all keyframes reference (for bounds calculation)
+        if all_slam_keyframes is not None:
+            self.all_slam_keyframes = all_slam_keyframes
+        else:
+            # Backward compatibility: use slam_keyframes if all not provided
+            self.all_slam_keyframes = slam_keyframes
+
+        # Filter new keyframes with valid images (for processing)
         valid_keyframes = [
             kf for kf in slam_keyframes
             if hasattr(kf, 'image') and kf.image is not None
