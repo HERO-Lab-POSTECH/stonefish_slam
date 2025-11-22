@@ -439,8 +439,8 @@ class SonarMapping3D:
             self.image_width
         )
 
-        # Range resolution
-        self.range_resolution = self.max_range / self.image_height
+        # Range resolution (bin size in meters)
+        self.range_resolution = (self.max_range - self.min_range) / self.image_height
 
         # Get adaptive update settings from config
         self.adaptive_update = default_config.get('adaptive_update', True)
@@ -589,9 +589,12 @@ class SonarMapping3D:
         # Update free space before first hit (with sparse sampling)
         free_sampling_step = 2  # Reduced from 10 to 2 for better coverage (0.12m intervals)
         for r_idx in range(0, first_hit_idx, free_sampling_step):
-            range_m = r_idx * self.range_resolution
-            if range_m < self.min_range:
-                continue
+            # Calculate actual range (add min_range offset)
+            range_m = self.min_range + r_idx * self.range_resolution
+
+            # Debug: Verify range for first frame
+            if self.frame_count == 0 and r_idx < 3:
+                print(f"  Free space: r_idx={r_idx}, range_m={range_m:.3f}m")
 
             # Calculate vertical spread at this range
             vertical_spread = range_m * np.tan(half_aperture)
@@ -626,8 +629,11 @@ class SonarMapping3D:
         # Update occupied regions ONLY
         # Process only the high intensity (occupied) regions we found
         for r_idx in high_intensity_indices:
-            range_m = r_idx * self.range_resolution
-            if range_m < self.min_range or range_m > self.max_range:
+            # Calculate actual range (add min_range offset)
+            range_m = self.min_range + r_idx * self.range_resolution
+
+            # Skip out-of-range (should not happen with correct calculation)
+            if range_m > self.max_range:
                 continue
 
             # Calculate vertical spread at this range
@@ -693,7 +699,7 @@ class SonarMapping3D:
 
         if range_bins != self.image_height:
             # Update range resolution if needed
-            self.range_resolution = self.max_range / range_bins
+            self.range_resolution = (self.max_range - self.min_range) / range_bins
 
         # Get robot transform
         T_base_to_world = self.pose_msg_to_transform(robot_pose)
