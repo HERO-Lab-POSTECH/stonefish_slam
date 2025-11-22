@@ -52,8 +52,8 @@ slam_node:
 
     # 3D Mapping parameters
     enable_3d_mapping: true
-    voxel_resolution: 0.05  # meters (3cm-10cm recommended, 5cm balanced)
-    min_probability: 0.6  # minimum probability to consider voxel as occupied (0.0-1.0)
+    voxel_resolution: 0.1  # meters (increased from 0.05 to reduce point count)
+    min_probability: 0.8  # minimum probability to consider voxel as occupied (increased from 0.6)
     vertical_aperture: 20.0  # degrees (sonar vertical beam aperture)
     # Log-odds Bayesian update parameters
     log_odds_occupied: 1.5  # increment for occupied voxels

@@ -458,7 +458,7 @@ class SonarMapping3D:
             # Calculate vertical spread at this range
             vertical_spread = range_m * np.tan(half_aperture)
             # Sparse vertical sampling for free space
-            free_vertical_factor = 4.0  # Could be made configurable
+            free_vertical_factor = 8.0  # Increased from 4.0 to reduce point count
             num_vertical_steps = max(1, int(vertical_spread / (self.voxel_resolution * free_vertical_factor)))
 
             for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
@@ -495,7 +495,7 @@ class SonarMapping3D:
             # Calculate vertical spread at this range
             vertical_spread = range_m * np.tan(half_aperture)
             # Denser vertical sampling for occupied space
-            occupied_vertical_factor = 1.5  # Could be made configurable
+            occupied_vertical_factor = 3.0  # Increased from 1.5 to reduce point count
             num_vertical_steps = max(2, int(vertical_spread / (self.voxel_resolution * occupied_vertical_factor)))
 
             # This is a high intensity region: mark as occupied
@@ -566,7 +566,7 @@ class SonarMapping3D:
         voxel_updates = {}  # Will store accumulated updates per voxel
 
         # Process subset of bearings for efficiency
-        bearing_divisor = 256  # Could be made configurable
+        bearing_divisor = 128  # Reduced from 256 to decrease point count
         bearing_step = max(1, bearing_bins // bearing_divisor)
 
         # Debug: Check if we have any data to process
