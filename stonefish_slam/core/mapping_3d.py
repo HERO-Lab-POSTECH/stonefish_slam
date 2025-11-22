@@ -623,17 +623,22 @@ class SonarMapping3D:
             all_slam_keyframes: Complete list of keyframes (for bounds - not used in 3D)
         """
         for kf in new_keyframes:
-            polar_img = kf.polar_image
+            # Keyframe.image contains the polar sonar image
+            polar_img = kf.image
+
+            # Skip if no image available
+            if polar_img is None:
+                continue
 
             # Convert gtsam.Pose2 to simple pose dict for processing
             # (we'll use x, y, yaw from Pose2, assume z=0, roll=0, pitch=0)
             pose_dict = {
-                'position': {'x': kf.corrected_pose.x(),
-                            'y': kf.corrected_pose.y(),
+                'position': {'x': kf.pose.x(),
+                            'y': kf.pose.y(),
                             'z': 0.0},  # Assume planar motion
                 'orientation': {'x': 0.0, 'y': 0.0,
-                               'z': np.sin(kf.corrected_pose.theta()/2),
-                               'w': np.cos(kf.corrected_pose.theta()/2)}
+                               'z': np.sin(kf.pose.theta()/2),
+                               'w': np.cos(kf.pose.theta()/2)}
             }
 
             self.process_sonar_image(polar_img, pose_dict)
