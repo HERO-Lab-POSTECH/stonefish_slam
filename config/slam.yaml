@@ -49,3 +49,18 @@ slam_node:
     sonar_fov: 130.0  # degrees
     map_update_interval: 1  # update map every N keyframes (1=every keyframe for real-time visualization)
     intensity_threshold: 50  # minimum intensity (0-255) for pixels to affect map (filters noise)
+
+    # 3D Mapping parameters
+    enable_3d_mapping: true
+    voxel_resolution: 0.05  # meters (3cm-10cm recommended, 5cm balanced)
+    min_probability: 0.6  # minimum probability to consider voxel as occupied (0.0-1.0)
+    vertical_aperture: 20.0  # degrees (sonar vertical beam aperture)
+    # Log-odds Bayesian update parameters
+    log_odds_occupied: 1.5  # increment for occupied voxels
+    log_odds_free: -2.0  # decrement for free space (stronger negative for clearing)
+    log_odds_min: -10.0  # minimum log-odds (clamping lower bound)
+    log_odds_max: 10.0  # maximum log-odds (clamping upper bound)
+    # Adaptive update (protects free space from noise)
+    adaptive_update: true  # enable adaptive update for occupied signals
+    adaptive_threshold: 0.5  # probability threshold for protection (voxels <= 0.5 protected)
+    adaptive_max_ratio: 0.5  # maximum update ratio for protected voxels (50% max)

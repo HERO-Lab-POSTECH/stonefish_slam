@@ -19,6 +19,7 @@ from stonefish_slam.utils.conversions import *
 from stonefish_slam.utils.visualization import *
 from stonefish_slam.core.slam import SLAM, Keyframe
 from stonefish_slam.core.mapping_2d import Mapping2D
+from stonefish_slam.core.mapping_3d import SonarMapping3D
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import *
 
@@ -195,6 +196,19 @@ class SLAMNode(SLAM, Node):
         self.declare_parameter('map_update_interval', 1)  # 매 키프레임마다 업데이트
         self.declare_parameter('intensity_threshold', 50)  # Minimum intensity for mapping (0-255)
 
+        # 3D Mapping parameters
+        self.declare_parameter('enable_3d_mapping', True)
+        self.declare_parameter('voxel_resolution', 0.05)
+        self.declare_parameter('min_probability', 0.6)
+        self.declare_parameter('vertical_aperture', 20.0)
+        self.declare_parameter('log_odds_occupied', 1.5)
+        self.declare_parameter('log_odds_free', -2.0)
+        self.declare_parameter('log_odds_min', -10.0)
+        self.declare_parameter('log_odds_max', 10.0)
+        self.declare_parameter('adaptive_update', True)
+        self.declare_parameter('adaptive_threshold', 0.5)
+        self.declare_parameter('adaptive_max_ratio', 0.5)
+
         self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
         self.map_update_interval = self.get_parameter('map_update_interval').value
 
@@ -224,6 +238,45 @@ class SLAMNode(SLAM, Node):
                 f"2D Mapping enabled: resolution={map_resolution}m/px, "
                 f"tilt={sonar_tilt_deg}°, intensity_threshold={intensity_threshold}"
             )
+
+        # Store sonar parameters for 3D mapping
+        self.sonar_fov = self.get_parameter('sonar_fov').value
+        self.sonar_range = sonar_range
+        self.intensity_threshold = self.get_parameter('intensity_threshold').value
+
+        # Initialize 3D mapper
+        self.enable_3d_mapping = self.get_parameter('enable_3d_mapping').value
+        self.mapper_3d = None
+        self.map_3d_pub = None
+
+        if self.enable_3d_mapping:
+            self.get_logger().info("Initializing 3D mapping...")
+
+            # Build config dict
+            config_3d = {
+                'horizontal_fov': self.sonar_fov,
+                'vertical_aperture': self.get_parameter('vertical_aperture').value,
+                'max_range': self.sonar_range,
+                'min_range': 0.5,
+                'intensity_threshold': self.intensity_threshold,
+                'image_width': 512,
+                'image_height': 500,
+                'voxel_resolution': self.get_parameter('voxel_resolution').value,
+                'min_probability': self.get_parameter('min_probability').value,
+                'max_frames': 0,
+                'dynamic_expansion': True,
+                'adaptive_update': self.get_parameter('adaptive_update').value,
+                'adaptive_threshold': self.get_parameter('adaptive_threshold').value,
+                'adaptive_max_ratio': self.get_parameter('adaptive_max_ratio').value,
+                'log_odds_occupied': self.get_parameter('log_odds_occupied').value,
+                'log_odds_free': self.get_parameter('log_odds_free').value,
+                'log_odds_min': self.get_parameter('log_odds_min').value,
+                'log_odds_max': self.get_parameter('log_odds_max').value,
+            }
+
+            # Create mapper
+            self.mapper_3d = SonarMapping3D(config=config_3d)
+            self.get_logger().info("3D mapping initialized")
 
         # max delay between an incoming point cloud and dead reckoning
         self.feature_odom_sync_max_delay = 0.5
@@ -309,6 +362,15 @@ class SLAMNode(SLAM, Node):
                 qos_profile=qos_image_pub_profile
             )
             self.get_logger().info(f"Publishing 2D map to: {SLAM_NS}mapping/map_2d_image (QoS: BEST_EFFORT)")
+
+        # 3D map publisher
+        if self.enable_3d_mapping:
+            self.map_3d_pub = self.create_publisher(
+                PointCloud2,
+                SLAM_NS + 'mapping/map_3d_pointcloud',
+                qos_profile=qos_image_pub_profile
+            )
+            self.get_logger().info(f"Publishing 3D map to: {SLAM_NS}mapping/map_3d_pointcloud (QoS: BEST_EFFORT)")
 
         # tf broadcaster to show pose
         self.tf = TransformBroadcaster(self)
@@ -527,6 +589,33 @@ class SLAMNode(SLAM, Node):
                     except Exception as e:
                         import traceback
                         self.get_logger().error(f"Synchronous mapping failed: {e}\n{traceback.format_exc()}")
+
+            # 5. Update 3D map (if enabled, shares map_update_interval with 2D)
+            if self.enable_3d_mapping and self.mapper_3d and (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
+                try:
+                    # Get new keyframes for incremental update
+                    new_keyframes = list(self.keyframes[self.last_map_update_kf:])
+
+                    # Update 3D map from new keyframes
+                    self.mapper_3d.update_map_from_slam(
+                        new_keyframes,
+                        all_slam_keyframes=self.keyframes
+                    )
+
+                    # Get and publish PointCloud2
+                    pc_msg = self.mapper_3d.get_pointcloud2_msg(
+                        frame_id='world_ned',
+                        stamp=self.get_clock().now().to_msg()
+                    )
+
+                    if pc_msg.width > 0:  # Only publish if not empty
+                        self.map_3d_pub.publish(pc_msg)
+                        self.get_logger().info(
+                            f"Published 3D point cloud: {pc_msg.width} points, "
+                            f"frame {self.mapper_3d.frame_count}"
+                        )
+                except Exception as e:
+                    self.get_logger().error(f"3D mapping update failed: {e}")
 
             # Track keyframe count
             self.mapping_stats['keyframes_total'] = len(self.keyframes)
