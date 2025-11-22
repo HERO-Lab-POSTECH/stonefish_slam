@@ -592,9 +592,9 @@ class SonarMapping3D:
             else:  # free
                 self.octree.update_voxel(update_info['point'], avg_update, adaptive=False)
 
-            # Debug: Log some statistics
-            if np.random.random() < 0.001:  # Sample 0.1% for better debugging
-                print(f"Voxel {voxel_key}: {update_info['count']} rays, avg_update={avg_update:.4f}, type={update_info['type']}, log_odds_occupied={self.octree.log_odds_occupied}")
+            # Debug: Log some statistics (commented out - too verbose)
+            # if np.random.random() < 0.001:  # Sample 0.1% for better debugging
+            #     print(f"Voxel {voxel_key}: {update_info['count']} rays, avg_update={avg_update:.4f}, type={update_info['type']}, log_odds_occupied={self.octree.log_odds_occupied}")
 
         # Debug: Print summary statistics
         if self.frame_count % 100 == 0:

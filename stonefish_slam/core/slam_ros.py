@@ -605,6 +605,12 @@ class SLAMNode(SLAM, Node):
                                         f"Published 3D point cloud: {pc_msg.width} points, "
                                         f"frame {self.mapper_3d.frame_count}"
                                     )
+                                else:
+                                    # Debug: Why is point cloud empty?
+                                    self.get_logger().warn(
+                                        f"3D point cloud is empty after {self.mapper_3d.frame_count} frames, "
+                                        f"{len(self.mapper_3d.octree.voxels)} total voxels"
+                                    )
                             except Exception as e:
                                 import traceback
                                 self.get_logger().error(f"3D mapping update failed: {e}\n{traceback.format_exc()}")
