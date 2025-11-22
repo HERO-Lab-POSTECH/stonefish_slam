@@ -621,7 +621,14 @@ class SonarMapping3D:
                 # CRITICAL: Check actual range after transform
                 sonar_origin_world = T_sonar_to_world[:3, 3]
                 actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
+
+                # Debug: Print range check for first frame
+                if self.frame_count == 0 and r_idx == 0 and v_step == 0:
+                    print(f"    FREE: sonar_origin={sonar_origin_world}, pt_world={pt_world[:3]}, actual_range={actual_range:.3f}m, min_range={self.min_range}m")
+
                 if actual_range < self.min_range:
+                    if self.frame_count == 0 and r_idx < 5:
+                        print(f"    SKIPPED FREE: actual_range={actual_range:.3f}m < min_range={self.min_range}m")
                     continue  # Skip points too close to sonar
 
                 # Get voxel key and accumulate update
@@ -672,7 +679,14 @@ class SonarMapping3D:
                 # CRITICAL: Check actual range after transform
                 sonar_origin_world = T_sonar_to_world[:3, 3]
                 actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
+
+                # Debug: Print range check for first occupied point
+                if self.frame_count == 0 and len(high_intensity_indices) <= 3 and v_step == 0:
+                    print(f"    OCCUPIED: r_idx={r_idx}, range_m={range_m:.3f}m, actual_range={actual_range:.3f}m, min_range={self.min_range}m")
+
                 if actual_range < self.min_range:
+                    if self.frame_count == 0:
+                        print(f"    SKIPPED OCCUPIED: actual_range={actual_range:.3f}m < min_range={self.min_range}m")
                     continue  # Skip points too close to sonar
 
                 # Get voxel key and accumulate update
