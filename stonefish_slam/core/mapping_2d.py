@@ -601,7 +601,12 @@ class Mapping2D:
             # Extract valid points
             map_row_valid = map_row[valid_idx]
             map_col_valid = map_col[valid_idx]
-            intensities_valid = intensities[valid_idx].astype(np.float32)
+            intensities_raw = intensities[valid_idx].astype(np.float32)
+
+            # Normalize intensity from [threshold, 255] to [0, 255] for better contrast
+            # This makes the difference between weak and strong signals more visible
+            intensities_normalized = (intensities_raw - self.intensity_threshold) / (255.0 - self.intensity_threshold) * 255.0
+            intensities_valid = np.clip(intensities_normalized, 0, 255).astype(np.float32)
 
             # Debug: log mapping statistics
             total_sampled_pixels = sampled_h * sampled_w
