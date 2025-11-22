@@ -556,16 +556,31 @@ class SonarMapping3D:
                 last_hit_idx = r_idx
                 high_intensity_indices.append(r_idx)
 
+        # DEBUG: Print ray processing info for first frame, first few bearings
+        if self.frame_count == 0 and abs(bearing_angle) < 0.5:  # Central bearings only
+            max_intensity = np.max(intensity_profile)
+            print(f"\n=== Ray bearing={np.degrees(bearing_angle):.1f}°, max_intensity={max_intensity} ===")
+            print(f"  Threshold: {self.intensity_threshold}")
+            print(f"  First hit index: {first_hit_idx}")
+            print(f"  High intensity indices: {high_intensity_indices[:5] if len(high_intensity_indices) > 0 else 'None'}")
+
         # If no hit found, skip this ray entirely (no information)
         if first_hit_idx == -1:
             # No reflection: don't update as free space (we don't know if it's free or just out of range)
+            if self.frame_count == 0 and abs(bearing_angle) < 0.5:
+                print(f"  → SKIPPED: No reflection detected (no map update)")
             return
 
         # Calculate vertical aperture parameters
         half_aperture = self.vertical_aperture / 2
 
+        # DEBUG: Print free space processing
+        if self.frame_count == 0 and abs(bearing_angle) < 0.5:
+            print(f"  Free space: Processing r_idx 0 to {first_hit_idx} (before first hit)")
+
         # Update free space before first hit (with sparse sampling)
         free_sampling_step = 2  # Reduced from 10 to 2 for better coverage (0.12m intervals)
+        free_voxel_count = 0
         for r_idx in range(0, first_hit_idx, free_sampling_step):
             # Calculate actual range (add min_range offset)
             range_m = self.min_range + r_idx * self.range_resolution
@@ -605,9 +620,15 @@ class SonarMapping3D:
                     voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0, 'type': 'free'}
                 voxel_updates[voxel_key]['sum'] += self.octree.log_odds_free
                 voxel_updates[voxel_key]['count'] += 1
+                free_voxel_count += 1
+
+        # DEBUG: Print free space summary
+        if self.frame_count == 0 and abs(bearing_angle) < 0.5:
+            print(f"  Free space voxels created: {free_voxel_count}")
 
         # Update occupied regions ONLY
         # Process only the high intensity (occupied) regions we found
+        occupied_voxel_count = 0
         for r_idx in high_intensity_indices:
             # Calculate actual range (add min_range offset)
             range_m = self.min_range + r_idx * self.range_resolution
@@ -658,6 +679,12 @@ class SonarMapping3D:
 
                 voxel_updates[voxel_key]['sum'] += log_odds_update
                 voxel_updates[voxel_key]['count'] += 1
+                occupied_voxel_count += 1
+
+        # DEBUG: Print occupied summary
+        if self.frame_count == 0 and abs(bearing_angle) < 0.5:
+            print(f"  Occupied voxels created: {occupied_voxel_count}")
+            print(f"  Total voxels in this ray: {free_voxel_count + occupied_voxel_count}")
 
     def process_sonar_image(self, polar_image, robot_pose):
         """
