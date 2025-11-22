@@ -257,7 +257,7 @@ class SLAMNode(SLAM, Node):
                 'horizontal_fov': self.sonar_fov,
                 'vertical_aperture': self.get_parameter('vertical_aperture').value,
                 'max_range': self.sonar_range,
-                'min_range': 10.0,  # TEST: Verify min_range filter works
+                'min_range': 0.5,
                 'intensity_threshold': self.intensity_threshold,
                 'image_width': 512,
                 'image_height': 500,

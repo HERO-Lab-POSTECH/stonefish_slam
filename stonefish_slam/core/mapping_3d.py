@@ -390,7 +390,7 @@ class SonarMapping3D:
             'horizontal_fov': 130.0,      # degrees (-65 to +65)
             'vertical_aperture': 20.0,     # degrees (vertical aperture)
             'max_range': 30.0,             # meters (updated from 20.0)
-            'min_range': 0.5,              # meters (updated from 0.2)
+            'min_range': 0.5,              # meters
             'intensity_threshold': 50,     # 0-255 scale (match 2D mapping)
             'image_width': 512,            # Sonar image width (bearings)
             'image_height': 500,          # Sonar image height (ranges)
@@ -470,31 +470,8 @@ class SonarMapping3D:
         self.octree.log_odds_min = self.log_odds_min
         self.octree.log_odds_max = self.log_odds_max
 
-        # Debug: Print actual values being used
-        print(f"  Octree log_odds_occupied: {self.octree.log_odds_occupied}")
-        print(f"  Octree log_odds_free: {self.octree.log_odds_free}")
-        print(f"  Octree adaptive_threshold: {self.octree.adaptive_threshold}")
-        print(f"  Octree adaptive_max_ratio: {self.octree.adaptive_max_ratio}")
-
         # Frame counter
         self.frame_count = 0
-
-        print(f"SonarMapping3D initialized:")
-        print(f"  Horizontal FOV: {default_config['horizontal_fov']}°")
-        print(f"  Vertical aperture: {default_config['vertical_aperture']}°")
-        print(f"  Range: {self.min_range}-{self.max_range}m")
-        print(f"  Intensity threshold: {self.intensity_threshold}")
-        print(f"  Voxel resolution: {self.voxel_resolution}m")
-        print(f"  Min probability: {self.min_probability}")
-        # Debug: Show what log-odds threshold this corresponds to
-        if self.min_probability >= 1.0:
-            print(f"    -> Using max log-odds threshold: {self.log_odds_max - 0.01:.2f}")
-        elif self.min_probability > 0 and self.min_probability < 1.0:
-            min_log_odds = np.log(self.min_probability / (1.0 - self.min_probability))
-            print(f"    -> Log-odds threshold: {min_log_odds:.2f}")
-        print(f"  Dynamic expansion: {self.dynamic_expansion}")
-        if hasattr(self, 'adaptive_update'):
-            print(f"  Adaptive update: {self.adaptive_update} (linear protection up to prob={self.adaptive_threshold}, max_ratio={self.adaptive_max_ratio})")
 
     def create_transform_matrix(self, position, tilt_rad):
         """
@@ -593,10 +570,6 @@ class SonarMapping3D:
             # Calculate actual range (add min_range offset)
             range_m = self.min_range + r_idx * self.range_resolution
 
-            # Debug: Verify range for first frame
-            if self.frame_count == 0 and r_idx < 3:
-                print(f"  Free space: r_idx={r_idx}, range_m={range_m:.3f}m")
-
             # Calculate vertical spread at this range
             vertical_spread = range_m * np.tan(half_aperture)
             # Sparse vertical sampling for free space
@@ -621,14 +594,7 @@ class SonarMapping3D:
                 # CRITICAL: Check actual range after transform
                 sonar_origin_world = T_sonar_to_world[:3, 3]
                 actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
-
-                # Debug: Print range check for first frame
-                if self.frame_count == 0 and r_idx == 0 and v_step == 0:
-                    print(f"    FREE: sonar_origin={sonar_origin_world}, pt_world={pt_world[:3]}, actual_range={actual_range:.3f}m, min_range={self.min_range}m")
-
                 if actual_range <= self.min_range:
-                    if self.frame_count == 0 and r_idx < 5:
-                        print(f"    SKIPPED FREE: actual_range={actual_range:.3f}m <= min_range={self.min_range}m")
                     continue  # Skip points at or below min_range
 
                 # Get voxel key and accumulate update
@@ -645,10 +611,6 @@ class SonarMapping3D:
         for r_idx in high_intensity_indices:
             # Calculate actual range (add min_range offset)
             range_m = self.min_range + r_idx * self.range_resolution
-
-            # Debug: Print first few occupied ranges
-            if self.frame_count == 0 and len(high_intensity_indices) <= 10:
-                print(f"  Occupied: r_idx={r_idx}, range_m={range_m:.3f}m")
 
             # Skip out-of-range (should not happen with correct calculation)
             if range_m > self.max_range:
@@ -679,14 +641,7 @@ class SonarMapping3D:
                 # CRITICAL: Check actual range after transform
                 sonar_origin_world = T_sonar_to_world[:3, 3]
                 actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
-
-                # Debug: Print range check for first occupied point
-                if self.frame_count == 0 and len(high_intensity_indices) <= 3 and v_step == 0:
-                    print(f"    OCCUPIED: r_idx={r_idx}, range_m={range_m:.3f}m, actual_range={actual_range:.3f}m, min_range={self.min_range}m")
-
                 if actual_range <= self.min_range:
-                    if self.frame_count == 0:
-                        print(f"    SKIPPED OCCUPIED: actual_range={actual_range:.3f}m <= min_range={self.min_range}m")
                     continue  # Skip points at or below min_range
 
                 # Get voxel key and accumulate update
@@ -736,13 +691,6 @@ class SonarMapping3D:
         T_base_to_world = self.pose_msg_to_transform(robot_pose)
         T_sonar_to_world = T_base_to_world @ self.T_sonar_to_base
 
-        # Debug: Print transforms
-        if self.frame_count < 3:
-            print(f"Frame {self.frame_count}:")
-            print(f"  Robot pose: x={robot_pose['position']['x']:.2f}, y={robot_pose['position']['y']:.2f}, z={robot_pose['position']['z']:.2f}")
-            print(f"  T_base_to_world translation: {T_base_to_world[:3, 3]}")
-            print(f"  T_sonar_to_world translation: {T_sonar_to_world[:3, 3]}")
-
         # Initialize voxel update accumulator for this frame
         # Dictionary to accumulate updates: key -> (sum_updates, count)
         voxel_updates = {}  # Will store accumulated updates per voxel
@@ -751,10 +699,6 @@ class SonarMapping3D:
         bearing_divisor = 128  # Reduced from 256 to decrease point count
         bearing_step = max(1, bearing_bins // bearing_divisor)
 
-        # Debug: Check if we have any data to process
-        max_intensity = np.max(polar_image)
-        if max_intensity > 0:
-            print(f"Processing image with max intensity: {max_intensity}, threshold: {self.intensity_threshold}")
 
         for b_idx in range(0, bearing_bins, bearing_step):
             bearing_angle = self.bearing_angles[b_idx]
@@ -764,7 +708,6 @@ class SonarMapping3D:
             self.process_sonar_ray(bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates)
 
         # Apply averaged updates to all voxels
-        debug_sample_count = 0
         for voxel_key, update_info in voxel_updates.items():
             # Calculate average update
             avg_update = update_info['sum'] / update_info['count']
@@ -775,21 +718,10 @@ class SonarMapping3D:
             else:  # free
                 self.octree.update_voxel(update_info['point'], avg_update, adaptive=False)
 
-            # Debug: Print first few voxel positions
-            if self.frame_count < 2 and debug_sample_count < 5:
-                print(f"  Voxel update: point={update_info['point']}, type={update_info['type']}, avg_update={avg_update:.2f}")
-                debug_sample_count += 1
-
             # Debug: Log some statistics (commented out - too verbose)
             # if np.random.random() < 0.001:  # Sample 0.1% for better debugging
             #     print(f"Voxel {voxel_key}: {update_info['count']} rays, avg_update={avg_update:.4f}, type={update_info['type']}, log_odds_occupied={self.octree.log_odds_occupied}")
 
-        # Debug: Print summary statistics
-        if self.frame_count % 100 == 0:
-            occupied_voxels = sum(1 for v in voxel_updates.values() if v['type'] == 'occupied')
-            free_voxels = sum(1 for v in voxel_updates.values() if v['type'] == 'free')
-            multi_ray_voxels = sum(1 for v in voxel_updates.values() if v['count'] > 1)
-            print(f"Frame {self.frame_count}: {occupied_voxels} occupied, {free_voxels} free, {multi_ray_voxels} multi-ray voxels")
 
         # Increment frame counter
         self.frame_count += 1
@@ -800,7 +732,6 @@ class SonarMapping3D:
             # More sophisticated: implement sliding window or decay
             self.octree.clear()
             self.frame_count = 0
-            print(f"Reached max frames ({self.max_frames}), clearing map")
 
     def update_map_from_slam(self, new_keyframes, all_slam_keyframes=None):
         """
@@ -828,9 +759,6 @@ class SonarMapping3D:
                                'z': np.sin(kf.pose.theta()/2),
                                'w': np.cos(kf.pose.theta()/2)}
             }
-
-            # Debug: Print robot pose
-            print(f"Processing keyframe at pose: x={kf.pose.x():.2f}, y={kf.pose.y():.2f}, z={kf.pose3.z():.2f}, yaw={kf.pose.theta():.2f}")
 
             self.process_sonar_image(polar_img, pose_dict)
 
@@ -951,4 +879,3 @@ class SonarMapping3D:
         """Reset the probabilistic map"""
         self.octree.clear()
         self.frame_count = 0
-        print("Map reset")
