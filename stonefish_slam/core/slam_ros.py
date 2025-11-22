@@ -584,38 +584,37 @@ class SLAMNode(SLAM, Node):
                         else:
                             self.get_logger().error(f"Map image is None or empty! Cannot publish.")
 
+                        # 5. Update 3D map (in same keyframe update block)
+                        if self.enable_3d_mapping and self.mapper_3d:
+                            try:
+                                # Update 3D map from same new keyframes
+                                self.mapper_3d.update_map_from_slam(
+                                    new_keyframes,
+                                    all_slam_keyframes=self.keyframes
+                                )
+
+                                # Get and publish PointCloud2
+                                pc_msg = self.mapper_3d.get_pointcloud2_msg(
+                                    frame_id='world_ned',
+                                    stamp=self.get_clock().now().to_msg()
+                                )
+
+                                if pc_msg.width > 0:  # Only publish if not empty
+                                    self.map_3d_pub.publish(pc_msg)
+                                    self.get_logger().info(
+                                        f"Published 3D point cloud: {pc_msg.width} points, "
+                                        f"frame {self.mapper_3d.frame_count}"
+                                    )
+                            except Exception as e:
+                                import traceback
+                                self.get_logger().error(f"3D mapping update failed: {e}\n{traceback.format_exc()}")
+
+                        # Update counter AFTER both 2D and 3D mapping
                         self.last_map_update_kf = len(self.keyframes)
 
                     except Exception as e:
                         import traceback
                         self.get_logger().error(f"Synchronous mapping failed: {e}\n{traceback.format_exc()}")
-
-            # 5. Update 3D map (if enabled, shares map_update_interval with 2D)
-            if self.enable_3d_mapping and self.mapper_3d and (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
-                try:
-                    # Get new keyframes for incremental update
-                    new_keyframes = list(self.keyframes[self.last_map_update_kf:])
-
-                    # Update 3D map from new keyframes
-                    self.mapper_3d.update_map_from_slam(
-                        new_keyframes,
-                        all_slam_keyframes=self.keyframes
-                    )
-
-                    # Get and publish PointCloud2
-                    pc_msg = self.mapper_3d.get_pointcloud2_msg(
-                        frame_id='world_ned',
-                        stamp=self.get_clock().now().to_msg()
-                    )
-
-                    if pc_msg.width > 0:  # Only publish if not empty
-                        self.map_3d_pub.publish(pc_msg)
-                        self.get_logger().info(
-                            f"Published 3D point cloud: {pc_msg.width} points, "
-                            f"frame {self.mapper_3d.frame_count}"
-                        )
-                except Exception as e:
-                    self.get_logger().error(f"3D mapping update failed: {e}")
 
             # Track keyframe count
             self.mapping_stats['keyframes_total'] = len(self.keyframes)
