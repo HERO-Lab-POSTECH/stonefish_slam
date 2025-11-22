@@ -643,6 +643,10 @@ class SonarMapping3D:
             occupied_vertical_factor = 3.0  # Increased from 1.5 to reduce point count
             num_vertical_steps = max(2, int(vertical_spread / (self.voxel_resolution * occupied_vertical_factor)))
 
+            # DEBUG: Print vertical sampling for first ray
+            if self.frame_count == 0 and abs(bearing_angle) < 0.5 and r_idx == high_intensity_indices[0]:
+                print(f"    r_idx={r_idx}, range_m={range_m:.2f}m, vertical_spread={vertical_spread:.3f}m, num_vertical_steps={num_vertical_steps}")
+
             # This is a high intensity region: mark as occupied
             log_odds_update = self.octree.log_odds_occupied
 
