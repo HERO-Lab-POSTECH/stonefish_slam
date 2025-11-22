@@ -699,6 +699,13 @@ class SonarMapping3D:
         T_base_to_world = self.pose_msg_to_transform(robot_pose)
         T_sonar_to_world = T_base_to_world @ self.T_sonar_to_base
 
+        # Debug: Print transforms
+        if self.frame_count < 3:
+            print(f"Frame {self.frame_count}:")
+            print(f"  Robot pose: x={robot_pose['position']['x']:.2f}, y={robot_pose['position']['y']:.2f}, z={robot_pose['position']['z']:.2f}")
+            print(f"  T_base_to_world translation: {T_base_to_world[:3, 3]}")
+            print(f"  T_sonar_to_world translation: {T_sonar_to_world[:3, 3]}")
+
         # Initialize voxel update accumulator for this frame
         # Dictionary to accumulate updates: key -> (sum_updates, count)
         voxel_updates = {}  # Will store accumulated updates per voxel
@@ -720,6 +727,7 @@ class SonarMapping3D:
             self.process_sonar_ray(bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates)
 
         # Apply averaged updates to all voxels
+        debug_sample_count = 0
         for voxel_key, update_info in voxel_updates.items():
             # Calculate average update
             avg_update = update_info['sum'] / update_info['count']
@@ -729,6 +737,11 @@ class SonarMapping3D:
                 self.octree.update_voxel(update_info['point'], avg_update, adaptive=self.octree.adaptive_update)
             else:  # free
                 self.octree.update_voxel(update_info['point'], avg_update, adaptive=False)
+
+            # Debug: Print first few voxel positions
+            if self.frame_count < 2 and debug_sample_count < 5:
+                print(f"  Voxel update: point={update_info['point']}, type={update_info['type']}, avg_update={avg_update:.2f}")
+                debug_sample_count += 1
 
             # Debug: Log some statistics (commented out - too verbose)
             # if np.random.random() < 0.001:  # Sample 0.1% for better debugging
@@ -778,6 +791,9 @@ class SonarMapping3D:
                                'z': np.sin(kf.pose.theta()/2),
                                'w': np.cos(kf.pose.theta()/2)}
             }
+
+            # Debug: Print robot pose
+            print(f"Processing keyframe at pose: x={kf.pose.x():.2f}, y={kf.pose.y():.2f}, z={kf.pose3.z():.2f}, yaw={kf.pose.theta():.2f}")
 
             self.process_sonar_image(polar_img, pose_dict)
 
