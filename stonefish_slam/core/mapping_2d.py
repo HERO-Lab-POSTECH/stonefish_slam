@@ -351,45 +351,76 @@ class Mapping2D:
         if not keyframes:
             return
 
-        # 1. Initialize bounds once (no expansion - use very large fixed bounds)
+        # 1. Calculate required bounds from all keyframes (dynamic expansion)
+        current_bounds = self.get_map_bounds(keyframes, buffer_m)
+        min_x_req, max_x_req, min_y_req, max_y_req = current_bounds
+
+        # 2. Initialize or expand bounds
         if self.global_map_accum is None:
-            # Calculate initial center from first keyframes
-            init_bounds = self.get_map_bounds(keyframes, buffer_m)
-            center_x = (init_bounds[0] + init_bounds[1]) / 2.0
-            center_y = (init_bounds[2] + init_bounds[3]) / 2.0
+            # First initialization
+            self.min_x = min_x_req
+            self.max_x = max_x_req
+            self.min_y = min_y_req
+            self.max_y = max_y_req
+        else:
+            # Save old bounds for padding calculation
+            old_min_x = self.min_x
+            old_max_x = self.max_x
+            old_min_y = self.min_y
+            old_max_y = self.max_y
 
-            # Create very large fixed map (1km × 1km centered on initial position)
-            map_half_size = 500.0
-            self.min_x = center_x - map_half_size
-            self.max_x = center_x + map_half_size
-            self.min_y = center_y - map_half_size
-            self.max_y = center_y + map_half_size
+            # Expand bounds if needed (keep existing area + add new)
+            self.min_x = min(self.min_x, min_x_req)
+            self.max_x = max(self.max_x, max_x_req)
+            self.min_y = min(self.min_y, min_y_req)
+            self.max_y = max(self.max_y, max_y_req)
 
-        # 2. Calculate map dimensions
+        # 3. Calculate map dimensions based on current bounds
         new_map_width = int((self.max_y - self.min_y) / self.map_resolution)
         new_map_height = int((self.max_x - self.min_x) / self.map_resolution)
 
-        # 3. Resize map if dimensions changed (fast padding)
+        # 4. Resize map if dimensions changed (dynamic expansion in all directions)
         if self.global_map_accum is None:
             # First initialization
             self.global_map_accum = np.zeros((new_map_height, new_map_width), dtype=np.float64)
             self.global_map_count = np.zeros((new_map_height, new_map_width), dtype=np.float64)
             self.map_width = new_map_width
             self.map_height = new_map_height
-            self.logger.info(f"Map initialized: ({new_map_height}, {new_map_width})")
+            self.logger.info(f"Map initialized: {new_map_width}x{new_map_height} pixels ({self.max_x-self.min_x:.1f}x{self.max_y-self.min_y:.1f}m)")
         elif self.global_map_accum.shape != (new_map_height, new_map_width):
-            # Expand map with zero-padding (faster than creating new array)
-            pad_height = new_map_height - self.map_height
-            pad_width = new_map_width - self.map_width
+            # Map needs expansion - calculate padding for all 4 directions
+            # old_min_x, old_max_x, old_min_y, old_max_y are set in line 367-370
 
-            if pad_height > 0 or pad_width > 0:
-                pad_h = max(0, pad_height)
-                pad_w = max(0, pad_width)
-                self.global_map_accum = np.pad(self.global_map_accum, ((0, pad_h), (0, pad_w)), mode='constant')
-                self.global_map_count = np.pad(self.global_map_count, ((0, pad_h), (0, pad_w)), mode='constant')
-                self.map_width = new_map_width
-                self.map_height = new_map_height
-                self.logger.info(f"Map auto-expanded to ({new_map_height}, {new_map_width})")
+            # Calculate pixel offsets (how much to expand in each direction)
+            pad_top = int((old_min_x - self.min_x) / self.map_resolution)
+            pad_bottom = int((self.max_x - old_max_x) / self.map_resolution)
+            pad_left = int((old_min_y - self.min_y) / self.map_resolution)
+            pad_right = int((self.max_y - old_max_y) / self.map_resolution)
+
+            # Ensure non-negative
+            pad_top = max(0, pad_top)
+            pad_bottom = max(0, pad_bottom)
+            pad_left = max(0, pad_left)
+            pad_right = max(0, pad_right)
+
+            # Expand map in all directions
+            self.global_map_accum = np.pad(
+                self.global_map_accum,
+                ((pad_top, pad_bottom), (pad_left, pad_right)),
+                mode='constant'
+            )
+            self.global_map_count = np.pad(
+                self.global_map_count,
+                ((pad_top, pad_bottom), (pad_left, pad_right)),
+                mode='constant'
+            )
+            self.map_width = new_map_width
+            self.map_height = new_map_height
+            self.logger.info(
+                f"Map expanded: {self.map_width}x{self.map_height} pixels "
+                f"({self.max_x-self.min_x:.1f}x{self.max_y-self.min_y:.1f}m), "
+                f"padding=({pad_top},{pad_bottom},{pad_left},{pad_right})"
+            )
 
 
         # 3. Transform and add each keyframe's sonar image

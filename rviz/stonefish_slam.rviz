@@ -41,9 +41,9 @@ Visualization Manager:
           Value: false
         bluerov2/base_link_frd:
           Value: true
-        map:
+        bluerov2_map:
           Value: true
-        odom:
+        bluerov2_odom:
           Value: true
         world_ned:
           Value: true
@@ -57,8 +57,8 @@ Visualization Manager:
           bluerov2/base_link:
             bluerov2/base_link_frd:
               {}
-          map:
-            odom:
+          bluerov2_map:
+            bluerov2_odom:
               {}
       Update Interval: 0
       Value: true
@@ -142,10 +142,10 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 23
+      Max Intensity: 8
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: Feature
@@ -163,7 +163,7 @@ Visualization Manager:
         Value: /stonefish_slam/slam/cloud
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -179,14 +179,14 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 23
+      Max Intensity: 20
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: KeyFrame Node
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.20000000298023224
+      Size (m): 0.30000001192092896
       Style: Flat Squares
       Topic:
         Depth: 5
@@ -202,7 +202,7 @@ Visualization Manager:
       Enabled: true
       Name: Constraint
       Namespaces:
-        {}
+        constraints: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -296,16 +296,16 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 98.20262908935547
+      Distance: 95.13670349121094
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 2.1432034969329834
-        Y: 0.7745622396469116
-        Z: 8.05081844329834
+        X: -2.70576810836792
+        Y: -3.338124990463257
+        Z: 8.055658340454102
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: true
