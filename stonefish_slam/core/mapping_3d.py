@@ -671,14 +671,9 @@ class SonarMapping3D:
                 voxel_updates[voxel_key]['sum'] += log_odds_update
                 voxel_updates[voxel_key]['count'] += 1
 
-        # DEBUG: Print voxel summary
+        # DEBUG: Print voxel summary (NOTE: voxel_updates accumulates across ALL rays in this frame)
         if self.frame_count == 0 and abs(bearing_angle) < 0.5:
-            print(f"  Total unique voxels in this ray: {len(voxel_updates)}")
-            # Sample a few voxels
-            for i, (key, info) in enumerate(list(voxel_updates.items())[:3]):
-                avg = info['sum'] / info['count']
-                prob = 1.0 / (1.0 + np.exp(-avg))
-                print(f"    Voxel sample {i}: avg_log_odds={avg:.2f}, prob={prob:.3f}, count={info['count']}")
+            print(f"  Total voxels accumulated so far (all rays): {len(voxel_updates)}")
 
     def process_sonar_image(self, polar_image, robot_pose):
         """
