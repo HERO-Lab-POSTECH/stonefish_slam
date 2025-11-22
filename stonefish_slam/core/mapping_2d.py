@@ -725,8 +725,8 @@ class Mapping2D:
         """Expand map using numpy padding to accommodate new sonar data.
 
         This method expands the map boundaries when new sonar data extends beyond
-        current map limits. Uses np.pad() to efficiently grow the map while preserving
-        existing data and maintaining exact world-to-pixel coordinate consistency.
+        current map limits. Uses grid alignment to ensure bounds are always exact
+        multiples of map_resolution, eliminating cumulative floating-point errors.
 
         Args:
             sonar_min_x: Minimum global X coordinate of sonar image
@@ -734,17 +734,30 @@ class Mapping2D:
             sonar_min_y: Minimum global Y coordinate of sonar image
             sonar_max_y: Maximum global Y coordinate of sonar image
         """
-        # Calculate required padding in meters (add 5m buffer)
-        pad_north_m = max(0, self.min_x - sonar_min_x + 5.0)
-        pad_south_m = max(0, sonar_max_x - self.max_x + 5.0)
-        pad_west_m = max(0, self.min_y - sonar_min_y + 5.0)
-        pad_east_m = max(0, sonar_max_y - self.max_y + 5.0)
+        # Calculate target bounds with 5m buffer
+        target_min_x = sonar_min_x - 5.0
+        target_max_x = sonar_max_x + 5.0
+        target_min_y = sonar_min_y - 5.0
+        target_max_y = sonar_max_y + 5.0
 
-        # Convert to pixels
-        pad_top_px = int(np.ceil(pad_north_m / self.map_resolution))
-        pad_bottom_px = int(np.ceil(pad_south_m / self.map_resolution))
-        pad_left_px = int(np.ceil(pad_west_m / self.map_resolution))
-        pad_right_px = int(np.ceil(pad_east_m / self.map_resolution))
+        # Snap to resolution grid (eliminates cumulative error)
+        # floor for min, ceil for max ensures coverage
+        new_min_x = np.floor(target_min_x / self.map_resolution) * self.map_resolution
+        new_max_x = np.ceil(target_max_x / self.map_resolution) * self.map_resolution
+        new_min_y = np.floor(target_min_y / self.map_resolution) * self.map_resolution
+        new_max_y = np.ceil(target_max_y / self.map_resolution) * self.map_resolution
+
+        # Calculate required padding in meters (always exact multiples of resolution)
+        pad_north_m = max(0, self.min_x - new_min_x)
+        pad_south_m = max(0, new_max_x - self.max_x)
+        pad_west_m = max(0, self.min_y - new_min_y)
+        pad_east_m = max(0, new_max_y - self.max_y)
+
+        # Convert to pixels (exact division, no rounding needed)
+        pad_top_px = int(pad_north_m / self.map_resolution)
+        pad_bottom_px = int(pad_south_m / self.map_resolution)
+        pad_left_px = int(pad_west_m / self.map_resolution)
+        pad_right_px = int(pad_east_m / self.map_resolution)
 
         # If no expansion needed, return early
         if pad_top_px == 0 and pad_bottom_px == 0 and pad_left_px == 0 and pad_right_px == 0:
@@ -752,6 +765,7 @@ class Mapping2D:
 
         # Store old dimensions for logging
         old_height, old_width = self.map_height, self.map_width
+        old_bounds = (self.min_x, self.max_x, self.min_y, self.max_y)
 
         # Expand both accumulator and count maps
         self.global_map_accum = np.pad(
@@ -766,6 +780,7 @@ class Mapping2D:
         )
 
         # Update bounds (CRITICAL for world-to-pixel consistency)
+        # With grid alignment, these are exact
         self.min_x -= pad_top_px * self.map_resolution
         self.max_x += pad_bottom_px * self.map_resolution
         self.min_y -= pad_left_px * self.map_resolution
@@ -774,11 +789,15 @@ class Mapping2D:
         # Update map dimensions
         self.map_height, self.map_width = self.global_map_accum.shape
 
-        # Log expansion
+        # Log expansion with bounds info
         if self.logger:
             self.logger.info(
                 f"[Mapping] Map expanded: {old_height}x{old_width} -> {self.map_height}x{self.map_width} "
                 f"(padding: top={pad_top_px}, bottom={pad_bottom_px}, left={pad_left_px}, right={pad_right_px})"
+            )
+            self.logger.info(
+                f"[Mapping] Bounds updated: X=[{old_bounds[0]:.2f}, {old_bounds[1]:.2f}] -> [{self.min_x:.2f}, {self.max_x:.2f}], "
+                f"Y=[{old_bounds[2]:.2f}, {old_bounds[3]:.2f}] -> [{self.min_y:.2f}, {self.max_y:.2f}]"
             )
 
     def get_colored_map(self) -> np.ndarray:
