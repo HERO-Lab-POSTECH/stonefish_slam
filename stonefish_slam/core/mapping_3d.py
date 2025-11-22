@@ -19,121 +19,211 @@ from collections import defaultdict
 import gtsam
 
 
-class SimpleOctree:
+class OctNode:
     """
-    Sparse voxel storage using dictionary with dynamic expansion
-    Stores log-odds values for each voxel
+    Single node in hierarchical octree (internal or leaf)
+
+    Uses lazy initialization: children only created when needed
+    Stores log-odds occupancy value at this node
     """
 
-    def __init__(self, resolution=0.03, dynamic_expansion=True):
+    def __init__(self, center, size):
         """
-        Initialize octree with given resolution
+        Initialize octree node
 
         Args:
-            resolution: Size of each voxel in meters
-            dynamic_expansion: Enable dynamic map expansion
+            center: [x, y, z] center position of this node
+            size: Edge length of this cubic node
         """
-        self.resolution = resolution
-        self.voxels = defaultdict(float)  # Store log-odds values
-        self.dynamic_expansion = dynamic_expansion
+        self.center = np.array(center, dtype=np.float64)
+        self.size = float(size)
+        self.log_odds = 0.0  # Occupancy log-odds value
+        self.children = [None] * 8  # 8 children (lazy init)
 
-        # Map bounds (for dynamic expansion)
+    def is_leaf(self):
+        """Check if this is a leaf node (no children created yet)"""
+        return self.children[0] is None
+
+    def get_octant_index(self, point):
+        """
+        Find which octant (0-7) the point belongs to
+
+        Octant indexing:
+        - Bit 0 (value 1): X >= center.x
+        - Bit 1 (value 2): Y >= center.y
+        - Bit 2 (value 4): Z >= center.z
+
+        Args:
+            point: [x, y, z] position
+
+        Returns:
+            Octant index 0-7
+        """
+        index = 0
+        if point[0] >= self.center[0]:
+            index |= 1  # X bit
+        if point[1] >= self.center[1]:
+            index |= 2  # Y bit
+        if point[2] >= self.center[2]:
+            index |= 4  # Z bit
+        return index
+
+    def subdivide(self):
+        """
+        Create 8 children nodes (lazy subdivision)
+
+        Each child inherits parent's log-odds value and has size/2
+        """
+        half_size = self.size / 2.0
+        quarter_size = self.size / 4.0
+
+        for i in range(8):
+            # Calculate octant offset based on bit pattern
+            x_offset = quarter_size if (i & 1) else -quarter_size
+            y_offset = quarter_size if (i & 2) else -quarter_size
+            z_offset = quarter_size if (i & 4) else -quarter_size
+
+            child_center = self.center + np.array([x_offset, y_offset, z_offset])
+            self.children[i] = OctNode(child_center, half_size)
+            # Inherit parent's log-odds value
+            self.children[i].log_odds = self.log_odds
+
+
+class HierarchicalOctree:
+    """
+    Hierarchical octree for efficient 3D occupancy mapping
+
+    Uses recursive 8-way tree structure for O(log n) update/query complexity
+    Implements lazy initialization for sparse memory usage
+    Compatible with existing SimpleOctree API
+    """
+
+    def __init__(self, resolution=0.1, max_depth=9, center=None, size=None):
+        """
+        Initialize hierarchical octree
+
+        Args:
+            resolution: Minimum voxel size in meters (leaf node size)
+            max_depth: Maximum tree depth (9 → 2^9 * resolution = 51.2m for 0.1m res)
+            center: Center of root node (default [size/2, size/2, size/2])
+            size: Size of root node (default 2^max_depth * resolution)
+        """
+        self.resolution = float(resolution)
+        self.max_depth = int(max_depth)
+
+        # Calculate required size and depth
+        if size is None:
+            # Auto-size: 2^max_depth * resolution
+            size = (2 ** max_depth) * resolution
+
+        if center is None:
+            # Default center at positive octant origin
+            center = [size/2, size/2, size/2]
+
+        self.root = OctNode(center, size)
+
+        # Log-odds parameters (same as SimpleOctree)
+        self.log_odds_occupied = 1.5
+        self.log_odds_free = -2.0
+        self.log_odds_min = -10.0
+        self.log_odds_max = 10.0
+        self.log_odds_threshold = 0.0
+        self.adaptive_update = True
+        self.adaptive_threshold = 0.5
+        self.adaptive_max_ratio = 0.5
+
+        # Bounds tracking (for compatibility)
         self.min_bounds = np.array([float('inf')] * 3)
         self.max_bounds = np.array([-float('inf')] * 3)
-
-        # Log-odds parameters (will be set from config)
-        self.log_odds_occupied = 1.5      # Log-odds increment for occupied
-        self.log_odds_free = -2.0         # Log-odds decrement for free space (strong)
-        self.log_odds_min = -2.0         # Minimum log-odds (clamping)
-        self.log_odds_max = 3.5          # Maximum log-odds (clamping)
-        self.log_odds_threshold = 0.0    # Threshold for considering occupied
-        self.adaptive_update = True       # Enable adaptive updating by default
-        self.adaptive_threshold = 0.5     # Protection threshold (will be set from config)
-        self.adaptive_max_ratio = 0.5     # Maximum update ratio at adaptive_threshold
-
-    def get_voxel_key(self, point):
-        """
-        Get voxel key from 3D point
-
-        Args:
-            point: [x, y, z] numpy array
-
-        Returns:
-            Tuple (ix, iy, iz) as voxel index
-        """
-        voxel_idx = np.floor(point / self.resolution).astype(int)
-        return tuple(voxel_idx)
-
-    def world_to_key(self, x, y, z):
-        """
-        Convert world coordinates to voxel key
-
-        Args:
-            x, y, z: World coordinates
-
-        Returns:
-            Tuple (ix, iy, iz) as voxel index
-        """
-        return self.get_voxel_key(np.array([x, y, z]))
+        self.dynamic_expansion = True
 
     def update_voxel(self, point, log_odds_update, adaptive=True):
         """
-        Update voxel log-odds value with optional adaptive updating
+        Update voxel at point with log-odds increment/decrement
 
         Args:
-            point: [x, y, z] numpy array
-            log_odds_update: Log-odds increment/decrement
-            adaptive: If True, reduce occupied updates for free space voxels
+            point: [x, y, z] position (or longer array, only first 3 used)
+            log_odds_update: Log-odds change to apply
+            adaptive: If True, apply adaptive update for occupied voxels
         """
-        key = self.get_voxel_key(point)
+        point = np.array(point[:3], dtype=np.float64)  # Ensure 3D
 
-        # Adaptive update: reduce occupied updates for voxels that are likely free
-        if adaptive and log_odds_update > 0:  # If updating as occupied
-            current_log_odds = self.voxels.get(key, 0.0)
+        # Adaptive update logic (same as SimpleOctree)
+        if adaptive and log_odds_update > 0:
+            current_log_odds = self.query_voxel(point)
             current_prob = 1.0 / (1.0 + np.exp(-current_log_odds))
 
-            # Protection for free space (prob <= adaptive_threshold)
-            # Maximum adaptive_max_ratio update rate for voxels with prob <= adaptive_threshold
             if current_prob <= self.adaptive_threshold:
-                # Linear interpolation with adaptive_max_ratio maximum
-                # prob = 0.0 -> scale = 0.0 (no update)
-                # prob = adaptive_threshold -> scale = adaptive_max_ratio
-                # Linear scaling: scale = (current_prob / adaptive_threshold) * adaptive_max_ratio
+                # Linear scaling: reduce update for free space voxels
                 update_scale = (current_prob / self.adaptive_threshold) * self.adaptive_max_ratio
                 log_odds_update *= update_scale
 
-        # Apply update
-        if key not in self.voxels:
-            self.voxels[key] = 0.0
-        self.voxels[key] += log_odds_update
-        # Clamp to prevent overflow
-        self.voxels[key] = np.clip(self.voxels[key],
-                                   self.log_odds_min,
-                                   self.log_odds_max)
+        # Update recursively
+        self._update_recursive(self.root, point, log_odds_update, depth=0)
 
-        # Update bounds for dynamic expansion
+        # Update bounds
         if self.dynamic_expansion:
             self.min_bounds = np.minimum(self.min_bounds, point)
             self.max_bounds = np.maximum(self.max_bounds, point)
 
-    def get_probability(self, point):
+    def _update_recursive(self, node, point, log_odds_update, depth):
         """
-        Get probability from log-odds value
+        Recursive update to target voxel
 
         Args:
-            point: [x, y, z] numpy array
+            node: Current OctNode
+            point: Target position
+            log_odds_update: Log-odds change
+            depth: Current tree depth
+        """
+        # Check if we've reached resolution or max depth
+        if depth >= self.max_depth or node.size <= self.resolution * 2:
+            # Leaf node: update log-odds
+            node.log_odds += log_odds_update
+            node.log_odds = np.clip(node.log_odds, self.log_odds_min, self.log_odds_max)
+            return
+
+        # Internal node: subdivide if needed and recurse
+        if node.is_leaf():
+            node.subdivide()
+
+        child_index = node.get_octant_index(point)
+        self._update_recursive(node.children[child_index], point, log_odds_update, depth + 1)
+
+    def query_voxel(self, point):
+        """
+        Query log-odds value at point
+
+        Args:
+            point: [x, y, z] position
 
         Returns:
-            Probability [0, 1]
+            Log-odds value at this position
         """
-        key = self.get_voxel_key(point)
-        log_odds = self.voxels.get(key, 0.0)
-        # Convert log-odds to probability
-        return 1.0 / (1.0 + np.exp(-log_odds))
+        point = np.array(point[:3], dtype=np.float64)
+        return self._query_recursive(self.root, point, depth=0)
+
+    def _query_recursive(self, node, point, depth):
+        """
+        Recursive query for log-odds value
+
+        Args:
+            node: Current OctNode
+            point: Target position
+            depth: Current tree depth
+
+        Returns:
+            Log-odds value
+        """
+        if depth >= self.max_depth or node.is_leaf():
+            return node.log_odds
+
+        child_index = node.get_octant_index(point)
+        return self._query_recursive(node.children[child_index], point, depth + 1)
 
     def get_occupied_voxels(self, min_probability=0.5):
         """
-        Get all occupied voxels above probability threshold
+        Get all occupied voxels above threshold
 
         Args:
             min_probability: Minimum probability to consider occupied
@@ -142,61 +232,54 @@ class SimpleOctree:
             List of (point, probability) tuples
         """
         occupied = []
-        # Handle edge cases for min_probability
+
+        # Convert probability to log-odds threshold
         if min_probability >= 1.0:
-            # Probability 1.0 means only return maximum log-odds voxels
-            min_log_odds = self.log_odds_max - 0.01  # Just below max
+            min_log_odds = self.log_odds_max - 0.01
         elif min_probability <= 0.0:
             min_log_odds = self.log_odds_min
         else:
             min_log_odds = np.log(min_probability / (1.0 - min_probability))
 
-        # Debug: Count voxels at different probability ranges
-        prob_ranges = {"0.5-0.7": 0, "0.7-0.9": 0, "0.9-0.95": 0, "0.95-0.99": 0, "0.99+": 0}
-
-        for key, log_odds in self.voxels.items():
-            probability = 1.0 / (1.0 + np.exp(-log_odds))
-
-            # Count probability ranges
-            if probability >= 0.99:
-                prob_ranges["0.99+"] += 1
-            elif probability >= 0.95:
-                prob_ranges["0.95-0.99"] += 1
-            elif probability >= 0.9:
-                prob_ranges["0.9-0.95"] += 1
-            elif probability >= 0.7:
-                prob_ranges["0.7-0.9"] += 1
-            elif probability >= 0.5:
-                prob_ranges["0.5-0.7"] += 1
-
-            if log_odds > min_log_odds:
-                # Convert voxel index back to 3D point (center of voxel)
-                point = np.array(key) * self.resolution + self.resolution / 2
-                occupied.append((point, probability))
-
-        # Print debug info
-        if len(self.voxels) > 0 and len(occupied) > 0:
-            print(f"\nVoxel probability distribution (min_prob={min_probability:.3f}):")
-            print(f"  Min log-odds threshold: {min_log_odds:.3f}")
-            print(f"  Total voxels: {len(self.voxels)}")
-            for range_name, count in prob_ranges.items():
-                if count > 0:
-                    print(f"  {range_name}: {count} voxels")
-            print(f"  Returned as occupied: {len(occupied)} voxels")
-            if len(occupied) > 0:
-                probs = [p[1] for p in occupied]
-                log_odds_vals = [self.voxels.get(self.get_voxel_key(p[0]), 0) for p in occupied[:5]]
-                print(f"  Occupied prob range: [{min(probs):.3f}, {max(probs):.3f}]")
-                print(f"  Sample log-odds: {log_odds_vals[:3]}")
+        # Traverse tree and collect occupied leaves
+        self._collect_occupied(self.root, min_log_odds, occupied, depth=0)
 
         return occupied
 
-    def get_all_voxels_classified(self, min_probability=0.7):
+    def _collect_occupied(self, node, min_log_odds, occupied, depth):
         """
-        Get all voxels classified as free, unknown, or occupied
+        Recursively collect occupied voxels
+
+        Early termination: if node log-odds below threshold, skip entire subtree
 
         Args:
-            min_probability: Minimum probability to consider occupied (0.0-1.0)
+            node: Current OctNode
+            min_log_odds: Minimum log-odds threshold
+            occupied: List to append results to
+            depth: Current tree depth
+        """
+        # Early termination: if node log-odds below threshold, skip subtree
+        if node.log_odds <= min_log_odds:
+            return
+
+        # If leaf or at max depth
+        if depth >= self.max_depth or node.is_leaf():
+            if node.log_odds > min_log_odds:
+                probability = 1.0 / (1.0 + np.exp(-node.log_odds))
+                occupied.append((node.center.copy(), probability))
+            return
+
+        # Recurse into children
+        for child in node.children:
+            if child is not None:
+                self._collect_occupied(child, min_log_odds, occupied, depth + 1)
+
+    def get_all_voxels_classified(self, min_probability=0.7):
+        """
+        Get free/unknown/occupied classification (compatibility method)
+
+        Args:
+            min_probability: Minimum probability to consider occupied
 
         Returns:
             Dictionary with 'free', 'unknown', 'occupied' lists
@@ -205,37 +288,91 @@ class SimpleOctree:
         unknown = []
         occupied = []
 
-        # Convert 0.3 probability to log-odds for free threshold (prob < 0.3 = free)
-        free_threshold = np.log(0.3 / (1.0 - 0.3))  # log-odds < this -> free
-        # Convert min_probability to log-odds threshold for occupied
-        if min_probability >= 1.0:
-            occupied_threshold = self.log_odds_max - 0.01
-        elif min_probability <= 0.0:
-            occupied_threshold = self.log_odds_min
-        else:
-            occupied_threshold = np.log(min_probability / (1.0 - min_probability))
+        free_threshold = np.log(0.3 / 0.7)  # prob < 0.3 = free
+        occupied_threshold = np.log(min_probability / (1.0 - min_probability))
 
-        for key, log_odds in self.voxels.items():
-            # Convert voxel index back to 3D point (center of voxel)
-            point = np.array(key) * self.resolution + self.resolution / 2
-            probability = 1.0 / (1.0 + np.exp(-log_odds))
+        self._classify_voxels(self.root, free_threshold, occupied_threshold,
+                             free, unknown, occupied, depth=0)
 
-            if log_odds < free_threshold:
-                free.append((point, probability))
-            elif log_odds > occupied_threshold:  # Only if above min_probability threshold
-                occupied.append((point, probability))
+        return {'free': free, 'unknown': unknown, 'occupied': occupied}
+
+    def _classify_voxels(self, node, free_thresh, occ_thresh, free, unknown, occupied, depth):
+        """
+        Recursively classify voxels
+
+        Args:
+            node: Current OctNode
+            free_thresh: Free space threshold
+            occ_thresh: Occupied space threshold
+            free, unknown, occupied: Lists to append results to
+            depth: Current tree depth
+        """
+        if depth >= self.max_depth or node.is_leaf():
+            probability = 1.0 / (1.0 + np.exp(-node.log_odds))
+
+            if node.log_odds < free_thresh:
+                free.append((node.center.copy(), probability))
+            elif node.log_odds > occ_thresh:
+                occupied.append((node.center.copy(), probability))
             else:
-                unknown.append((point, probability))
+                unknown.append((node.center.copy(), probability))
+            return
 
-        return {
-            'free': free,
-            'unknown': unknown,
-            'occupied': occupied
-        }
+        # Recurse into children
+        for child in node.children:
+            if child is not None:
+                self._classify_voxels(child, free_thresh, occ_thresh,
+                                    free, unknown, occupied, depth + 1)
 
     def clear(self):
-        """Clear all voxels"""
-        self.voxels.clear()
+        """Clear all data (recreate root)"""
+        self.root = OctNode(self.root.center, self.root.size)
+        self.min_bounds = np.array([float('inf')] * 3)
+        self.max_bounds = np.array([-float('inf')] * 3)
+
+    def world_to_key(self, x, y, z):
+        """
+        Compatibility method (not used in hierarchical octree)
+
+        Returns quantized voxel key for compatibility with existing code
+        """
+        ix = int(np.floor(x / self.resolution))
+        iy = int(np.floor(y / self.resolution))
+        iz = int(np.floor(z / self.resolution))
+        return (ix, iy, iz)
+
+    def get_voxel_key(self, point):
+        """Compatibility method"""
+        return self.world_to_key(point[0], point[1], point[2])
+
+    @property
+    def voxels(self):
+        """
+        Compatibility: return dict-like view of octree
+
+        Returns object with __len__ that counts all leaf nodes
+        """
+        count = {'total': 0}
+        self._count_leaves(self.root, count, depth=0)
+
+        # Return a fake dict-like object
+        class VoxelDict:
+            def __init__(self, total):
+                self._total = total
+            def __len__(self):
+                return self._total
+
+        return VoxelDict(count['total'])
+
+    def _count_leaves(self, node, count, depth):
+        """Count all leaf nodes"""
+        if depth >= self.max_depth or node.is_leaf():
+            count['total'] += 1
+            return
+
+        for child in node.children:
+            if child is not None:
+                self._count_leaves(child, count, depth + 1)
 
 
 class SonarMapping3D:
@@ -266,7 +403,7 @@ class SonarMapping3D:
             'sonar_position': [0.25, 0.0, 0.08],  # meters from base_link
             'sonar_tilt': -0.5236,         # 30° downward (negative pitch in FRD)
             # Octree parameters
-            'voxel_resolution': 0.05,      # 5cm voxels (recommended default)
+            'voxel_resolution': 0.1,       # 10cm voxels (hierarchical octree optimized)
             'min_probability': 0.6,        # Minimum probability for occupied
             'max_frames': 0,               # 0=unlimited
             'dynamic_expansion': True,     # Enable dynamic map expansion
@@ -321,8 +458,13 @@ class SonarMapping3D:
         self.log_odds_min = default_config.get('log_odds_min', -10.0)
         self.log_odds_max = default_config.get('log_odds_max', 10.0)
 
-        # Initialize octree for voxel storage with dynamic expansion
-        self.octree = SimpleOctree(self.voxel_resolution, dynamic_expansion=self.dynamic_expansion)
+        # Initialize hierarchical octree for voxel storage
+        self.octree = HierarchicalOctree(
+            resolution=self.voxel_resolution,
+            max_depth=9,  # Optimal for 30m space (2^9 * 0.1m = 51.2m)
+            center=None,  # Auto-calculated
+            size=None  # Auto-calculated
+        )
 
         # Pass all settings to octree
         self.octree.adaptive_update = self.adaptive_update
