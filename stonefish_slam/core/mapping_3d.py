@@ -587,7 +587,7 @@ class SonarMapping3D:
         half_aperture = self.vertical_aperture / 2
 
         # Update free space before first hit (with sparse sampling)
-        free_sampling_step = 10  # Could be made configurable if needed
+        free_sampling_step = 2  # Reduced from 10 to 2 for better coverage (0.12m intervals)
         for r_idx in range(0, first_hit_idx, free_sampling_step):
             range_m = r_idx * self.range_resolution
             if range_m < self.min_range:
