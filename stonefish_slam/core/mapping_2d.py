@@ -634,9 +634,9 @@ class Mapping2D:
                 map_flat = self.global_map_accum.ravel()
                 count_flat = self.global_map_count.ravel()
 
-                # Exponential Moving Average (alpha=0.15)
+                # Exponential Moving Average (alpha=0.3)
                 # Balances noise reduction (past data) with new information
-                alpha = 0.15  # Fusion weight (0.1-0.3 range, 0.15 = ~6-7 frames effective)
+                alpha = 0.3  # Fusion weight (0.1-0.3 range, 0.3 = ~3-4 frames effective)
                 old_intensities = map_flat[linear_indices]
 
                 # First observation: use new value directly (avoid dark initialization)
