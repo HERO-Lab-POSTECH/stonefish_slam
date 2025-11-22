@@ -618,6 +618,12 @@ class SonarMapping3D:
                 pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])
                 pt_world = T_sonar_to_world @ pt_sonar
 
+                # CRITICAL: Check actual range after transform
+                sonar_origin_world = T_sonar_to_world[:3, 3]
+                actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
+                if actual_range < self.min_range:
+                    continue  # Skip points too close to sonar
+
                 # Get voxel key and accumulate update
                 voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
 
@@ -662,6 +668,12 @@ class SonarMapping3D:
                 # Transform to world frame
                 pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])
                 pt_world = T_sonar_to_world @ pt_sonar
+
+                # CRITICAL: Check actual range after transform
+                sonar_origin_world = T_sonar_to_world[:3, 3]
+                actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
+                if actual_range < self.min_range:
+                    continue  # Skip points too close to sonar
 
                 # Get voxel key and accumulate update
                 voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
