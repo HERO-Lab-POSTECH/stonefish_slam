@@ -1,8 +1,6 @@
 # python imports
-import threading
 import numpy as np
 import struct
-import queue
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
@@ -90,24 +88,16 @@ class SLAMNode(SLAM, Node):
         # Then initialize SLAM parent class
         SLAM.__init__(self)
 
-        # the threading lock
-        self.lock = threading.RLock()
+        # No lock needed (synchronous processing)
 
         # TF2 buffer for timestamp synchronization (30s cache for delayed mapping)
         self.tf_buffer = Buffer(cache_time=Duration(seconds=30))
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # Asynchronous mapping queue
-        self.mapping_queue = queue.Queue(maxsize=50)  # Increased to prevent drops
-        self.mapping_thread = None
-        self.mapping_active = False
-
         # Mapping statistics
         self.mapping_stats = {
             'keyframes_total': 0,
-            'maps_queued': 0,
-            'maps_processed': 0,
-            'maps_dropped': 0
+            'maps_published': 0
         }
 
         # Mapping initialization (configured in init_node)
@@ -341,12 +331,9 @@ class SLAMNode(SLAM, Node):
         self.configure()
         self.get_logger().info("SLAM node is initialized")
 
-        # Start mapping thread if 2D mapping is enabled
+        # 2D mapping uses synchronous processing (no thread needed)
         if self.enable_2d_mapping:
-            self.mapping_active = True
-            self.mapping_thread = threading.Thread(target=self._mapping_worker, daemon=True)
-            self.mapping_thread.start()
-            self.get_logger().info("Asynchronous mapping thread started")
+            self.get_logger().info("2D mapping enabled (synchronous mode)")
 
     def SLAM_callback(self, feature_msg: PointCloud2, odom_msg: Odometry) -> None:
         """SLAM call back. Subscibes to the feature msg point cloud and odom msg
@@ -357,8 +344,6 @@ class SLAMNode(SLAM, Node):
             odom_msg (Odometry): the incoming DVL/IMU state estimate
         """
 
-        # aquire the lock
-        self.lock.acquire()
         self.get_logger().info("SLAM_callback", throttle_duration_sec=1.0)
 
         # get rostime from the point cloud
@@ -414,7 +399,6 @@ class SLAMNode(SLAM, Node):
         # update current time step and publish the topics
         self.current_frame = frame
         self.publish_all()
-        self.lock.release()
 
     def SLAM_callback_with_mapping(self, feature_msg: PointCloud2, odom_msg: Odometry, sonar_msg: Image) -> None:
         """SLAM callback with 2D mapping support (3-way synchronization).
@@ -426,92 +410,107 @@ class SLAMNode(SLAM, Node):
             odom_msg (Odometry): the incoming DVL/IMU state estimate
             sonar_msg (Image): the incoming sonar image
         """
-        with self.lock:
-            # 1. Convert sonar image
-            try:
-                sonar_image = self.bridge.imgmsg_to_cv2(sonar_msg, desired_encoding="mono8")
-            except Exception as e:
-                self.get_logger().error(f"Failed to convert sonar image: {e}")
-                sonar_image = None
+        # 1. Convert sonar image
+        try:
+            sonar_image = self.bridge.imgmsg_to_cv2(sonar_msg, desired_encoding="mono8")
+        except Exception as e:
+            self.get_logger().error(f"Failed to convert sonar image: {e}")
+            sonar_image = None
 
-            # 2. Standard SLAM processing
-            # Use sonar timestamp for consistency (feature + mapping use same time)
-            time = sonar_msg.header.stamp
-            dr_pose3 = r2g(odom_msg.pose.pose)
-            frame = Keyframe(False, time, dr_pose3)
+        # 2. Standard SLAM processing
+        # Use sonar timestamp for consistency (feature + mapping use same time)
+        time = sonar_msg.header.stamp
+        dr_pose3 = r2g(odom_msg.pose.pose)
+        frame = Keyframe(False, time, dr_pose3)
 
-            # Convert point cloud
-            points = pointcloud2_to_xyz_array(feature_msg)
-            points = np.c_[points[:, 0], points[:, 1]]
+        # Convert point cloud
+        points = pointcloud2_to_xyz_array(feature_msg)
+        points = np.c_[points[:, 0], points[:, 1]]
 
-            # Check if valid points
-            if len(points) and np.isnan(points[0, 0]):
-                frame.status = False
+        # Check if valid points
+        if len(points) and np.isnan(points[0, 0]):
+            frame.status = False
+        else:
+            frame.status = self.is_keyframe(frame)
+
+        # Set frame twist
+        frame.twist = odom_msg.twist.twist
+
+        # Update keyframe pose from dead reckoning
+        if self.keyframes:
+            dr_odom = self.current_keyframe.dr_pose.between(frame.dr_pose)
+            pose = self.current_keyframe.pose.compose(dr_odom)
+            frame.update(pose)
+
+        # 3. Process keyframe
+        if frame.status:
+            # Add points
+            frame.points = points
+
+            # Add sonar image to frame with acquisition timestamp
+            if sonar_image is not None:
+                frame.image = sonar_image
+                frame.sonar_time = sonar_msg.header.stamp  # Store sonar acquisition time for mapping
+
+            # Sequential scan matching
+            if not self.keyframes:
+                self.add_prior(frame)
             else:
-                frame.status = self.is_keyframe(frame)
+                self.add_sequential_scan_matching(frame)
 
-            # Set frame twist
-            frame.twist = odom_msg.twist.twist
+            # Update factor graph
+            self.update_factor_graph(frame)
 
-            # Update keyframe pose from dead reckoning
-            if self.keyframes:
-                dr_odom = self.current_keyframe.dr_pose.between(frame.dr_pose)
-                pose = self.current_keyframe.pose.compose(dr_odom)
-                frame.update(pose)
+            # Loop closure
+            if self.nssm_params.enable and self.add_nonsequential_scan_matching():
+                self.update_factor_graph()
 
-            # 3. Process keyframe
-            if frame.status:
-                # Add points
-                frame.points = points
+            # 4. Update 2D map immediately (synchronous)
+            if self.enable_2d_mapping and (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
+                # Get new keyframes for incremental update
+                new_keyframes = list(self.keyframes[self.last_map_update_kf:])
 
-                # Add sonar image to frame with acquisition timestamp
-                if sonar_image is not None:
-                    frame.image = sonar_image
-                    frame.sonar_time = sonar_msg.header.stamp  # Store sonar acquisition time for mapping
+                if new_keyframes:
+                    try:
+                        # Construct source_frame with namespace (use FRD for correct NED mapping)
+                        source_frame = 'base_link_frd' if self.rov_id == "" else f"{self.rov_id}/base_link_frd"
 
-                # Sequential scan matching
-                if not self.keyframes:
-                    self.add_prior(frame)
-                else:
-                    self.add_sequential_scan_matching(frame)
+                        # Update map immediately (synchronous - no queue, no thread)
+                        self.mapper.update_global_map_from_slam(
+                            new_keyframes,  # New keyframes to process
+                            tf2_buffer=None,  # Disabled: use keyframe.pose
+                            target_frame='world_ned',
+                            source_frame=source_frame,
+                            all_slam_keyframes=self.keyframes  # Complete list for bounds calculation
+                        )
 
-                # Update factor graph
-                self.update_factor_graph(frame)
+                        # Get and publish map image immediately
+                        map_image = self.mapper.get_map_image()
+                        if map_image is not None and map_image.size > 0:
+                            image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
+                            image_msg.header.stamp = self.get_clock().now().to_msg()
+                            image_msg.header.frame_id = "map"
+                            self.map_2d_pub.publish(image_msg)
 
-                # Loop closure
-                if self.nssm_params.enable and self.add_nonsequential_scan_matching():
-                    self.update_factor_graph()
+                            self.get_logger().info(
+                                f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
+                                f"{len(new_keyframes)} new keyframes, "
+                                f"bounds=X[{self.mapper.min_x:.1f},{self.mapper.max_x:.1f}] "
+                                f"Y[{self.mapper.min_y:.1f},{self.mapper.max_y:.1f}]"
+                            )
 
-                # 4. Update 2D map periodically (non-blocking)
-                if self.enable_2d_mapping and (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
-                    # Send only new keyframes (incremental update) - much faster than full snapshot
-                    # mapping_2d.py uses processed_keyframe_keys to skip already processed ones
-                    new_keyframes = list(self.keyframes[self.last_map_update_kf:])
-
-                    # Add to queue if not full (drop if queue full to prevent backlog)
-                    if not self.mapping_queue.full() and new_keyframes:
-                        self.mapping_queue.put(new_keyframes)
                         self.last_map_update_kf = len(self.keyframes)
-                        self.mapping_stats['maps_queued'] += 1
-                        self.get_logger().info(
-                            f"Queued {len(new_keyframes)} keyframes for mapping "
-                            f"(queue: {self.mapping_queue.qsize()}/{self.mapping_queue.maxsize})"
-                        )
-                    else:
-                        self.mapping_stats['maps_dropped'] += 1
-                        self.get_logger().warn(
-                            f"Mapping queue full ({self.mapping_queue.qsize()}/{self.mapping_queue.maxsize}), "
-                            f"skipping update. Stats: queued={self.mapping_stats['maps_queued']}, "
-                            f"dropped={self.mapping_stats['maps_dropped']}",
-                            throttle_duration_sec=5.0
-                        )
 
-                # Track keyframe count
-                self.mapping_stats['keyframes_total'] = len(self.keyframes)
+                    except Exception as e:
+                        import traceback
+                        self.get_logger().error(f"Synchronous mapping failed: {e}\n{traceback.format_exc()}")
 
-            # Update current frame and publish
-            self.current_frame = frame
-            self.publish_all()
+            # Track keyframe count
+            self.mapping_stats['keyframes_total'] = len(self.keyframes)
+
+        # Update current frame and publish
+        self.current_frame = frame
+        self.publish_all()
 
     def publish_all(self) -> None:
         """Publish to all ouput topics
@@ -674,85 +673,8 @@ class SLAMNode(SLAM, Node):
             cloud_msg.header.frame_id = self.rov_id + "_map"
         self.cloud_pub.publish(cloud_msg)
 
-    def _mapping_worker(self):
-        """Background worker for asynchronous 2D mapping.
-
-        Runs in a separate thread to prevent blocking the SLAM callback.
-        Processes mapping requests from the queue using tf2 for accurate pose lookup.
-        """
-        self.get_logger().info("Mapping worker thread started, waiting for requests...")
-
-        while self.mapping_active and rclpy.ok():
-            try:
-                # Get mapping request from queue (blocks until available)
-                keyframes_snapshot = self.mapping_queue.get(timeout=1.0)
-
-                if keyframes_snapshot is None:
-                    break
-
-                self.get_logger().info(
-                    f"[Mapping] Processing {len(keyframes_snapshot)} keyframes"
-                )
-
-                # Perform mapping with tf2 buffer
-                try:
-                    # Construct source_frame with namespace (use FRD for correct NED mapping)
-                    source_frame = 'base_link_frd' if self.rov_id == "" else f"{self.rov_id}/base_link_frd"
-
-                    # Use keyframe.pose directly (more reliable than delayed tf2 lookup)
-                    # tf2 lookup often fails due to async mapping delay exceeding buffer cache
-                    self.mapper.update_global_map_from_slam(
-                        keyframes_snapshot,  # New keyframes to process
-                        tf2_buffer=None,  # Disabled: use keyframe.pose
-                        target_frame='world_ned',
-                        source_frame=source_frame,
-                        all_slam_keyframes=self.keyframes  # Complete list for bounds calculation
-                    )
-
-                    # Get and publish map image
-                    map_image = self.mapper.get_map_image()
-                    if map_image is not None and map_image.size > 0:
-                        image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
-                        image_msg.header.stamp = self.get_clock().now().to_msg()
-                        image_msg.header.frame_id = "map"
-                        self.map_2d_pub.publish(image_msg)
-
-                        # Update statistics
-                        self.mapping_stats['maps_processed'] += 1
-
-                        if self.mapping_stats['maps_processed'] % 5 == 0:  # Every 5 maps
-                            self.get_logger().info(
-                                f"Mapping stats: "
-                                f"KF={self.mapping_stats['keyframes_total']}, "
-                                f"queued={self.mapping_stats['maps_queued']}, "
-                                f"processed={self.mapping_stats['maps_processed']}, "
-                                f"dropped={self.mapping_stats['maps_dropped']}, "
-                                f"queue_size={self.mapping_queue.qsize()}"
-                            )
-                        else:
-                            self.get_logger().info(
-                                f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
-                                f"{len(keyframes_snapshot)} keyframes",
-                                throttle_duration_sec=5.0
-                            )
-                except Exception as e:
-                    import traceback
-                    self.get_logger().error(f"Mapping failed: {e}\n{traceback.format_exc()}")
-
-            except queue.Empty:
-                continue
-            except Exception as e:
-                import traceback
-                self.get_logger().error(f"Mapping worker error: {e}\n{traceback.format_exc()}")
-
     def destroy_node(self):
         """Cleanup when node is destroyed."""
-        # Stop mapping thread
-        if self.mapping_thread is not None:
-            self.mapping_active = False
-            self.mapping_queue.put(None)  # Signal thread to exit
-            self.mapping_thread.join(timeout=2.0)
-
         super().destroy_node()
 
 

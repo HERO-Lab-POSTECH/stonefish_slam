@@ -92,7 +92,8 @@ class Mapping2D:
         fan_pixel_resolution: float = 0.05,
         sonar_tilt_deg: float = 30.0,
         range_min: float = 0.1,
-        keyframe_sample_threshold: int = 50
+        keyframe_sample_threshold: int = 50,
+        ros_logger=None
     ):
         """Initialize 2D mapping parameters.
 
