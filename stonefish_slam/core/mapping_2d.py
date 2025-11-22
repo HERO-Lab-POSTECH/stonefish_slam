@@ -372,6 +372,12 @@ class Mapping2D:
             self.max_x = max_x_req
             self.min_y = min_y_req
             self.max_y = max_y_req
+            self.logger.info(
+                f"Map bounds initialized: "
+                f"X=[{self.min_x:.1f}, {self.max_x:.1f}] ({self.max_x-self.min_x:.1f}m), "
+                f"Y=[{self.min_y:.1f}, {self.max_y:.1f}] ({self.max_y-self.min_y:.1f}m), "
+                f"based on {len(all_keyframes_for_bounds)} keyframes"
+            )
         else:
             # Save old bounds for padding calculation
             old_min_x = self.min_x
@@ -384,6 +390,19 @@ class Mapping2D:
             self.max_x = max(self.max_x, max_x_req)
             self.min_y = min(self.min_y, min_y_req)
             self.max_y = max(self.max_y, max_y_req)
+
+            # Check if bounds changed
+            bounds_changed = (
+                self.min_x != old_min_x or self.max_x != old_max_x or
+                self.min_y != old_min_y or self.max_y != old_max_y
+            )
+            if bounds_changed:
+                self.logger.info(
+                    f"Map bounds expanded: "
+                    f"X=[{self.min_x:.1f}, {self.max_x:.1f}] ({self.max_x-self.min_x:.1f}m), "
+                    f"Y=[{self.min_y:.1f}, {self.max_y:.1f}] ({self.max_y-self.min_y:.1f}m), "
+                    f"based on {len(all_keyframes_for_bounds)} keyframes"
+                )
 
         # 3. Calculate map dimensions based on current bounds
         new_map_width = int((self.max_y - self.min_y) / self.map_resolution)
@@ -399,7 +418,9 @@ class Mapping2D:
             self.logger.info(f"Map initialized: {new_map_width}x{new_map_height} pixels ({self.max_x-self.min_x:.1f}x{self.max_y-self.min_y:.1f}m)")
         elif self.global_map_accum.shape != (new_map_height, new_map_width):
             # Map needs expansion - calculate padding for all 4 directions
-            # old_min_x, old_max_x, old_min_y, old_max_y are set in line 367-370
+            self.logger.info(
+                f"Map resize needed: {self.map_height}x{self.map_width} → {new_map_height}x{new_map_width}"
+            )
 
             # Calculate pixel offsets (how much to expand in each direction)
             pad_top = int((old_min_x - self.min_x) / self.map_resolution)
@@ -412,6 +433,10 @@ class Mapping2D:
             pad_bottom = max(0, pad_bottom)
             pad_left = max(0, pad_left)
             pad_right = max(0, pad_right)
+
+            self.logger.info(
+                f"Padding: top={pad_top}, bottom={pad_bottom}, left={pad_left}, right={pad_right}"
+            )
 
             # Expand map in all directions
             self.global_map_accum = np.pad(
