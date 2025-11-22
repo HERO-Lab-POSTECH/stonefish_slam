@@ -91,7 +91,7 @@ class Mapping2D:
         sonar_fov: float = 130.0,
         fan_pixel_resolution: float = 0.05,
         sonar_tilt_deg: float = 30.0,
-        range_min: float = 0.1,
+        range_min: float = 0.5,
         keyframe_sample_threshold: int = 50,
         intensity_threshold: int = 50,
         ros_logger=None
@@ -105,7 +105,7 @@ class Mapping2D:
             sonar_fov: Sonar field of view in degrees (default: 130.0)
             fan_pixel_resolution: Fan-shaped image resolution in m/pixel (default: 0.05)
             sonar_tilt_deg: Sonar tilt angle in degrees (0=vertical down, 30=tilted) (default: 30.0)
-            range_min: Minimum sonar range in meters (default: 0.1)
+            range_min: Minimum sonar range in meters (default: 0.5, matches Stonefish config)
             keyframe_sample_threshold: Threshold for adaptive sampling (default: 50)
             intensity_threshold: Minimum intensity for pixels to affect map (default: 50)
         """
@@ -287,7 +287,10 @@ class Mapping2D:
         # Flip horizontally to correct left-right orientation
         cartesian_img = np.fliplr(cartesian_img)
 
-        return cartesian_img
+        # Calculate actual range resolution for accurate distance calculation
+        range_resolution = (max_range - self.range_min) / rows
+
+        return cartesian_img, range_resolution
 
     def get_map_bounds(
         self,
@@ -505,7 +508,7 @@ class Mapping2D:
                     self.tf2_stats['no_timestamp'] += 1
 
             # ===== STEP 1: Convert polar sonar to fan-shaped cartesian =====
-            fan_img = self.polar_to_cartesian_image(polar_img, self.sonar_range, self.sonar_fov)
+            fan_img, range_resolution = self.polar_to_cartesian_image(polar_img, self.sonar_range, self.sonar_fov)
             fan_h, fan_w = fan_img.shape
 
             # ===== STEP 2: Prepare rotation matrix (NED convention) =====
@@ -534,10 +537,10 @@ class Mapping2D:
             yy_valid = yy[mask]
             xx_valid = xx[mask]
 
-            # Convert VALID pixels to local coordinates
-            local_x_raw = (fan_h - yy_valid) * self.fan_pixel_resolution
+            # Convert VALID pixels to local coordinates (use actual range_resolution)
+            local_x_raw = (fan_h - yy_valid) * range_resolution
             local_x = local_x_raw * np.cos(self.sonar_tilt_rad)
-            local_y = (xx_valid - fan_w / 2.0) * self.fan_pixel_resolution
+            local_y = (xx_valid - fan_w / 2.0) * range_resolution
 
             # Transform to global coordinates
             theta = -pose.theta()
