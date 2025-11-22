@@ -596,9 +596,9 @@ class SonarMapping3D:
 
                 # Calculate 3D position in sonar frame
                 # Sonar coordinate system: X=forward, Y=right, Z=down (FRD)
-                # CRITICAL: Keep the MINUS sign for y_sonar (coordinate system convention)
+                # Bearing: negative=left, positive=right
                 x_sonar = range_m * np.cos(vertical_angle) * np.cos(bearing_angle)
-                y_sonar = -range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
+                y_sonar = range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
                 z_sonar = range_m * np.sin(vertical_angle)
 
                 # Transform to world frame
@@ -647,9 +647,10 @@ class SonarMapping3D:
                 # Calculate vertical angle within aperture
                 vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
 
-                # Calculate 3D position
+                # Calculate 3D position in sonar frame
+                # Bearing: negative=left, positive=right
                 x_sonar = range_m * np.cos(vertical_angle) * np.cos(bearing_angle)
-                y_sonar = -range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
+                y_sonar = range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
                 z_sonar = range_m * np.sin(vertical_angle)
 
                 # Transform to world frame
