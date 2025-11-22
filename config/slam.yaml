@@ -48,3 +48,4 @@ slam_node:
     sonar_range: 30.0  # meters
     sonar_fov: 130.0  # degrees
     map_update_interval: 1  # update map every N keyframes (1=every keyframe for real-time visualization)
+    intensity_threshold: 50  # minimum intensity (0-255) for pixels to affect map (filters noise)

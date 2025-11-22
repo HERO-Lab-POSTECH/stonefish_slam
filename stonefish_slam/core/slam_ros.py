@@ -193,6 +193,7 @@ class SLAMNode(SLAM, Node):
         self.declare_parameter('sonar_tilt_deg', 30.0)  # FLS: 60° roll = 30° from horizontal
         self.declare_parameter('map_size', [4000, 4000])
         self.declare_parameter('map_update_interval', 1)  # 매 키프레임마다 업데이트
+        self.declare_parameter('intensity_threshold', 50)  # Minimum intensity for mapping (0-255)
 
         self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
         self.map_update_interval = self.get_parameter('map_update_interval').value
@@ -209,16 +210,19 @@ class SLAMNode(SLAM, Node):
         if self.enable_2d_mapping:
             map_size = tuple(self.get_parameter('map_size').value)
             sonar_fov = self.get_parameter('sonar_fov').value
+            intensity_threshold = self.get_parameter('intensity_threshold').value
 
             self.mapper = Mapping2D(
                 map_resolution=map_resolution,
                 map_size=map_size,
                 sonar_range=sonar_range,
                 sonar_fov=sonar_fov,
-                sonar_tilt_deg=sonar_tilt_deg
+                sonar_tilt_deg=sonar_tilt_deg,
+                intensity_threshold=intensity_threshold
             )
             self.get_logger().info(
-                f"2D Mapping enabled: resolution={map_resolution}m/px, tilt={sonar_tilt_deg}°"
+                f"2D Mapping enabled: resolution={map_resolution}m/px, "
+                f"tilt={sonar_tilt_deg}°, intensity_threshold={intensity_threshold}"
             )
 
         # max delay between an incoming point cloud and dead reckoning

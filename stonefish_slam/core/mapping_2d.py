@@ -93,6 +93,7 @@ class Mapping2D:
         sonar_tilt_deg: float = 30.0,
         range_min: float = 0.1,
         keyframe_sample_threshold: int = 50,
+        intensity_threshold: int = 50,
         ros_logger=None
     ):
         """Initialize 2D mapping parameters.
@@ -106,6 +107,7 @@ class Mapping2D:
             sonar_tilt_deg: Sonar tilt angle in degrees (0=vertical down, 30=tilted) (default: 30.0)
             range_min: Minimum sonar range in meters (default: 0.1)
             keyframe_sample_threshold: Threshold for adaptive sampling (default: 50)
+            intensity_threshold: Minimum intensity for pixels to affect map (default: 50)
         """
         self.map_resolution = map_resolution
         self.max_map_size = map_size
@@ -115,6 +117,7 @@ class Mapping2D:
         self.sonar_tilt_rad = np.deg2rad(sonar_tilt_deg)
         self.range_min = range_min
         self.keyframe_sample_threshold = keyframe_sample_threshold
+        self.intensity_threshold = intensity_threshold
 
         # Logger for debugging
         self.logger = logging.getLogger('Mapping2D')
@@ -511,8 +514,8 @@ class Mapping2D:
                 indexing='ij'
             )
 
-            # Filter zero-intensity pixels
-            mask = fan_sampled > 0
+            # Filter low-intensity pixels (intensity threshold)
+            mask = fan_sampled > self.intensity_threshold
             if not np.any(mask):
                 continue
 
@@ -560,18 +563,26 @@ class Mapping2D:
             intensities_valid = intensities[valid_idx].astype(np.float32)
 
             # Debug: log mapping statistics
-            total_pixels = len(intensities)
+            total_sampled_pixels = sampled_h * sampled_w
+            total_pixels_after_intensity_filter = len(intensities)
             valid_pixels = len(intensities_valid)
-            if total_pixels > 0:
+            filtered_by_intensity = total_sampled_pixels - total_pixels_after_intensity_filter
+
+            if total_pixels_after_intensity_filter > 0:
                 if valid_pixels > 0:
                     self.logger.info(
-                        f"Keyframe mapping: total={total_pixels}, valid={valid_pixels} "
-                        f"({100*valid_pixels/total_pixels:.1f}%), "
-                        f"intensity=[{intensities_valid.min():.1f}, {intensities_valid.max():.1f}]"
+                        f"Keyframe mapping: sampled={total_sampled_pixels}, "
+                        f"filtered_by_intensity={filtered_by_intensity} (threshold>{self.intensity_threshold}), "
+                        f"after_filter={total_pixels_after_intensity_filter}, "
+                        f"valid_in_bounds={valid_pixels} ({100*valid_pixels/total_pixels_after_intensity_filter:.1f}%), "
+                        f"intensity_range=[{intensities_valid.min():.1f}, {intensities_valid.max():.1f}]"
                     )
                 else:
                     self.logger.warning(
-                        f"Keyframe mapping: total={total_pixels}, valid=0 (0.0%) - ALL PIXELS OUT OF BOUNDS! "
+                        f"Keyframe mapping: sampled={total_sampled_pixels}, "
+                        f"filtered_by_intensity={filtered_by_intensity} (threshold>{self.intensity_threshold}), "
+                        f"after_filter={total_pixels_after_intensity_filter}, "
+                        f"valid_in_bounds=0 (0.0%) - ALL PIXELS OUT OF BOUNDS! "
                         f"map_bounds=({self.min_x:.1f}, {self.max_x:.1f}, {self.min_y:.1f}, {self.max_y:.1f}), "
                         f"pose=({pose.x():.1f}, {pose.y():.1f})"
                     )
