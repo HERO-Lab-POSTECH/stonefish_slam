@@ -240,9 +240,16 @@ class SLAMNode(SLAM, Node):
             depth=20
         )
 
-        # QoS profile for publishers (RELIABLE for RViz compatibility)
+        # QoS profile for publishers
         qos_pub_profile = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        # QoS profile for image publishers (BEST_EFFORT for compatibility with image viewers)
+        qos_image_pub_profile = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=10
         )
@@ -304,9 +311,9 @@ class SLAMNode(SLAM, Node):
             self.map_2d_pub = self.create_publisher(
                 Image,
                 SLAM_NS + 'mapping/map_2d_image',
-                qos_profile=qos_pub_profile
+                qos_profile=qos_image_pub_profile
             )
-            self.get_logger().info(f"Publishing 2D map to: {SLAM_NS}mapping/map_2d_image")
+            self.get_logger().info(f"Publishing 2D map to: {SLAM_NS}mapping/map_2d_image (QoS: BEST_EFFORT)")
 
         # tf broadcaster to show pose
         self.tf = TransformBroadcaster(self)
@@ -486,6 +493,10 @@ class SLAMNode(SLAM, Node):
                         self.mapping_queue.put(new_keyframes)
                         self.last_map_update_kf = len(self.keyframes)
                         self.mapping_stats['maps_queued'] += 1
+                        self.get_logger().info(
+                            f"Queued {len(new_keyframes)} keyframes for mapping "
+                            f"(queue: {self.mapping_queue.qsize()}/{self.mapping_queue.maxsize})"
+                        )
                     else:
                         self.mapping_stats['maps_dropped'] += 1
                         self.get_logger().warn(
@@ -725,12 +736,14 @@ class SLAMNode(SLAM, Node):
                                 throttle_duration_sec=5.0
                             )
                 except Exception as e:
-                    self.get_logger().error(f"Mapping failed: {e}")
+                    import traceback
+                    self.get_logger().error(f"Mapping failed: {e}\n{traceback.format_exc()}")
 
             except queue.Empty:
                 continue
             except Exception as e:
-                self.get_logger().error(f"Mapping worker error: {e}")
+                import traceback
+                self.get_logger().error(f"Mapping worker error: {e}\n{traceback.format_exc()}")
 
     def destroy_node(self):
         """Cleanup when node is destroyed."""
