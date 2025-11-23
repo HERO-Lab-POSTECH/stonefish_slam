@@ -123,6 +123,43 @@ else()
   message(WARNING "pybind11 or Eigen3 not found, CFAR C++ module will not be built")
 endif()
 
+# DDA Traversal module (only needs Eigen)
+if(pybind11_FOUND AND EIGEN3_FOUND)
+  # Get Python include directories
+  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+
+  # Manual library creation for ROS2
+  add_library(dda_traversal MODULE stonefish_slam/cpp/dda_traversal.cpp)
+
+  target_link_libraries(dda_traversal PRIVATE
+    pybind11::module
+    pybind11::lto
+    Eigen3::Eigen
+    Python3::Module
+  )
+
+  target_include_directories(dda_traversal PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stonefish_slam/cpp
+    ${pybind11_INCLUDE_DIRS}
+    ${Python3_INCLUDE_DIRS}
+  )
+
+  set_target_properties(dda_traversal PROPERTIES
+    PREFIX "${PYTHON_MODULE_PREFIX}"
+    SUFFIX "${PYTHON_MODULE_EXTENSION}"
+    CXX_VISIBILITY_PRESET "hidden"
+  )
+
+  # Install to Python package directory
+  install(TARGETS dda_traversal
+    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}
+  )
+
+  message(STATUS "DDA Traversal module will be built with Python ${Python3_VERSION}")
+else()
+  message(WARNING "pybind11 or Eigen3 not found, DDA Traversal C++ module will not be built")
+endif()
+
 # PCL module for fast ICP
 if(libpointmatcher_FOUND AND PCL_FOUND AND pybind11_FOUND)
   message(STATUS "Building PCL module with libpointmatcher and PCL")

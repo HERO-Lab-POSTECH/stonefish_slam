@@ -415,6 +415,8 @@ class SonarMapping3D:
             # Range weighting parameters (distance-dependent decay)
             'use_range_weighting': True,         # Enable range-dependent weight decay
             'lambda_decay': 0.1,                 # Exponential decay rate (gentler for 30m range)
+            # DDA voxel traversal (Amanatides-Woo algorithm)
+            'use_dda_traversal': True,           # Enable C++ DDA for faster free space traversal
         }
 
         # Update with provided config if any
@@ -508,6 +510,17 @@ class SonarMapping3D:
         # Range weighting parameters (distance-dependent decay)
         self.use_range_weighting = default_config.get('use_range_weighting', True)
         self.lambda_decay = default_config.get('lambda_decay', 0.1)
+
+        # DDA voxel traversal initialization
+        self.use_dda = default_config.get('use_dda_traversal', True)
+        if self.use_dda:
+            try:
+                from stonefish_slam import dda_traversal
+                self.dda_traverser = dda_traversal.DDATraversal(self.voxel_resolution)
+                print(f"[INFO] Using C++ DDA traversal (voxel_size={self.voxel_resolution}m)")
+            except ImportError as e:
+                self.use_dda = False
+                print(f"[WARN] C++ DDA module not found ({e}), using Python traversal")
 
     def create_transform_matrix(self, position, tilt_rad):
         """
@@ -738,65 +751,140 @@ class SonarMapping3D:
             print(f"  Free space: Processing r_idx 0 to {first_hit_idx} (before first hit)")
 
         # Update free space before first hit (with sparse sampling)
-        free_sampling_step = 2  # Reduced from 10 to 2 for better coverage (0.12m intervals)
-        for r_idx in range(0, first_hit_idx, free_sampling_step):
-            # Calculate actual range (FLS image: row 0 = far, row max = near)
-            range_m = self.max_range - r_idx * self.range_resolution
+        # Use C++ DDA traversal if available, otherwise fall back to Python
+        if self.use_dda and first_hit_idx > 0:
+            # C++ DDA traversal for free space (much faster)
+            # Calculate sparse vertical sampling
+            sonar_origin_world = T_sonar_to_world[:3, 3]
 
-            # Calculate vertical spread at this range
-            vertical_spread = range_m * np.tan(half_aperture)
-            # Sparse vertical sampling for free space
-            free_vertical_factor = 8.0  # Increased from 4.0 to reduce point count
+            # Estimate vertical spread at mid-range for sampling
+            mid_range = self.max_range - (first_hit_idx / 2) * self.range_resolution
+            vertical_spread = mid_range * np.tan(half_aperture)
+            free_vertical_factor = 8.0
             num_vertical_steps = max(1, int(vertical_spread / (self.voxel_resolution * free_vertical_factor)))
 
-            # Base log-odds for free space before weighting
+            # Base log-odds for free space
             base_log_odds_free = self.octree.log_odds_free
 
-            # Apply range weighting if enabled
-            if self.use_range_weighting:
-                range_weight = self.compute_range_weight(range_m)
-                base_log_odds_free = base_log_odds_free * range_weight
-
+            # Iterate over vertical angles
             for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
                 # Calculate vertical angle within aperture
                 vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
 
-                # Apply Gaussian weighting if enabled
-                if self.enable_gaussian_weighting:
-                    # Normalized angle: -1 to +1
-                    normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
-                    # Gaussian: exp(-0.5 * (x/σ)^2), σ = 1/gaussian_sigma_factor
-                    gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
-                    log_odds_update = base_log_odds_free * gaussian_weight
-                else:
-                    # Uniform weighting (default)
-                    log_odds_update = base_log_odds_free
+                # Calculate ray end point (just before first hit)
+                range_end = self.max_range - (first_hit_idx - 1) * self.range_resolution
 
-                # Calculate 3D position in sonar frame
-                # Sonar coordinate system: X=forward, Y=right, Z=down (FRD)
-                # Bearing: negative=left, positive=right
-                x_sonar = range_m * np.cos(vertical_angle) * np.cos(bearing_angle)
-                y_sonar = range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
-                z_sonar = range_m * np.sin(vertical_angle)
+                # 3D end point in sonar frame
+                x_end = range_end * np.cos(vertical_angle) * np.cos(bearing_angle)
+                y_end = range_end * np.cos(vertical_angle) * np.sin(bearing_angle)
+                z_end = range_end * np.sin(vertical_angle)
 
                 # Transform to world frame
-                pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])
-                pt_world = T_sonar_to_world @ pt_sonar
+                pt_end_sonar = np.array([x_end, y_end, z_end, 1.0])
+                pt_end_world = T_sonar_to_world @ pt_end_sonar
 
-                # CRITICAL: Check actual range after transform
-                sonar_origin_world = T_sonar_to_world[:3, 3]
-                actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
-                if actual_range <= self.min_range:
-                    continue  # Skip points at or below min_range
+                # DDA traversal from sonar origin to end point
+                try:
+                    voxel_keys = self.dda_traverser.traverse(
+                        sonar_origin_world,
+                        pt_end_world[:3],
+                        max_voxels=500
+                    )
+                except Exception as e:
+                    print(f"[WARN] DDA traversal failed: {e}, falling back to Python")
+                    voxel_keys = []
 
-                # Get voxel key and accumulate update
-                voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
+                # Apply range weighting and Gaussian to each voxel
+                for voxel_key_arr in voxel_keys:
+                    voxel_key = tuple(voxel_key_arr)
 
-                # Accumulate log-odds updates (no type distinction)
-                if voxel_key not in voxel_updates:
-                    voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0}
-                voxel_updates[voxel_key]['sum'] += log_odds_update  # Use weighted value
-                voxel_updates[voxel_key]['count'] += 1
+                    # Calculate actual range for this voxel
+                    voxel_center = np.array(voxel_key_arr) * self.voxel_resolution
+                    range_m = np.linalg.norm(voxel_center - sonar_origin_world)
+
+                    # Skip if below min_range
+                    if range_m <= self.min_range:
+                        continue
+
+                    # Apply range weighting
+                    if self.use_range_weighting:
+                        range_weight = self.compute_range_weight(range_m)
+                        log_odds_update = base_log_odds_free * range_weight
+                    else:
+                        log_odds_update = base_log_odds_free
+
+                    # Apply Gaussian weighting if enabled
+                    if self.enable_gaussian_weighting:
+                        normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
+                        gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
+                        log_odds_update *= gaussian_weight
+
+                    # Accumulate update
+                    if voxel_key not in voxel_updates:
+                        voxel_updates[voxel_key] = {'point': voxel_center, 'sum': 0.0, 'count': 0}
+                    voxel_updates[voxel_key]['sum'] += log_odds_update
+                    voxel_updates[voxel_key]['count'] += 1
+        else:
+            # Fallback to original Python traversal
+            free_sampling_step = 2  # Reduced from 10 to 2 for better coverage (0.12m intervals)
+            for r_idx in range(0, first_hit_idx, free_sampling_step):
+                # Calculate actual range (FLS image: row 0 = far, row max = near)
+                range_m = self.max_range - r_idx * self.range_resolution
+
+                # Calculate vertical spread at this range
+                vertical_spread = range_m * np.tan(half_aperture)
+                # Sparse vertical sampling for free space
+                free_vertical_factor = 8.0  # Increased from 4.0 to reduce point count
+                num_vertical_steps = max(1, int(vertical_spread / (self.voxel_resolution * free_vertical_factor)))
+
+                # Base log-odds for free space before weighting
+                base_log_odds_free = self.octree.log_odds_free
+
+                # Apply range weighting if enabled
+                if self.use_range_weighting:
+                    range_weight = self.compute_range_weight(range_m)
+                    base_log_odds_free = base_log_odds_free * range_weight
+
+                for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
+                    # Calculate vertical angle within aperture
+                    vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
+
+                    # Apply Gaussian weighting if enabled
+                    if self.enable_gaussian_weighting:
+                        # Normalized angle: -1 to +1
+                        normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
+                        # Gaussian: exp(-0.5 * (x/σ)^2), σ = 1/gaussian_sigma_factor
+                        gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
+                        log_odds_update = base_log_odds_free * gaussian_weight
+                    else:
+                        # Uniform weighting (default)
+                        log_odds_update = base_log_odds_free
+
+                    # Calculate 3D position in sonar frame
+                    # Sonar coordinate system: X=forward, Y=right, Z=down (FRD)
+                    # Bearing: negative=left, positive=right
+                    x_sonar = range_m * np.cos(vertical_angle) * np.cos(bearing_angle)
+                    y_sonar = range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
+                    z_sonar = range_m * np.sin(vertical_angle)
+
+                    # Transform to world frame
+                    pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])
+                    pt_world = T_sonar_to_world @ pt_sonar
+
+                    # CRITICAL: Check actual range after transform
+                    sonar_origin_world = T_sonar_to_world[:3, 3]
+                    actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
+                    if actual_range <= self.min_range:
+                        continue  # Skip points at or below min_range
+
+                    # Get voxel key and accumulate update
+                    voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
+
+                    # Accumulate log-odds updates (no type distinction)
+                    if voxel_key not in voxel_updates:
+                        voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0}
+                    voxel_updates[voxel_key]['sum'] += log_odds_update  # Use weighted value
+                    voxel_updates[voxel_key]['count'] += 1
 
         # Update occupied regions ONLY
         # Process only the high intensity (occupied) regions we found

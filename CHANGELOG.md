@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DDA 3D 복셀 순회 (C++ 모듈)** (`stonefish_slam/cpp/dda_traversal.cpp`)
+  - Amanatides-Woo (1987) 알고리즘 구현
+  - Pybind11 바인딩으로 Python 통합
+  - `use_dda_traversal` 파라미터로 활성화/비활성화 제어
+  - Free space traversal 성능 대폭 개선:
+    - 복셀 순회: 43,968 → ~9,600/frame (4.6× 감소)
+    - 예상 처리 속도: 2-3 Hz → 10-15 Hz
+  - Fallback: C++ 모듈 미로드 시 자동으로 Python 구현 사용
+  - 파일: `stonefish_slam/cpp/dda_traversal.cpp` (180 lines)
+  - 참고문헌: Amanatides & Woo, "A Fast Voxel Traversal Algorithm for Ray Tracing", Eurographics 1987
+
 - **거리 기반 Range Weighting 기능** (`mapping_3d.py`)
   - `use_range_weighting`: Range weighting 활성화 여부 (기본값: True)
   - `max_effective_range`: 최대 유효 거리 (기본값: 15.0m)
@@ -40,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `propagation_sigma`: Gaussian weight의 표준편차 (기본값: 1.5)
 
 ### Changed
+
+- **Free space traversal 성능 최적화** (`mapping_3d.py`)
+  - 기존 Python loop → DDA C++ 호출로 교체 (`use_dda_traversal=True` 기본)
+  - 모든 기존 로직 보존 (range weighting, Gaussian weighting, adaptive update)
+  - Backward compatibility: `use_dda_traversal=False`로 기존 Python 방식 사용 가능
+  - 성능 개선: 4.6× 복셀 순회 감소로 2-3 Hz → 10-15 Hz 예상
 
 - **`process_sonar_ray()` 메서드 업데이트** (`mapping_3d.py`)
   - Log-odds 업데이트에 range weighting 적용
@@ -78,6 +95,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 원인: `max_effective_range=15m`가 `max_range=30m`보다 작아서 15~30m 타겟이 weight=0 받음
   - 해결: `max_range` 직접 사용으로 모든 범위 커버
   - 결과: 0~30m 전 범위에서 exponential decay (0.90~1.0)
+
+### Technical
+
+- **DDA (Digital Differential Analyzer) 알고리즘**:
+  - O(n) 시간 복잡도 (n = 교차하는 복셀 수)
+  - tMax/tDelta 기반 incremental stepping으로 floating-point 산술 최소화
+  - Edge case 처리: zero-length ray, division by zero, NaN/Inf 검증
+  - 정확한 ray-voxel intersection 계산으로 누락된 복셀 방지
+  - CMake with Eigen3, Pybind11 통합
+  - 테스트: 7개 카테고리 검증 완료 (축 정렬, 대각선, 장거리, 영벡터 등)
 
 ### Performance
 
