@@ -17,6 +17,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from collections import defaultdict
 import gtsam
+import time  # For performance profiling
 
 
 class OctNode:
@@ -403,6 +404,11 @@ class SonarMapping3D:
             'max_frames': 0,               # 0=unlimited
             'dynamic_expansion': True,     # Enable dynamic map expansion
             'adaptive_update': True,       # Enable adaptive updating (linear protection)
+            # Bearing propagation parameters (NEW)
+            'enable_propagation': False,   # Enable bearing propagation (default off for testing)
+            'propagation_radius': 2,       # Number of adjacent bearings to propagate to
+            'propagation_sigma': 1.5,      # Gaussian decay sigma for propagation weight
+            'enable_profiling': True,      # Enable performance profiling
         }
 
         # Update with provided config if any
@@ -473,6 +479,22 @@ class SonarMapping3D:
         # Frame counter
         self.frame_count = 0
 
+        # Bearing propagation settings
+        self.enable_propagation = default_config.get('enable_propagation', False)
+        self.propagation_radius = default_config.get('propagation_radius', 2)
+        self.propagation_sigma = default_config.get('propagation_sigma', 1.5)
+
+        # Performance profiling
+        self.enable_profiling = default_config.get('enable_profiling', True)
+        self.performance_stats = {
+            'frame_times': [],           # Processing times per frame
+            'voxel_updates': [],          # Number of voxel updates per frame
+            'ray_times': [],              # Processing times per ray
+            'total_frames': 0,
+            'total_voxels_updated': 0,
+            'propagation_times': []       # Times for propagation operations
+        }
+
     def create_transform_matrix(self, position, tilt_rad):
         """
         Create 4x4 transform with tilt angle (pitch rotation)
@@ -533,6 +555,91 @@ class SonarMapping3D:
         T[:3, 3] = position
 
         return T
+
+    def propagate_bearing_updates(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
+        """
+        Propagate voxel updates from a sampled bearing to adjacent bearings
+
+        This method implements spatial coherence: adjacent bearings often observe
+        similar surfaces, so we can propagate updates with decreasing weight.
+
+        Args:
+            voxel_updates: Dictionary of voxel updates from sampled bearing
+            sampled_bearing_idx: Index of the sampled bearing (0, 4, 8, ...)
+            bearing_bins: Total number of bearings (512)
+            T_sonar_to_world: 4x4 transform matrix from sonar to world
+
+        Returns:
+            Dictionary of propagated voxel updates
+        """
+        if not self.enable_propagation:
+            return {}
+
+        propagated_updates = {}
+
+        # Calculate propagation range
+        for offset in range(-self.propagation_radius, self.propagation_radius + 1):
+            if offset == 0:
+                continue  # Skip original bearing (already processed)
+
+            adjacent_bearing_idx = sampled_bearing_idx + offset
+
+            # Boundary check
+            if adjacent_bearing_idx < 0 or adjacent_bearing_idx >= bearing_bins:
+                continue
+
+            # Calculate Gaussian weight based on distance
+            weight = np.exp(-0.5 * (offset / self.propagation_sigma)**2)
+
+            # Get bearing angle for adjacent bearing
+            adjacent_bearing = self.bearing_angles[adjacent_bearing_idx]
+            bearing_diff = adjacent_bearing - self.bearing_angles[sampled_bearing_idx]
+
+            # For each voxel update in the original bearing
+            for voxel_key, update_info in voxel_updates.items():
+                # Calculate rotated position for adjacent bearing
+                # The voxel position needs to be rotated around sonar origin
+
+                # Get original point in world frame
+                original_point = update_info['point']
+
+                # Transform back to sonar frame
+                sonar_origin_world = T_sonar_to_world[:3, 3]
+                relative_pos = original_point - sonar_origin_world
+
+                # Rotate around Z axis (bearing rotation in sonar frame)
+                # Create rotation matrix for bearing difference
+                cos_diff = np.cos(bearing_diff)
+                sin_diff = np.sin(bearing_diff)
+                rotation_z = np.array([
+                    [cos_diff, -sin_diff, 0],
+                    [sin_diff, cos_diff, 0],
+                    [0, 0, 1]
+                ])
+
+                # Apply rotation and translate back
+                rotated_pos = rotation_z @ relative_pos
+                adjusted_point = rotated_pos + sonar_origin_world
+
+                # Create new voxel key for adjusted position
+                adjacent_voxel_key = self.octree.world_to_key(
+                    adjusted_point[0], adjusted_point[1], adjusted_point[2]
+                )
+
+                # Apply weighted update
+                weighted_sum = update_info['sum'] * weight
+
+                if adjacent_voxel_key not in propagated_updates:
+                    propagated_updates[adjacent_voxel_key] = {
+                        'point': adjusted_point,
+                        'sum': 0.0,
+                        'count': 0
+                    }
+
+                propagated_updates[adjacent_voxel_key]['sum'] += weighted_sum
+                propagated_updates[adjacent_voxel_key]['count'] += update_info['count']
+
+        return propagated_updates
 
     def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates):
         """
@@ -684,6 +791,10 @@ class SonarMapping3D:
             polar_image: 2D numpy array (height x width) with intensity values
             robot_pose: Robot pose (dict with 'position'/'orientation' or ROS Pose message)
         """
+        # Start timing if profiling enabled
+        if self.enable_profiling:
+            frame_start_time = time.time()
+
         # Ensure image is numpy array
         if not isinstance(polar_image, np.ndarray):
             polar_image = np.array(polar_image)
@@ -711,35 +822,103 @@ class SonarMapping3D:
         # Initialize voxel update accumulator for this frame
         # Dictionary to accumulate updates: key -> (sum_updates, count)
         voxel_updates = {}  # Will store accumulated updates per voxel
+        all_voxel_updates = {}  # Combined updates (original + propagated)
 
         # Process subset of bearings for efficiency
         bearing_divisor = 128  # Reduced from 256 to decrease point count
         bearing_step = max(1, bearing_bins // bearing_divisor)
 
+        # Track processed bearings for propagation
+        processed_bearings = []
 
         for b_idx in range(0, bearing_bins, bearing_step):
+            if self.enable_profiling:
+                ray_start = time.time()
+
             bearing_angle = self.bearing_angles[b_idx]
             intensity_profile = polar_image[:, b_idx]
+
+            # Clear voxel_updates for this bearing
+            voxel_updates.clear()
 
             # Process this ray and accumulate updates
             self.process_sonar_ray(bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates)
 
+            # Add to all updates
+            for voxel_key, update_info in voxel_updates.items():
+                if voxel_key not in all_voxel_updates:
+                    all_voxel_updates[voxel_key] = {'point': update_info['point'], 'sum': 0.0, 'count': 0}
+                all_voxel_updates[voxel_key]['sum'] += update_info['sum']
+                all_voxel_updates[voxel_key]['count'] += update_info['count']
+
+            # Propagate to adjacent bearings if enabled
+            if self.enable_propagation and len(voxel_updates) > 0:
+                if self.enable_profiling:
+                    prop_start = time.time()
+
+                propagated = self.propagate_bearing_updates(
+                    voxel_updates, b_idx, bearing_bins, T_sonar_to_world
+                )
+
+                # Merge propagated updates
+                for voxel_key, update_info in propagated.items():
+                    if voxel_key not in all_voxel_updates:
+                        all_voxel_updates[voxel_key] = {'point': update_info['point'], 'sum': 0.0, 'count': 0}
+                    all_voxel_updates[voxel_key]['sum'] += update_info['sum']
+                    all_voxel_updates[voxel_key]['count'] += update_info['count']
+
+                if self.enable_profiling:
+                    prop_time = time.time() - prop_start
+                    self.performance_stats['propagation_times'].append(prop_time)
+
+            processed_bearings.append(b_idx)
+
+            if self.enable_profiling:
+                ray_time = time.time() - ray_start
+                self.performance_stats['ray_times'].append(ray_time)
+
         # Apply averaged updates to all voxels
-        for voxel_key, update_info in voxel_updates.items():
+        num_voxels_updated = 0
+        for voxel_key, update_info in all_voxel_updates.items():
             # Calculate average update
             avg_update = update_info['sum'] / update_info['count']
 
             # Apply update (adaptive only if positive log-odds = occupied)
             adaptive = (avg_update > 0)
             self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
-
-            # Debug: Log some statistics (commented out - too verbose)
-            # if np.random.random() < 0.001:  # Sample 0.1% for better debugging
-            #     print(f"Voxel {voxel_key}: {update_info['count']} rays, avg_update={avg_update:.4f}, type={update_info['type']}, log_odds_occupied={self.octree.log_odds_occupied}")
-
+            num_voxels_updated += 1
 
         # Increment frame counter
         self.frame_count += 1
+
+        # Performance profiling statistics
+        if self.enable_profiling:
+            frame_time = time.time() - frame_start_time
+            self.performance_stats['frame_times'].append(frame_time)
+            self.performance_stats['voxel_updates'].append(num_voxels_updated)
+            self.performance_stats['total_frames'] += 1
+            self.performance_stats['total_voxels_updated'] += num_voxels_updated
+
+            # Print statistics every 10 frames
+            if self.frame_count % 10 == 0:
+                avg_frame_time = np.mean(self.performance_stats['frame_times'][-10:])
+                avg_voxels = np.mean(self.performance_stats['voxel_updates'][-10:])
+                total_voxels = len(self.octree.voxels)
+
+                print(f"\n[3D Mapping Performance - Frame {self.frame_count}]")
+                print(f"  Avg frame time (last 10): {avg_frame_time:.3f}s")
+                print(f"  Avg voxels updated/frame: {avg_voxels:.0f}")
+                print(f"  Total voxels in map: {total_voxels}")
+                print(f"  Bearings processed: {len(processed_bearings)} (step={bearing_step})")
+
+                if self.enable_propagation and len(self.performance_stats['propagation_times']) > 0:
+                    avg_prop_time = np.mean(self.performance_stats['propagation_times'][-10:])
+                    print(f"  Avg propagation time: {avg_prop_time:.4f}s")
+                    print(f"  Propagation enabled: radius={self.propagation_radius}, sigma={self.propagation_sigma}")
+
+                # Memory usage estimate (rough)
+                memory_mb = (total_voxels * 100) / (1024 * 1024)  # ~100 bytes per voxel estimate
+                print(f"  Estimated memory usage: {memory_mb:.1f} MB")
 
         # Optional: Clear old voxels if frame limit reached
         if self.max_frames > 0 and self.frame_count > self.max_frames:
@@ -894,3 +1073,49 @@ class SonarMapping3D:
         """Reset the probabilistic map"""
         self.octree.clear()
         self.frame_count = 0
+        # Reset performance stats
+        if self.enable_profiling:
+            self.performance_stats = {
+                'frame_times': [],
+                'voxel_updates': [],
+                'ray_times': [],
+                'total_frames': 0,
+                'total_voxels_updated': 0,
+                'propagation_times': []
+            }
+
+    def get_performance_summary(self):
+        """
+        Get performance statistics summary
+
+        Returns:
+            Dictionary with performance metrics
+        """
+        if not self.enable_profiling or len(self.performance_stats['frame_times']) == 0:
+            return {'profiling_enabled': False}
+
+        stats = {
+            'profiling_enabled': True,
+            'total_frames': self.performance_stats['total_frames'],
+            'total_voxels_updated': self.performance_stats['total_voxels_updated'],
+            'avg_frame_time': np.mean(self.performance_stats['frame_times']) if len(self.performance_stats['frame_times']) > 0 else 0,
+            'avg_voxels_per_frame': np.mean(self.performance_stats['voxel_updates']) if len(self.performance_stats['voxel_updates']) > 0 else 0,
+            'avg_ray_time': np.mean(self.performance_stats['ray_times']) if len(self.performance_stats['ray_times']) > 0 else 0,
+            'total_rays_processed': len(self.performance_stats['ray_times']),
+        }
+
+        if self.enable_propagation and len(self.performance_stats['propagation_times']) > 0:
+            stats['propagation_enabled'] = True
+            stats['avg_propagation_time'] = np.mean(self.performance_stats['propagation_times'])
+            stats['propagation_radius'] = self.propagation_radius
+            stats['propagation_sigma'] = self.propagation_sigma
+        else:
+            stats['propagation_enabled'] = False
+
+        # Add percentiles for frame times
+        if len(self.performance_stats['frame_times']) > 0:
+            stats['frame_time_p50'] = np.percentile(self.performance_stats['frame_times'], 50)
+            stats['frame_time_p90'] = np.percentile(self.performance_stats['frame_times'], 90)
+            stats['frame_time_p99'] = np.percentile(self.performance_stats['frame_times'], 99)
+
+        return stats
