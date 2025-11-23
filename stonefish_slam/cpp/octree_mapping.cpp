@@ -137,11 +137,13 @@ void OctreeMapping::insert_point_cloud(
             const auto& key = batch.keys[i];
             double log_odds_update = batch.log_odds_updates[i];
 
-            // Direct log-odds update (OctoMap handles clamping)
-            tree_->updateNode(key, log_odds_update > 0.0);
-
-            // For more precise control, manually set log-odds
+            // Get or create node
             octomap::OcTreeNode* node = tree_->search(key);
+            if (!node) {
+                // Create node with neutral probability (log-odds = 0)
+                node = tree_->updateNode(key, 0.0f);
+            }
+
             if (node) {
                 // Get current log-odds
                 double current_log_odds = node->getLogOdds();
@@ -169,11 +171,13 @@ void OctreeMapping::insert_point_cloud(
         // Update node using OctoMap's built-in log-odds logic
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
-            // Direct log-odds update (OctoMap handles clamping)
-            tree_->updateNode(key, log_odds_update > 0.0);
-
-            // For more precise control, manually set log-odds
+            // Get or create node
             octomap::OcTreeNode* node = tree_->search(key);
+            if (!node) {
+                // Create node with neutral probability (log-odds = 0)
+                node = tree_->updateNode(key, 0.0f);
+            }
+
             if (node) {
                 // Get current log-odds
                 double current_log_odds = node->getLogOdds();
@@ -222,8 +226,8 @@ py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
         if (tree_->isNodeOccupied(*it)) {
             double occupancy = it->getOccupancy();
             if (occupancy >= threshold) {
-                // Get voxel center coordinates
-                octomap::point3d coord = it.getCoordinate();
+                // Get voxel center coordinates using keyToCoord (more reliable)
+                octomap::point3d coord = tree_->keyToCoord(it.getKey());
                 result_ptr[idx * 3 + 0] = coord.x();
                 result_ptr[idx * 3 + 1] = coord.y();
                 result_ptr[idx * 3 + 2] = coord.z();
@@ -237,7 +241,15 @@ py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
 
 double OctreeMapping::query_cell(double x, double y, double z) {
     octomap::point3d query_point(x, y, z);
-    octomap::OcTreeNode* node = tree_->search(query_point);
+
+    // Convert point to voxel key (handles arbitrary coordinates)
+    octomap::OcTreeKey key;
+    if (!tree_->coordToKeyChecked(query_point, key)) {
+        return 0.5;  // Out of bounds
+    }
+
+    // Search using key (not coordinate)
+    octomap::OcTreeNode* node = tree_->search(key);
 
     if (node) {
         return node->getOccupancy();  // Returns probability in [0, 1]

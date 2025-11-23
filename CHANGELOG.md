@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Phase 3 Critical Bug Fixes** (`octree_mapping.cpp`)
+  - `insert_point_cloud()`: Log-odds 값을 직접 사용 (boolean 대신)
+    - 기존: `logodds = occupied ? occupied_logodds : free_logodds`
+    - 수정: `logodds = point.occupancy` (범위: -2.0 ~ 2.0)
+    - 결과: Occupancy 확률값이 이제 정확하게 반영됨
+
+  - `query_cell()`: 임의 좌표를 정확한 voxel key로 변환
+    - 기존: 좌표를 그대로 key로 사용 (불일치)
+    - 수정: `key = ot::Pointcloud::genKey(x, y, z)` 사용
+    - 결과: 정확한 voxel 쿼리 가능
+
+  - `get_occupied_cells()`: OctoMap iterator 기반 좌표 반환
+    - 기존: `keyToCoord()` 미사용으로 임의 좌표 반환
+    - 수정: `coord = map->keyToCoord(key)` 사용
+    - 결과: Visualization에서 정확한 voxel 위치 표시
+
+- **Phase 3 발견 문제점 기록**
+  - **Free space voxel 0개**: Python SLAM 파이프라인에서 C++ 백엔드로 free space 정보 전달 경로 불분명
+    - 원인 추정: `process_sonar_image()` 단계에서 free space 제외 또는 누락
+    - 디버깅 필요: Ray 정보 → Voxel update → C++ insert 경로 추적
+
+  - **Occupancy saturation**: p=0.807에서 포화 (clamping 문제 추정)
+    - Log-odds clamping range: [-3.0, 3.0] 설정
+    - 누적 업데이트 시 한 계획이 여러 번 반영될 가능성
+    - 해결책: Batch 중복 제거 또는 threshold 동적 조정 필요
+
 ### Added
 
 - **C++ OctoMap Backend for 3D Mapping** (`octree_mapping.cpp/h`, `mapping_3d.py`)
