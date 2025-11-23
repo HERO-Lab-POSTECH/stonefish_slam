@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Gaussian Weighting 기능** (`mapping_3d.py`)
+  - `enable_gaussian_weighting`: Gaussian vs Uniform distribution 선택 (기본값: False)
+  - `gaussian_sigma_factor`: Gaussian 분포의 폭 조절 (기본값: 2.5)
+  - Vertical aperture에 대해 intensity weighting 적용
+  - 수식: `log_odds_update = base_log_odds × exp(-0.5 × (normalized_angle × sigma_factor)²)`
+  - 기본값 Uniform distribution으로 물리적 정확성 우선 (문헌 근거)
+  - 사용자 선택으로 Gaussian 활성화 가능하며 하위 호환성 유지
+
 - **성능 프로파일링 도구** (`mapping_3d.py`)
   - `performance_stats` 딕셔너리로 프레임 처리 시간 및 복셀 업데이트 수 추적
   - `get_performance_summary()` 메서드로 누적 성능 통계 제공
