@@ -414,8 +414,7 @@ class SonarMapping3D:
             'gaussian_sigma_factor': 2.5,        # Sigma = aperture / factor (smaller = wider spread)
             # Range weighting parameters (distance-dependent decay)
             'use_range_weighting': True,         # Enable range-dependent weight decay
-            'max_effective_range': 15.0,         # Maximum effective range in meters
-            'lambda_decay': 0.3,                 # Exponential decay rate
+            'lambda_decay': 0.1,                 # Exponential decay rate (gentler for 30m range)
         }
 
         # Update with provided config if any
@@ -508,8 +507,7 @@ class SonarMapping3D:
 
         # Range weighting parameters (distance-dependent decay)
         self.use_range_weighting = default_config.get('use_range_weighting', True)
-        self.max_effective_range = default_config.get('max_effective_range', 15.0)
-        self.lambda_decay = default_config.get('lambda_decay', 0.3)
+        self.lambda_decay = default_config.get('lambda_decay', 0.1)
 
     def create_transform_matrix(self, position, tilt_rad):
         """
@@ -572,29 +570,31 @@ class SonarMapping3D:
 
         return T
 
-    def compute_range_weight(self, range_m, max_range=None, lambda_decay=None):
+    def compute_range_weight(self, range_m, lambda_decay=None):
         """
         Compute distance-dependent weight using exponential decay.
 
-        Closer measurements are more reliable, so they receive higher weight.
+        Uses sonar's max_range as the reference for decay calculation.
+        No hard cutoff - weight decays smoothly from 1.0 (near) to ~0.9 (max_range).
 
         Args:
             range_m: Measured range in meters
-            max_range: Maximum effective range (use self.max_effective_range if None)
             lambda_decay: Decay rate (use self.lambda_decay if None)
 
         Returns:
-            weight: [0.0, 1.0], exponential decay with hard cutoff
+            weight: (0.0, 1.0], exponential decay w(r) = exp(-λ * r / max_range)
+
+        Literature:
+            - Fairfield 2007: σ(r) = σ₀ + k·r
+            - Pinto 2015: SNR decreases with range
         """
-        if max_range is None:
-            max_range = self.max_effective_range
         if lambda_decay is None:
             lambda_decay = self.lambda_decay
 
-        if range_m > max_range:
-            return 0.0  # Hard cutoff beyond effective range
-
-        return np.exp(-lambda_decay * range_m / max_range)
+        # Exponential decay: w(r) = exp(-λ * r / r_max)
+        # At r=0: w=1.0
+        # At r=max_range: w=exp(-λ) (e.g., λ=0.1 → w≈0.90)
+        return np.exp(-lambda_decay * range_m / self.max_range)
 
     def propagate_bearing_updates_optimized(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
         """

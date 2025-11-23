@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `max_effective_range`: 최대 유효 거리 설정
   - `lambda_decay`: 감소 상수 설정
 
+- **Range weighting 파라미터 간소화** (`mapping_3d.py`)
+  - `max_effective_range` 파라미터 제거 (불필요)
+  - `max_range` (30m) 직접 사용으로 변경
+  - `lambda_decay`: 0.3 → 0.1 (30m 범위에 맞춘 완만한 감쇠)
+  - Hard cutoff 제거 (모든 범위에서 smooth decay)
+
 - **Phase 2: Bearing Propagation 최적화** (`mapping_3d.py`)
   - `propagate_bearing_updates()` → `propagate_bearing_updates_optimized()` 교체
   - 전체 3D 변환 대신 Z축 회전만 수행 (2D 회전 최적화)
@@ -65,6 +71,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **설정 파라미터 추가** (`Mapping3D` 클래스)
   - `enable_propagation`: Bearing propagation 활성화 여부 (기본값: False → True)
   - `enable_profiling`: 성능 측정 활성화 여부 (기본값: True)
+
+### Fixed
+
+- **3D 맵핑 포인트 클라우드 empty 문제 해결** (`mapping_3d.py`)
+  - 원인: `max_effective_range=15m`가 `max_range=30m`보다 작아서 15~30m 타겟이 weight=0 받음
+  - 해결: `max_range` 직접 사용으로 모든 범위 커버
+  - 결과: 0~30m 전 범위에서 exponential decay (0.90~1.0)
 
 ### Performance
 
