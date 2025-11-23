@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **거리 기반 Range Weighting 기능** (`mapping_3d.py`)
+  - `use_range_weighting`: Range weighting 활성화 여부 (기본값: True)
+  - `max_effective_range`: 최대 유효 거리 (기본값: 15.0m)
+  - `lambda_decay`: 지수 감소 상수 (기본값: 0.3)
+  - `compute_range_weight()` 메서드: 거리 기반 가중치 계산
+  - 수식: `w(r) = exp(-λ × r / r_max)` (r ≤ r_max인 경우), 그 외 0
+  - 자유공간 및 점유공간 업데이트에 range weighting 적용
+  - 원거리 측정 노이즈 감소로 3D 맵 품질 개선
+  - 문헌 근거: Fairfield 2007 (소나 불확실성 모델), Pinto 2015
+
 - **Gaussian Weighting 기능** (`mapping_3d.py`)
   - `enable_gaussian_weighting`: Gaussian vs Uniform distribution 선택 (기본값: False)
   - `gaussian_sigma_factor`: Gaussian 분포의 폭 조절 (기본값: 2.5)
@@ -30,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `propagation_sigma`: Gaussian weight의 표준편차 (기본값: 1.5)
 
 ### Changed
+
+- **`process_sonar_ray()` 메서드 업데이트** (`mapping_3d.py`)
+  - Log-odds 업데이트에 range weighting 적용
+  - 거리에 따른 신뢰도 스케일링으로 물리적 정확성 향상
+
+- **기본 설정 파라미터 추가** (`Mapping3D` 클래스)
+  - `use_range_weighting`: Range weighting 활성화 (기본값: True)
+  - `max_effective_range`: 최대 유효 거리 설정
+  - `lambda_decay`: 감소 상수 설정
 
 - **Phase 2: Bearing Propagation 최적화** (`mapping_3d.py`)
   - `propagate_bearing_updates()` → `propagate_bearing_updates_optimized()` 교체

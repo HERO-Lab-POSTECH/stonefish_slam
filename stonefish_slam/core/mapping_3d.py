@@ -412,6 +412,10 @@ class SonarMapping3D:
             # Gaussian weighting for vertical aperture (NEW)
             'enable_gaussian_weighting': False,  # Use Gaussian vs Uniform intensity distribution
             'gaussian_sigma_factor': 2.5,        # Sigma = aperture / factor (smaller = wider spread)
+            # Range weighting parameters (distance-dependent decay)
+            'use_range_weighting': True,         # Enable range-dependent weight decay
+            'max_effective_range': 15.0,         # Maximum effective range in meters
+            'lambda_decay': 0.3,                 # Exponential decay rate
         }
 
         # Update with provided config if any
@@ -502,6 +506,11 @@ class SonarMapping3D:
         self.enable_gaussian_weighting = default_config.get('enable_gaussian_weighting', False)
         self.gaussian_sigma_factor = default_config.get('gaussian_sigma_factor', 2.5)
 
+        # Range weighting parameters (distance-dependent decay)
+        self.use_range_weighting = default_config.get('use_range_weighting', True)
+        self.max_effective_range = default_config.get('max_effective_range', 15.0)
+        self.lambda_decay = default_config.get('lambda_decay', 0.3)
+
     def create_transform_matrix(self, position, tilt_rad):
         """
         Create 4x4 transform with tilt angle (pitch rotation)
@@ -562,6 +571,30 @@ class SonarMapping3D:
         T[:3, 3] = position
 
         return T
+
+    def compute_range_weight(self, range_m, max_range=None, lambda_decay=None):
+        """
+        Compute distance-dependent weight using exponential decay.
+
+        Closer measurements are more reliable, so they receive higher weight.
+
+        Args:
+            range_m: Measured range in meters
+            max_range: Maximum effective range (use self.max_effective_range if None)
+            lambda_decay: Decay rate (use self.lambda_decay if None)
+
+        Returns:
+            weight: [0.0, 1.0], exponential decay with hard cutoff
+        """
+        if max_range is None:
+            max_range = self.max_effective_range
+        if lambda_decay is None:
+            lambda_decay = self.lambda_decay
+
+        if range_m > max_range:
+            return 0.0  # Hard cutoff beyond effective range
+
+        return np.exp(-lambda_decay * range_m / max_range)
 
     def propagate_bearing_updates_optimized(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
         """
@@ -719,6 +752,11 @@ class SonarMapping3D:
             # Base log-odds for free space before weighting
             base_log_odds_free = self.octree.log_odds_free
 
+            # Apply range weighting if enabled
+            if self.use_range_weighting:
+                range_weight = self.compute_range_weight(range_m)
+                base_log_odds_free = base_log_odds_free * range_weight
+
             for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
                 # Calculate vertical angle within aperture
                 vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
@@ -782,6 +820,11 @@ class SonarMapping3D:
 
             # Base log-odds for occupied space before weighting
             base_log_odds_occupied = self.octree.log_odds_occupied
+
+            # Apply range weighting if enabled
+            if self.use_range_weighting:
+                range_weight = self.compute_range_weight(range_m)
+                base_log_odds_occupied = base_log_odds_occupied * range_weight
 
             for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
                 # Calculate vertical angle within aperture
