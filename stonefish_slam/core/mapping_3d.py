@@ -409,6 +409,9 @@ class SonarMapping3D:
             'propagation_radius': 1,       # Number of adjacent bearings to propagate to (reduced from 2)
             'propagation_sigma': 1.0,      # Gaussian decay sigma for propagation weight (reduced from 1.5)
             'enable_profiling': True,      # Enable performance profiling
+            # Gaussian weighting for vertical aperture (NEW)
+            'enable_gaussian_weighting': False,  # Use Gaussian vs Uniform intensity distribution
+            'gaussian_sigma_factor': 2.5,        # Sigma = aperture / factor (smaller = wider spread)
         }
 
         # Update with provided config if any
@@ -494,6 +497,10 @@ class SonarMapping3D:
             'total_voxels_updated': 0,
             'propagation_times': []       # Times for propagation operations
         }
+
+        # Gaussian weighting settings for vertical aperture
+        self.enable_gaussian_weighting = default_config.get('enable_gaussian_weighting', False)
+        self.gaussian_sigma_factor = default_config.get('gaussian_sigma_factor', 2.5)
 
     def create_transform_matrix(self, position, tilt_rad):
         """
@@ -709,9 +716,23 @@ class SonarMapping3D:
             free_vertical_factor = 8.0  # Increased from 4.0 to reduce point count
             num_vertical_steps = max(1, int(vertical_spread / (self.voxel_resolution * free_vertical_factor)))
 
+            # Base log-odds for free space before weighting
+            base_log_odds_free = self.octree.log_odds_free
+
             for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
                 # Calculate vertical angle within aperture
                 vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
+
+                # Apply Gaussian weighting if enabled
+                if self.enable_gaussian_weighting:
+                    # Normalized angle: -1 to +1
+                    normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
+                    # Gaussian: exp(-0.5 * (x/σ)^2), σ = 1/gaussian_sigma_factor
+                    gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
+                    log_odds_update = base_log_odds_free * gaussian_weight
+                else:
+                    # Uniform weighting (default)
+                    log_odds_update = base_log_odds_free
 
                 # Calculate 3D position in sonar frame
                 # Sonar coordinate system: X=forward, Y=right, Z=down (FRD)
@@ -736,7 +757,7 @@ class SonarMapping3D:
                 # Accumulate log-odds updates (no type distinction)
                 if voxel_key not in voxel_updates:
                     voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0}
-                voxel_updates[voxel_key]['sum'] += self.octree.log_odds_free
+                voxel_updates[voxel_key]['sum'] += log_odds_update  # Use weighted value
                 voxel_updates[voxel_key]['count'] += 1
 
         # Update occupied regions ONLY
@@ -759,12 +780,23 @@ class SonarMapping3D:
             if False:  # Disabled for performance
                 print(f"    r_idx={r_idx}, range_m={range_m:.2f}m, vertical_spread={vertical_spread:.3f}m, num_vertical_steps={num_vertical_steps}")
 
-            # This is a high intensity region: mark as occupied
-            log_odds_update = self.octree.log_odds_occupied
+            # Base log-odds for occupied space before weighting
+            base_log_odds_occupied = self.octree.log_odds_occupied
 
             for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
                 # Calculate vertical angle within aperture
                 vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
+
+                # Apply Gaussian weighting if enabled
+                if self.enable_gaussian_weighting:
+                    # Normalized angle: -1 to +1
+                    normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
+                    # Gaussian: exp(-0.5 * (x/σ)^2), σ = 1/gaussian_sigma_factor
+                    gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
+                    log_odds_update = base_log_odds_occupied * gaussian_weight
+                else:
+                    # Uniform weighting (default)
+                    log_odds_update = base_log_odds_occupied
 
                 # Calculate 3D position in sonar frame
                 # Bearing: negative=left, positive=right
