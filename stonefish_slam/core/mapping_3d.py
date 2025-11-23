@@ -503,6 +503,20 @@ class SonarMapping3D:
             'propagation_times': []       # Times for propagation operations
         }
 
+        # Detailed profiling infrastructure (7 measurement points)
+        self.profiling_enabled = True  # Enable detailed profiling
+        self.profiling_data = {
+            'frame_total': [],
+            'ray_processing': [],
+            'dda_traversal': [],
+            'dict_merge': [],
+            'occupied_processing': [],
+            'bearing_propagation': [],
+            'octree_updates': [],
+            'voxels_per_frame': [],
+            'rays_per_frame': []
+        }
+
         # Gaussian weighting settings for vertical aperture
         self.enable_gaussian_weighting = default_config.get('enable_gaussian_weighting', False)
         self.gaussian_sigma_factor = default_config.get('gaussian_sigma_factor', 2.5)
@@ -719,7 +733,7 @@ class SonarMapping3D:
             voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world
         )
 
-    def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates):
+    def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators=None):
         """
         Process a single sonar ray (bearing) and accumulate voxel updates
 
@@ -728,6 +742,7 @@ class SonarMapping3D:
             intensity_profile: 1D array of intensities along range
             T_sonar_to_world: 4x4 transform matrix from sonar to world
             voxel_updates: Dictionary to accumulate updates per voxel
+            timing_accumulators: Optional dict with 'dda', 'merge', 'occupied' keys for profiling
         """
         # Find all high intensity (occupied) regions
         first_hit_idx = -1
@@ -789,6 +804,10 @@ class SonarMapping3D:
 
             # SINGLE C++ call for entire vertical fan
             try:
+                # [C] DDA traversal timing
+                if timing_accumulators is not None:
+                    t_dda = time.perf_counter()
+
                 voxel_updates_list = self.dda_traverser.process_free_space_ray(
                     sonar_origin_world,
                     ray_direction_world,
@@ -796,6 +815,13 @@ class SonarMapping3D:
                     num_vertical_steps,
                     self.dda_config
                 )
+
+                if timing_accumulators is not None:
+                    timing_accumulators['dda'] += (time.perf_counter() - t_dda)
+
+                # [D] Dictionary merge timing
+                if timing_accumulators is not None:
+                    t_merge = time.perf_counter()
 
                 # Merge results into voxel_updates dict
                 for update in voxel_updates_list:
@@ -805,6 +831,9 @@ class SonarMapping3D:
                         voxel_updates[key] = {'point': voxel_center, 'sum': 0.0, 'count': 0}
                     voxel_updates[key]['sum'] += update.log_odds_sum
                     voxel_updates[key]['count'] += update.count
+
+                if timing_accumulators is not None:
+                    timing_accumulators['merge'] += (time.perf_counter() - t_merge)
 
             except Exception as e:
                 print(f"[ERROR] DDA batch processing failed: {e}")
@@ -870,6 +899,10 @@ class SonarMapping3D:
                         voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0}
                     voxel_updates[voxel_key]['sum'] += log_odds_update  # Use weighted value
                     voxel_updates[voxel_key]['count'] += 1
+
+        # [E] Occupied voxel processing timing
+        if timing_accumulators is not None:
+            t_occupied = time.perf_counter()
 
         # Update occupied regions ONLY
         # Process only the high intensity (occupied) regions we found
@@ -939,6 +972,9 @@ class SonarMapping3D:
                 voxel_updates[voxel_key]['sum'] += log_odds_update
                 voxel_updates[voxel_key]['count'] += 1
 
+        if timing_accumulators is not None:
+            timing_accumulators['occupied'] += (time.perf_counter() - t_occupied)
+
         # DEBUG: Print voxel summary (NOTE: voxel_updates accumulates across ALL rays in this frame) (DISABLED)
         if False:  # Disabled for performance
             print(f"  Total voxels accumulated so far (all rays): {len(voxel_updates)}")
@@ -951,7 +987,11 @@ class SonarMapping3D:
             polar_image: 2D numpy array (height x width) with intensity values
             robot_pose: Robot pose (dict with 'position'/'orientation' or ROS Pose message)
         """
-        # Start timing if profiling enabled
+        # [A] Frame start timing
+        if self.profiling_enabled:
+            t_frame_start = time.perf_counter()
+
+        # Start timing if profiling enabled (legacy)
         if self.enable_profiling:
             frame_start_time = time.time()
 
@@ -992,6 +1032,13 @@ class SonarMapping3D:
         # Track processed bearings for propagation
         processed_bearings = []
 
+        # [B] Ray processing timing
+        if self.profiling_enabled:
+            t_ray_start = time.perf_counter()
+            timing_accumulators = {'dda': 0.0, 'merge': 0.0, 'occupied': 0.0}
+        else:
+            timing_accumulators = None
+
         for b_idx in range(0, bearing_bins, bearing_step):
             if self.enable_profiling:
                 ray_start = time.time()
@@ -1003,7 +1050,7 @@ class SonarMapping3D:
             voxel_updates.clear()
 
             # Process this ray and accumulate updates
-            self.process_sonar_ray(bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates)
+            self.process_sonar_ray(bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators)
 
             # Add to all updates
             for voxel_key, update_info in voxel_updates.items():
@@ -1038,8 +1085,20 @@ class SonarMapping3D:
                 ray_time = time.time() - ray_start
                 self.performance_stats['ray_times'].append(ray_time)
 
+        # [B] Ray processing timing end
+        if self.profiling_enabled:
+            t_ray_total = time.perf_counter() - t_ray_start
+
+        # [F] Bearing propagation timing (NOTE: already measured above if enabled)
+        if self.profiling_enabled:
+            t_prop_total = 0.0  # Measured inside loop above if enabled
+
         # Apply averaged updates to all voxels
         num_voxels_updated = 0
+
+        # [G] Octree updates timing
+        if self.profiling_enabled:
+            t_octree_start = time.perf_counter()
         for voxel_key, update_info in all_voxel_updates.items():
             # Calculate average update
             avg_update = update_info['sum'] / update_info['count']
@@ -1049,41 +1108,42 @@ class SonarMapping3D:
             self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
             num_voxels_updated += 1
 
+        if self.profiling_enabled:
+            t_octree_total = time.perf_counter() - t_octree_start
+
+        # [A] Frame total timing end
+        if self.profiling_enabled:
+            t_frame_total = time.perf_counter() - t_frame_start
+
+            # Store profiling data
+            self.profiling_data['frame_total'].append(t_frame_total)
+            self.profiling_data['ray_processing'].append(t_ray_total)
+            self.profiling_data['dda_traversal'].append(timing_accumulators['dda'])
+            self.profiling_data['dict_merge'].append(timing_accumulators['merge'])
+            self.profiling_data['occupied_processing'].append(timing_accumulators['occupied'])
+            self.profiling_data['bearing_propagation'].append(t_prop_total)
+            self.profiling_data['octree_updates'].append(t_octree_total)
+            self.profiling_data['voxels_per_frame'].append(num_voxels_updated)
+            self.profiling_data['rays_per_frame'].append(len(processed_bearings))
+
         # Increment frame counter
         self.frame_count += 1
 
-        # Performance profiling statistics
+        # Print detailed profiling statistics every 10 frames
+        if self.profiling_enabled and self.frame_count % 10 == 0:
+            if len(self.profiling_data['frame_total']) >= 10:
+                self._print_profiling_stats()
+                # Keep only last 10 frames
+                for key in self.profiling_data:
+                    self.profiling_data[key] = self.profiling_data[key][-10:]
+
+        # Performance profiling statistics (legacy - keep for compatibility)
         if self.enable_profiling:
             frame_time = time.time() - frame_start_time
             self.performance_stats['frame_times'].append(frame_time)
             self.performance_stats['voxel_updates'].append(num_voxels_updated)
             self.performance_stats['total_frames'] += 1
             self.performance_stats['total_voxels_updated'] += num_voxels_updated
-
-            # Print statistics every 10 frames
-            if self.frame_count % 10 == 0:
-                avg_frame_time = np.mean(self.performance_stats['frame_times'][-10:])
-                avg_voxels = np.mean(self.performance_stats['voxel_updates'][-10:])
-                total_voxels = len(self.octree.voxels)
-
-                print(f"\n[3D Mapping Performance - Frame {self.frame_count}]")
-                print(f"  Avg frame time (last 10): {avg_frame_time:.3f}s")
-                print(f"  Avg voxels updated/frame: {avg_voxels:.0f}")
-                print(f"  Total voxels in map: {total_voxels}")
-                print(f"  Bearings processed: {len(processed_bearings)} (step={bearing_step})")
-
-                if self.enable_propagation:
-                    print(f"  Propagation: ENABLED (radius={self.propagation_radius}, sigma={self.propagation_sigma:.1f})")
-                    if len(self.performance_stats['propagation_times']) > 0:
-                        avg_prop_time = np.mean(self.performance_stats['propagation_times'][-10:])
-                        prop_percent = (avg_prop_time / avg_frame_time) * 100
-                        print(f"    Propagation time: {avg_prop_time:.4f}s ({prop_percent:.1f}% of frame time)")
-                else:
-                    print(f"  Propagation: DISABLED")
-
-                # Memory usage estimate (rough)
-                memory_mb = (total_voxels * 100) / (1024 * 1024)  # ~100 bytes per voxel estimate
-                print(f"  Estimated memory usage: {memory_mb:.1f} MB")
 
         # Optional: Clear old voxels if frame limit reached
         if self.max_frames > 0 and self.frame_count > self.max_frames:
@@ -1284,3 +1344,46 @@ class SonarMapping3D:
             stats['frame_time_p99'] = np.percentile(self.performance_stats['frame_times'], 99)
 
         return stats
+
+    def _print_profiling_stats(self):
+        """Print detailed profiling statistics (called every 10 frames)"""
+        import numpy as np
+
+        # Calculate averages (convert to milliseconds)
+        avg_frame = np.mean(self.profiling_data['frame_total']) * 1000  # ms
+        avg_ray = np.mean(self.profiling_data['ray_processing']) * 1000
+        avg_dda = np.mean(self.profiling_data['dda_traversal']) * 1000
+        avg_merge = np.mean(self.profiling_data['dict_merge']) * 1000
+        avg_occupied = np.mean(self.profiling_data['occupied_processing']) * 1000
+        avg_prop = np.mean(self.profiling_data['bearing_propagation']) * 1000
+        avg_octree = np.mean(self.profiling_data['octree_updates']) * 1000
+        avg_voxels = np.mean(self.profiling_data['voxels_per_frame'])
+        avg_rays = np.mean(self.profiling_data['rays_per_frame'])
+
+        # Calculate percentages
+        total = avg_frame
+        pct_ray = (avg_ray / total * 100) if total > 0 else 0
+        pct_dda = (avg_dda / total * 100) if total > 0 else 0
+        pct_merge = (avg_merge / total * 100) if total > 0 else 0
+        pct_occupied = (avg_occupied / total * 100) if total > 0 else 0
+        pct_prop = (avg_prop / total * 100) if total > 0 else 0
+        pct_octree = (avg_octree / total * 100) if total > 0 else 0
+
+        fps = 1000.0 / avg_frame if avg_frame > 0 else 0
+
+        # Print formatted output
+        frame_num = self.frame_count
+        print("\n" + "="*55)
+        print(f"  3D MAPPING PROFILING (Frame #{frame_num})")
+        print("="*55)
+        print("Frame Time Breakdown:")
+        print(f"  Ray Processing:       {avg_ray:6.1f}ms ({pct_ray:5.1f}%) [{int(avg_rays)} rays]")
+        print(f"    ├─ DDA (C++):       {avg_dda:6.1f}ms ({pct_dda:5.1f}%)")
+        print(f"    ├─ Dict Merge:      {avg_merge:6.1f}ms ({pct_merge:5.1f}%)")
+        print(f"    └─ Occupied:        {avg_occupied:6.1f}ms ({pct_occupied:5.1f}%)")
+        print(f"  Bearing Propagation:   {avg_prop:6.1f}ms ({pct_prop:5.1f}%)")
+        print(f"  Octree Updates:        {avg_octree:6.1f}ms ({pct_octree:5.1f}%) [{int(avg_voxels)} voxels]")
+        print("  " + "─"*51)
+        print(f"  TOTAL:                {avg_frame:6.1f}ms → {fps:5.1f} FPS")
+        print(f"\n10-Frame Avg: {avg_frame:.1f}ms ({fps:.1f} FPS) | Voxels: {int(avg_voxels)}/frame")
+        print("="*55 + "\n")

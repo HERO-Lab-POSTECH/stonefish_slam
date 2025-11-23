@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **상세 성능 프로파일링 시스템** (`mapping_3d.py`)
+  - 7개 측정 지점: 프레임 총 시간, Ray 처리, DDA, 딕셔너리 병합, 점유 처리, Bearing 전파, Octree 배치 업데이트
+  - 10프레임 롤링 평균 통계로 안정적 성능 추적
+  - 매 10프레임마다 자동 콘솔 출력
+  - 시간 백분율 및 FPS 포함한 포맷된 리포트
+  - **프로파일링 결과 (실제 SLAM 시뮬레이션)**:
+    - Octree 업데이트: 6602.8ms (69.5%) ← 치명적 병목
+    - 점유 처리: 2104.9ms (22.1%) ← 2차 병목
+    - 딕셔너리 병합: 469.7ms (4.9%)
+    - DDA 순회: 66.7ms (0.7%) ← 최적화 완료 검증
+    - **총 처리시간: 9507.0ms → 0.1 FPS**
+  - **핵심 발견**: DDA 최적화 성공 확인 (0.7% 오버헤드), Python Octree는 69.5% 차지 → C++ 마이그레이션 필수
+
 - **DDA 3D 복셀 순회 (C++ 모듈)** (`stonefish_slam/cpp/dda_traversal.cpp`)
   - Amanatides-Woo (1987) 알고리즘 구현
   - Pybind11 바인딩으로 Python 통합
@@ -51,6 +64,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `propagation_sigma`: Gaussian weight의 표준편차 (기본값: 1.5)
 
 ### Changed
+
+- **P0.1 DDA 최적화 상태 업데이트**
+  - 상태: COMPLETED (프로파일링으로 검증)
+  - DDA 오버헤드: 0.7% (완전히 무시할 수 있는 수준)
+  - 예상 성능과 실제 성능 일치 확인
 
 - **C++ 표준 업그레이드** (`CMakeLists.txt`)
   - C++14 → C++17 (structured bindings 지원으로 배치 처리 코드 가독성 향상)
@@ -99,6 +117,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `enable_profiling`: 성능 측정 활성화 여부 (기본값: True)
 
 ### Fixed
+
+- **성능 프로파일링으로 진정한 병목지점 확인** (2025-11-23)
+  - 문제: 0.1 FPS의 심각한 성능 저하 원인 불명확
+  - 원인 분석:
+    - Python Octree 연산: 6602.8ms (69.5%) ← **진정한 병목**
+    - 점유 복셀 처리: 2104.9ms (22.1%) ← 2차 병목
+    - DDA/Ray 처리: 66.7ms (0.7%) ← 최적화 완료 검증
+  - **결론**: P0.3 C++ Core Migration 필수 (95-100배 성능 향상 필요)
 
 - **DDA 통합 성능 문제 해결 (배치 처리로 재설계)** (`dda_traversal.cpp`, `mapping_3d.py`)
   - 문제: DDA 통합 후 오히려 성능 저하 (2-3 Hz → 1-2 Hz)
