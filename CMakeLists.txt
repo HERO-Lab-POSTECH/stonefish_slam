@@ -186,6 +186,10 @@ if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND)
   # Add OpenMP if available
   if(OpenMP_CXX_FOUND)
     target_link_libraries(octree_mapping PRIVATE OpenMP::OpenMP_CXX)
+    target_compile_options(octree_mapping PRIVATE ${OpenMP_CXX_FLAGS})
+    message(STATUS "Octree Mapping: OpenMP enabled for parallel ray processing")
+  else()
+    message(WARNING "Octree Mapping: OpenMP not found, ray processing will be single-threaded")
   endif()
 
   target_include_directories(octree_mapping PRIVATE

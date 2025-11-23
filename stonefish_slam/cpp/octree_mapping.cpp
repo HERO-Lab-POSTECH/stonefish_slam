@@ -5,6 +5,10 @@
 #include <stdexcept>
 #include <cmath>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 OctreeMapping::OctreeMapping(double resolution)
     : resolution_(resolution),
       log_odds_occupied_(0.85),
@@ -23,6 +27,13 @@ OctreeMapping::OctreeMapping(double resolution)
 
     // Enable automatic pruning for memory efficiency
     tree_->enableChangeDetection(true);
+
+#ifdef _OPENMP
+    int max_threads = omp_get_max_threads();
+    std::cout << "[OctreeMapping] OpenMP enabled: " << max_threads << " threads available" << std::endl;
+#else
+    std::cout << "[OctreeMapping] OpenMP not available, running single-threaded" << std::endl;
+#endif
 }
 
 OctreeMapping::~OctreeMapping() {
@@ -63,7 +74,88 @@ void OctreeMapping::insert_point_cloud(
     // Convert sensor origin to OctoMap point
     octomap::point3d sensor_pos(origin_ptr[0], origin_ptr[1], origin_ptr[2]);
 
-    // Batch insert all points
+    // Batch insert all points with OpenMP parallelization
+    // Strategy: Each thread accumulates updates in local buffer, then applies with mutex
+    // This minimizes lock contention and maximizes parallelism
+
+#ifdef _OPENMP
+    // Thread-local storage for batched updates
+    struct UpdateBatch {
+        std::vector<octomap::OcTreeKey> keys;
+        std::vector<double> log_odds_updates;
+
+        void reserve(size_t n) {
+            keys.reserve(n);
+            log_odds_updates.reserve(n);
+        }
+
+        void add(const octomap::OcTreeKey& key, double log_odds) {
+            keys.push_back(key);
+            log_odds_updates.push_back(log_odds);
+        }
+    };
+
+    // Parallel phase: compute keys and prepare updates (no tree access)
+    std::vector<UpdateBatch> thread_batches(omp_get_max_threads());
+    for (auto& batch : thread_batches) {
+        batch.reserve(num_points / omp_get_max_threads() + 100);
+    }
+
+    #pragma omp parallel
+    {
+        int thread_id = omp_get_thread_num();
+        UpdateBatch& my_batch = thread_batches[thread_id];
+
+        #pragma omp for schedule(dynamic, 100) nowait
+        for (size_t i = 0; i < num_points; ++i) {
+            // Get point coordinates (row-major: [x, y, z])
+            double x = points_ptr[i * 3 + 0];
+            double y = points_ptr[i * 3 + 1];
+            double z = points_ptr[i * 3 + 2];
+            octomap::point3d endpoint(x, y, z);
+
+            // Get log-odds update for this point
+            double log_odds_update = log_odds_ptr[i];
+
+            // Compute key (no tree modification)
+            octomap::OcTreeKey key;
+            if (tree_->coordToKeyChecked(endpoint, key)) {
+                my_batch.add(key, log_odds_update);
+            }
+        }
+    }
+
+    // Sequential phase: merge all updates into tree
+    // Apply updates in batches to reduce Python GIL-like overhead
+    double min_log = static_cast<double>(tree_->getClampingThresMinLog());
+    double max_log = static_cast<double>(tree_->getClampingThresMaxLog());
+
+    for (const auto& batch : thread_batches) {
+        // Process entire batch without per-update locking
+        // OctoMap tree updates are sequential here, but key computation was parallel
+        for (size_t i = 0; i < batch.keys.size(); ++i) {
+            const auto& key = batch.keys[i];
+            double log_odds_update = batch.log_odds_updates[i];
+
+            // Direct log-odds update (OctoMap handles clamping)
+            tree_->updateNode(key, log_odds_update > 0.0);
+
+            // For more precise control, manually set log-odds
+            octomap::OcTreeNode* node = tree_->search(key);
+            if (node) {
+                // Get current log-odds
+                double current_log_odds = node->getLogOdds();
+                // Add update
+                double new_log_odds = current_log_odds + log_odds_update;
+                // Clamp to prevent overflow
+                new_log_odds = std::max(min_log, std::min(new_log_odds, max_log));
+                node->setLogOdds(static_cast<float>(new_log_odds));
+            }
+        }
+    }
+
+#else
+    // Single-threaded fallback
     for (size_t i = 0; i < num_points; ++i) {
         // Get point coordinates (row-major: [x, y, z])
         double x = points_ptr[i * 3 + 0];
@@ -75,7 +167,6 @@ void OctreeMapping::insert_point_cloud(
         double log_odds_update = log_odds_ptr[i];
 
         // Update node using OctoMap's built-in log-odds logic
-        // updateNode internally converts log-odds to probability, updates, and clamps
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
             // Direct log-odds update (OctoMap handles clamping)
@@ -96,6 +187,7 @@ void OctreeMapping::insert_point_cloud(
             }
         }
     }
+#endif
 
     // Optional: prune tree to reduce memory (can be expensive)
     // tree_->prune();
