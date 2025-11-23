@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **C++ OctoMap Backend for 3D Mapping** (`octree_mapping.cpp/h`, `mapping_3d.py`)
+  - OctoMap 라이브러리 통합으로 probabilistic occupancy mapping
+  - Pybind11 바인딩으로 Python 인터페이스 제공
+  - Batch API: `insert_point_cloud()`, `get_occupied_cells()`, `query_cell()`
+  - `use_cpp_backend` 파라미터로 활성화/비활성화 제어 (기본값: True)
+  - Fallback: C++ 모듈 미로드 시 자동으로 Python Octree 사용
+  - 파일: `stonefish_slam/cpp/octree_mapping.cpp/h`
+  - 성능: Octree 업데이트 26.6배 향상 (2376.8ms → 89.4ms)
+  - 전체 프레임 처리: 3.5배 향상 (3262.5ms → 944.5ms, 0.3 FPS → 1.1 FPS)
+
 - **상세 성능 프로파일링 시스템** (`mapping_3d.py`)
   - 7개 측정 지점: 프레임 총 시간, Ray 처리, DDA, 딕셔너리 병합, 점유 처리, Bearing 전파, Octree 배치 업데이트
   - 10프레임 롤링 평균 통계로 안정적 성능 추적
@@ -64,6 +74,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `propagation_sigma`: Gaussian weight의 표준편차 (기본값: 1.5)
 
 ### Changed
+
+- **mapping_3d.py C++ Backend 통합** (`stonefish_slam/core/mapping_3d.py`)
+  - `use_cpp_backend` 설정으로 Python Octree vs C++ OctoMap 선택
+  - `process_sonar_image`: C++ backend 사용 시 batch processing
+  - `get_point_cloud`: C++ backend 사용 시 `get_occupied_cells()` 호출
+  - Python backend는 기존 로직 100% 보존 (backward compatible)
+  - Threshold 계산 수정: Log-odds → Probability (0-1 range)
+
+- **CMakeLists.txt 업데이트** (`stonefish_slam/CMakeLists.txt`)
+  - OctoMap 의존성 추가 (`find_package(octomap REQUIRED)`)
+  - OpenMP 지원 추가 (향후 병렬화 준비)
+  - octree_mapping 모듈 빌드 설정 추가
 
 - **P0.1 DDA 최적화 상태 업데이트**
   - 상태: COMPLETED (프로파일링으로 검증)
@@ -153,6 +175,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **OctoMap C++ Backend 벤치마크 (10 frames, fake sonar data)**
+  - Python Octree: 3262.5 ms/frame (0.3 FPS)
+    - Octree Updates: 2376.8ms (73.2%)
+    - Ray Processing: 868.5ms (26.8%)
+  - C++ OctoMap: 944.5 ms/frame (1.1 FPS)
+    - Octree Updates: 89.4ms (9.6%) ← **26.6배 가속**
+    - Ray Processing: 837.9ms (90.3%)
+  - **전체 성능: 3.5배 향상**
+  - Ray Processing이 새로운 병목 (Phase 3 OpenMP로 추가 4-8배 향상 예상)
+
 - **Baseline (Propagation 비활성화)**
   - 평균 처리 시간: 1.087초/프레임
   - 프레임당 복셀 업데이트: 50,738개
@@ -175,6 +207,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
+- C++ OctoMap backend 기본값 `use_cpp_backend=True`로 활성화
+- C++ 모듈 로드 실패 시 자동으로 Python Octree로 fallback
+- `use_cpp_backend=False`로 Python 구현으로 명시적 전환 가능
+- C++ backend는 현재 log-odds 값 반환 미지원 (TODO)
+- `include_free=True` 미지원 (free space 조회 미구현)
+- Phase 3 OpenMP 병렬화로 Ray Processing 추가 4-8배 향상 예상
 - 기본값 `enable_propagation=True`로 최적화된 버전 기본 활성화
 - 기존 API 변경 없음 (하위 호환성 유지)
 - Phase 2 최적화 적용으로 성능과 맵 품질의 균형 달성

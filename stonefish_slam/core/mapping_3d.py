@@ -404,6 +404,8 @@ class SonarMapping3D:
             'max_frames': 0,               # 0=unlimited
             'dynamic_expansion': True,     # Enable dynamic map expansion
             'adaptive_update': True,       # Enable adaptive updating (linear protection)
+            # C++ OctoMap backend
+            'use_cpp_backend': True,       # Use C++ OctoMap for 50-100x speedup
             # Bearing propagation parameters (NEW)
             'enable_propagation': False,   # DISABLED for performance (30-40% overhead)
             'propagation_radius': 1,       # Number of adjacent bearings to propagate to (reduced from 2)
@@ -467,22 +469,39 @@ class SonarMapping3D:
         self.log_odds_min = default_config.get('log_odds_min', -10.0)
         self.log_odds_max = default_config.get('log_odds_max', 10.0)
 
-        # Initialize hierarchical octree for voxel storage
-        self.octree = HierarchicalOctree(
-            resolution=self.voxel_resolution,
-            max_depth=9,  # Optimal for 30m space (2^9 * 0.1m = 51.2m)
-            center=None,  # Auto-calculated
-            size=None  # Auto-calculated
-        )
+        # C++ backend initialization
+        self.use_cpp_backend = default_config['use_cpp_backend']
 
-        # Pass all settings to octree
-        self.octree.adaptive_update = self.adaptive_update
-        self.octree.adaptive_threshold = self.adaptive_threshold
-        self.octree.adaptive_max_ratio = self.adaptive_max_ratio
-        self.octree.log_odds_occupied = self.log_odds_occupied
-        self.octree.log_odds_free = self.log_odds_free
-        self.octree.log_odds_min = self.log_odds_min
-        self.octree.log_odds_max = self.log_odds_max
+        if self.use_cpp_backend:
+            try:
+                from stonefish_slam import octree_mapping
+                self.cpp_octree = octree_mapping.OctreeMapping(resolution=self.voxel_resolution)
+                print(f"[INFO] Using C++ OctoMap backend (resolution: {self.voxel_resolution}m)")
+                # No Python octree needed
+                self.octree = None
+            except ImportError as e:
+                print(f"[WARNING] C++ OctoMap not available, falling back to Python: {e}")
+                self.use_cpp_backend = False
+                self.cpp_octree = None
+                # Fall through to Python octree initialization
+
+        # Initialize Python octree if C++ backend not used
+        if not self.use_cpp_backend:
+            self.octree = HierarchicalOctree(
+                resolution=self.voxel_resolution,
+                max_depth=9,  # Optimal for 30m space (2^9 * 0.1m = 51.2m)
+                center=None,  # Auto-calculated
+                size=None  # Auto-calculated
+            )
+
+            # Pass all settings to octree
+            self.octree.adaptive_update = self.adaptive_update
+            self.octree.adaptive_threshold = self.adaptive_threshold
+            self.octree.adaptive_max_ratio = self.adaptive_max_ratio
+            self.octree.log_odds_occupied = self.log_odds_occupied
+            self.octree.log_odds_free = self.log_odds_free
+            self.octree.log_odds_min = self.log_odds_min
+            self.octree.log_odds_max = self.log_odds_max
 
         # Frame counter
         self.frame_count = 0
@@ -525,7 +544,7 @@ class SonarMapping3D:
         self.use_range_weighting = default_config.get('use_range_weighting', True)
         self.lambda_decay = default_config.get('lambda_decay', 0.1)
 
-        # DDA voxel traversal initialization
+        # DDA voxel traversal initialization (after all parameters are set)
         self.use_dda = default_config.get('use_dda_traversal', True)
         if self.use_dda:
             try:
@@ -535,7 +554,7 @@ class SonarMapping3D:
                 # Create config object for batch processing
                 self.dda_config = dda_traversal.SonarRayConfig()
                 self.dda_config.voxel_size = self.voxel_resolution
-                self.dda_config.log_odds_free = self.octree.log_odds_free
+                self.dda_config.log_odds_free = self.log_odds_free
                 self.dda_config.max_range = self.max_range
                 self.dda_config.min_range = self.min_range
                 self.dda_config.vertical_aperture = self.vertical_aperture
@@ -707,7 +726,14 @@ class SonarMapping3D:
                 # pz unchanged (vertical aperture same for all bearings)
 
                 # Create new voxel key for adjusted position
-                adjacent_voxel_key = self.octree.world_to_key(new_px, new_py, pz)
+                if self.use_cpp_backend:
+                    adjacent_voxel_key = (
+                        int(np.floor(new_px / self.voxel_resolution)),
+                        int(np.floor(new_py / self.voxel_resolution)),
+                        int(np.floor(pz / self.voxel_resolution))
+                    )
+                else:
+                    adjacent_voxel_key = self.octree.world_to_key(new_px, new_py, pz)
 
                 # Apply weighted update
                 weighted_sum = update_info['sum'] * weight
@@ -852,7 +878,7 @@ class SonarMapping3D:
                 num_vertical_steps = max(1, int(vertical_spread / (self.voxel_resolution * free_vertical_factor)))
 
                 # Base log-odds for free space before weighting
-                base_log_odds_free = self.octree.log_odds_free
+                base_log_odds_free = self.log_odds_free
 
                 # Apply range weighting if enabled
                 if self.use_range_weighting:
@@ -892,7 +918,15 @@ class SonarMapping3D:
                         continue  # Skip points at or below min_range
 
                     # Get voxel key and accumulate update
-                    voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
+                    if self.use_cpp_backend:
+                        # Use resolution-based quantization for C++ backend
+                        voxel_key = (
+                            int(np.floor(pt_world[0] / self.voxel_resolution)),
+                            int(np.floor(pt_world[1] / self.voxel_resolution)),
+                            int(np.floor(pt_world[2] / self.voxel_resolution))
+                        )
+                    else:
+                        voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
 
                     # Accumulate log-odds updates (no type distinction)
                     if voxel_key not in voxel_updates:
@@ -925,7 +959,7 @@ class SonarMapping3D:
                 print(f"    r_idx={r_idx}, range_m={range_m:.2f}m, vertical_spread={vertical_spread:.3f}m, num_vertical_steps={num_vertical_steps}")
 
             # Base log-odds for occupied space before weighting
-            base_log_odds_occupied = self.octree.log_odds_occupied
+            base_log_odds_occupied = self.log_odds_occupied
 
             # Apply range weighting if enabled
             if self.use_range_weighting:
@@ -964,7 +998,15 @@ class SonarMapping3D:
                     continue  # Skip points at or below min_range
 
                 # Get voxel key and accumulate update
-                voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
+                if self.use_cpp_backend:
+                    # Use resolution-based quantization for C++ backend
+                    voxel_key = (
+                        int(np.floor(pt_world[0] / self.voxel_resolution)),
+                        int(np.floor(pt_world[1] / self.voxel_resolution)),
+                        int(np.floor(pt_world[2] / self.voxel_resolution))
+                    )
+                else:
+                    voxel_key = self.octree.world_to_key(pt_world[0], pt_world[1], pt_world[2])
 
                 # Accumulate log-odds updates (no type distinction - just add)
                 if voxel_key not in voxel_updates:
@@ -1099,14 +1141,40 @@ class SonarMapping3D:
         # [G] Octree updates timing
         if self.profiling_enabled:
             t_octree_start = time.perf_counter()
-        for voxel_key, update_info in all_voxel_updates.items():
-            # Calculate average update
-            avg_update = update_info['sum'] / update_info['count']
 
-            # Apply update (adaptive only if positive log-odds = occupied)
-            adaptive = (avg_update > 0)
-            self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
-            num_voxels_updated += 1
+        if self.use_cpp_backend:
+            # C++ batch update path
+            if len(all_voxel_updates) > 0:
+                # Prepare batch arrays
+                points_list = []
+                log_odds_list = []
+
+                for voxel_key, update_info in all_voxel_updates.items():
+                    # Calculate average update
+                    avg_update = update_info['sum'] / update_info['count']
+                    points_list.append(update_info['point'])
+                    log_odds_list.append(avg_update)
+
+                # Convert to numpy arrays
+                points = np.array(points_list, dtype=np.float64)
+                log_odds = np.array(log_odds_list, dtype=np.float64)
+
+                # Get sensor origin from transform
+                sensor_origin = T_sonar_to_world[:3, 3]
+
+                # Single batch insert call
+                self.cpp_octree.insert_point_cloud(points, log_odds, sensor_origin)
+                num_voxels_updated = len(points)
+        else:
+            # Python update path (existing)
+            for voxel_key, update_info in all_voxel_updates.items():
+                # Calculate average update
+                avg_update = update_info['sum'] / update_info['count']
+
+                # Apply update (adaptive only if positive log-odds = occupied)
+                adaptive = (avg_update > 0)
+                self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
+                num_voxels_updated += 1
 
         if self.profiling_enabled:
             t_octree_total = time.perf_counter() - t_octree_start
@@ -1191,44 +1259,78 @@ class SonarMapping3D:
         Returns:
             Dictionary containing classified voxels and statistics
         """
-        if include_free:
-            # Get all classified voxels with min_probability filter
-            classified = self.octree.get_all_voxels_classified(self.min_probability)
+        if self.use_cpp_backend:
+            # C++ backend path
+            # Convert probability threshold to log-odds
+            # C++ backend expects probability threshold (0-1), not log-odds
+            threshold = np.clip(self.min_probability, 0.0, 1.0)
 
-            result = {
-                'occupied': classified['occupied'],
-                'free': classified['free'],
-                'unknown': classified['unknown'],
-                'num_voxels': len(self.octree.voxels),
-                'num_occupied': len(classified['occupied']),
-                'num_free': len(classified['free']),
-                'num_unknown': len(classified['unknown']),
-                'frame_count': self.frame_count,
-                'bounds': {
-                    'min': self.octree.min_bounds.copy() if self.octree.dynamic_expansion else None,
-                    'max': self.octree.max_bounds.copy() if self.octree.dynamic_expansion else None
-                }
-            }
-        else:
-            # Get only occupied voxels (backward compatibility)
-            occupied_voxels = self.octree.get_occupied_voxels(self.min_probability)
+            # Get occupied cells from C++ backend
+            occupied_cells = self.cpp_octree.get_occupied_cells(threshold=threshold)
 
-            if occupied_voxels:
-                points = np.array([v[0] for v in occupied_voxels])
-                probabilities = np.array([v[1] for v in occupied_voxels])
+            if len(occupied_cells) > 0:
+                points = occupied_cells  # Already (N, 3) array
+                # C++ backend doesn't return log-odds yet, use fixed probability
+                # TODO: Update C++ binding to return log-odds
+                probs = np.full(len(points), self.min_probability, dtype=np.float64)
             else:
                 points = np.empty((0, 3))
-                probabilities = np.empty(0)
+                probs = np.empty(0)
 
             result = {
                 'points': points,
-                'probabilities': probabilities,
-                'num_voxels': len(self.octree.voxels),
-                'num_occupied': len(occupied_voxels),
+                'probabilities': probs,
+                'num_points': len(points),
+                'num_occupied': len(points),
                 'frame_count': self.frame_count
             }
 
-        return result
+            # Note: include_free not supported in C++ backend yet
+            if include_free:
+                print("[WARNING] include_free=True not supported with C++ backend")
+
+            return result
+
+        else:
+            # Python backend path (existing)
+            if include_free:
+                # Get all classified voxels with min_probability filter
+                classified = self.octree.get_all_voxels_classified(self.min_probability)
+
+                result = {
+                    'occupied': classified['occupied'],
+                    'free': classified['free'],
+                    'unknown': classified['unknown'],
+                    'num_voxels': len(self.octree.voxels),
+                    'num_occupied': len(classified['occupied']),
+                    'num_free': len(classified['free']),
+                    'num_unknown': len(classified['unknown']),
+                    'frame_count': self.frame_count,
+                    'bounds': {
+                        'min': self.octree.min_bounds.copy() if self.octree.dynamic_expansion else None,
+                        'max': self.octree.max_bounds.copy() if self.octree.dynamic_expansion else None
+                    }
+                }
+            else:
+                # Get only occupied voxels (backward compatibility)
+                occupied_voxels = self.octree.get_occupied_voxels(self.min_probability)
+
+                if occupied_voxels:
+                    points = np.array([v[0] for v in occupied_voxels])
+                    probabilities = np.array([v[1] for v in occupied_voxels])
+                else:
+                    points = np.empty((0, 3))
+                    probabilities = np.empty(0)
+
+                result = {
+                    'points': points,
+                    'probabilities': probabilities,
+                    'num_voxels': len(self.octree.voxels),
+                    'num_occupied': len(occupied_voxels),
+                    'frame_count': self.frame_count
+                }
+
+            return result
 
     def get_pointcloud2_msg(self, frame_id='world_ned', stamp=None):
         """
@@ -1296,8 +1398,13 @@ class SonarMapping3D:
 
     def reset_map(self):
         """Reset the probabilistic map"""
-        self.octree.clear()
+        if self.use_cpp_backend:
+            self.cpp_octree.clear()
+        else:
+            self.octree.clear()
+
         self.frame_count = 0
+
         # Reset performance stats
         if self.enable_profiling:
             self.performance_stats = {

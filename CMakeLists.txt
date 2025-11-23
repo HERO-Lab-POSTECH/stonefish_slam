@@ -29,6 +29,12 @@ find_package(pybind11 REQUIRED)
 # Find Eigen3
 find_package(Eigen3 REQUIRED)
 
+# Find OctoMap
+find_package(octomap REQUIRED)
+
+# Find OpenMP for parallel processing
+find_package(OpenMP)
+
 # Find libpointmatcher
 find_package(libpointmatcher QUIET)
 if(NOT libpointmatcher_FOUND)
@@ -45,6 +51,7 @@ endif()
 include_directories(
   include
   ${EIGEN3_INCLUDE_DIRS}
+  ${OCTOMAP_INCLUDE_DIRS}
 )
 
 if(libpointmatcher_FOUND)
@@ -158,6 +165,50 @@ if(pybind11_FOUND AND EIGEN3_FOUND)
   message(STATUS "DDA Traversal module will be built with Python ${Python3_VERSION}")
 else()
   message(WARNING "pybind11 or Eigen3 not found, DDA Traversal C++ module will not be built")
+endif()
+
+# Octree Mapping module (OctoMap-based)
+if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND)
+  # Get Python include directories
+  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+
+  # Manual library creation for ROS2
+  add_library(octree_mapping MODULE stonefish_slam/cpp/octree_mapping.cpp)
+
+  target_link_libraries(octree_mapping PRIVATE
+    pybind11::module
+    pybind11::lto
+    Eigen3::Eigen
+    ${OCTOMAP_LIBRARIES}
+    Python3::Module
+  )
+
+  # Add OpenMP if available
+  if(OpenMP_CXX_FOUND)
+    target_link_libraries(octree_mapping PRIVATE OpenMP::OpenMP_CXX)
+  endif()
+
+  target_include_directories(octree_mapping PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stonefish_slam/cpp
+    ${pybind11_INCLUDE_DIRS}
+    ${Python3_INCLUDE_DIRS}
+    ${OCTOMAP_INCLUDE_DIRS}
+  )
+
+  set_target_properties(octree_mapping PROPERTIES
+    PREFIX "${PYTHON_MODULE_PREFIX}"
+    SUFFIX "${PYTHON_MODULE_EXTENSION}"
+    CXX_VISIBILITY_PRESET "hidden"
+  )
+
+  # Install to Python package directory
+  install(TARGETS octree_mapping
+    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}
+  )
+
+  message(STATUS "Octree Mapping module will be built with OctoMap and Python ${Python3_VERSION}")
+else()
+  message(WARNING "pybind11, Eigen3, or OctoMap not found, Octree Mapping C++ module will not be built")
 endif()
 
 # PCL module for fast ICP
