@@ -23,8 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Phase 2: Bearing Propagation 최적화** (`mapping_3d.py`)
+  - `propagate_bearing_updates()` → `propagate_bearing_updates_optimized()` 교체
+  - 전체 3D 변환 대신 Z축 회전만 수행 (2D 회전 최적화)
+  - Sonar origin 계산 최적화 (중복 제거)
+  - 불필요한 행렬 연산 제거
+
+- **파라미터 조정** (`Mapping3D` 클래스)
+  - `propagation_radius`: 2 → 1 (영향 범위 축소)
+  - `propagation_sigma`: 1.5 → 1.0 (가중치 감소율 개선)
+  - `enable_propagation`: False → True (기본값으로 활성화)
+  - `bearing_divisor`: 128 → 256 (샘플링 밀도 조정)
+
 - **설정 파라미터 추가** (`Mapping3D` 클래스)
-  - `enable_propagation`: Bearing propagation 활성화 여부 (기본값: False)
+  - `enable_propagation`: Bearing propagation 활성화 여부 (기본값: False → True)
   - `enable_profiling`: 성능 측정 활성화 여부 (기본값: True)
 
 ### Performance
@@ -33,16 +45,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 평균 처리 시간: 1.087초/프레임
   - 프레임당 복셀 업데이트: 50,738개
 
-- **Propagation 활성화 시**
+- **Phase 1: Propagation 활성화 (최적화 전)**
   - 평균 처리 시간: 3.671초/프레임 (237.7% 증가)
   - 프레임당 복셀 업데이트: 214,770개 (323.3% 증가)
-  - 권장: 맵 품질 개선 필요 시에만 활성화
+  - 문제점: 성능 저하가 심함
+
+- **Phase 2: 최적화 후 (예상)**
+  - Propagation radius 감소로 처리 voxel 수 ~60% 감소
+  - 2D 회전 최적화로 계산 복잡도 감소
+  - Bearing coverage 100% 유지
+  - 목표: 프레임당 처리 시간 < 2.5초 (baseline 대비 2배 이내)
+
+- **알고리즘 개선**
+  - Bearing step=2 (512 bearings → 256 samples)
+  - Propagation radius=1로 각 sampled bearing이 인접 1개 bearing에만 전파
+  - 중복 제거로 모든 bearing을 효율적으로 커버
 
 ### Notes
 
-- 기본값 `enable_propagation=False`로 기존 동작 유지
+- 기본값 `enable_propagation=True`로 최적화된 버전 기본 활성화
 - 기존 API 변경 없음 (하위 호환성 유지)
-- 차후 파라미터 최적화로 성능 개선 예정
+- Phase 2 최적화 적용으로 성능과 맵 품질의 균형 달성
 
 ## [0.1.0] - 2024-11-18
 

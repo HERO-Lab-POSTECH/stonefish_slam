@@ -405,9 +405,9 @@ class SonarMapping3D:
             'dynamic_expansion': True,     # Enable dynamic map expansion
             'adaptive_update': True,       # Enable adaptive updating (linear protection)
             # Bearing propagation parameters (NEW)
-            'enable_propagation': False,   # Enable bearing propagation (default off for testing)
-            'propagation_radius': 2,       # Number of adjacent bearings to propagate to
-            'propagation_sigma': 1.5,      # Gaussian decay sigma for propagation weight
+            'enable_propagation': True,    # Enable bearing propagation (optimized for performance)
+            'propagation_radius': 1,       # Number of adjacent bearings to propagate to (reduced from 2)
+            'propagation_sigma': 1.0,      # Gaussian decay sigma for propagation weight (reduced from 1.5)
             'enable_profiling': True,      # Enable performance profiling
         }
 
@@ -556,16 +556,17 @@ class SonarMapping3D:
 
         return T
 
-    def propagate_bearing_updates(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
+    def propagate_bearing_updates_optimized(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
         """
-        Propagate voxel updates from a sampled bearing to adjacent bearings
+        Optimized bearing propagation with minimal computation
 
         This method implements spatial coherence: adjacent bearings often observe
         similar surfaces, so we can propagate updates with decreasing weight.
+        Optimized version with reduced computation.
 
         Args:
             voxel_updates: Dictionary of voxel updates from sampled bearing
-            sampled_bearing_idx: Index of the sampled bearing (0, 4, 8, ...)
+            sampled_bearing_idx: Index of the sampled bearing (0, 2, 4, ...)
             bearing_bins: Total number of bearings (512)
             T_sonar_to_world: 4x4 transform matrix from sonar to world
 
@@ -577,7 +578,11 @@ class SonarMapping3D:
 
         propagated_updates = {}
 
-        # Calculate propagation range
+        # Get sonar origin in world frame once
+        sonar_origin_world = T_sonar_to_world[:3, 3]
+        sampled_bearing_angle = self.bearing_angles[sampled_bearing_idx]
+
+        # Calculate propagation range (now only ±1 bearing)
         for offset in range(-self.propagation_radius, self.propagation_radius + 1):
             if offset == 0:
                 continue  # Skip original bearing (already processed)
@@ -588,50 +593,48 @@ class SonarMapping3D:
             if adjacent_bearing_idx < 0 or adjacent_bearing_idx >= bearing_bins:
                 continue
 
-            # Calculate Gaussian weight based on distance
-            weight = np.exp(-0.5 * (offset / self.propagation_sigma)**2)
+            # Calculate Gaussian weight (faster with radius=1)
+            if abs(offset) == 1:
+                weight = np.exp(-0.5 / (self.propagation_sigma**2))  # Pre-computable for radius=1
+            else:
+                weight = np.exp(-0.5 * (offset / self.propagation_sigma)**2)
 
-            # Get bearing angle for adjacent bearing
-            adjacent_bearing = self.bearing_angles[adjacent_bearing_idx]
-            bearing_diff = adjacent_bearing - self.bearing_angles[sampled_bearing_idx]
+            # Get bearing angle difference
+            adjacent_bearing_angle = self.bearing_angles[adjacent_bearing_idx]
+            angle_diff = adjacent_bearing_angle - sampled_bearing_angle
+
+            # Pre-compute rotation values
+            cos_diff = np.cos(angle_diff)
+            sin_diff = np.sin(angle_diff)
 
             # For each voxel update in the original bearing
             for voxel_key, update_info in voxel_updates.items():
-                # Calculate rotated position for adjacent bearing
-                # The voxel position needs to be rotated around sonar origin
-
                 # Get original point in world frame
-                original_point = update_info['point']
+                px, py, pz = update_info['point']
 
-                # Transform back to sonar frame
-                sonar_origin_world = T_sonar_to_world[:3, 3]
-                relative_pos = original_point - sonar_origin_world
+                # Transform to sonar-relative coordinates
+                rel_x = px - sonar_origin_world[0]
+                rel_y = py - sonar_origin_world[1]
+                # Note: pz stays the same (no vertical rotation)
 
-                # Rotate around Z axis (bearing rotation in sonar frame)
-                # Create rotation matrix for bearing difference
-                cos_diff = np.cos(bearing_diff)
-                sin_diff = np.sin(bearing_diff)
-                rotation_z = np.array([
-                    [cos_diff, -sin_diff, 0],
-                    [sin_diff, cos_diff, 0],
-                    [0, 0, 1]
-                ])
+                # Apply 2D rotation (Z-axis rotation only, much faster)
+                new_rel_x = rel_x * cos_diff - rel_y * sin_diff
+                new_rel_y = rel_x * sin_diff + rel_y * cos_diff
 
-                # Apply rotation and translate back
-                rotated_pos = rotation_z @ relative_pos
-                adjusted_point = rotated_pos + sonar_origin_world
+                # Transform back to world coordinates
+                new_px = new_rel_x + sonar_origin_world[0]
+                new_py = new_rel_y + sonar_origin_world[1]
+                # pz unchanged (vertical aperture same for all bearings)
 
                 # Create new voxel key for adjusted position
-                adjacent_voxel_key = self.octree.world_to_key(
-                    adjusted_point[0], adjusted_point[1], adjusted_point[2]
-                )
+                adjacent_voxel_key = self.octree.world_to_key(new_px, new_py, pz)
 
                 # Apply weighted update
                 weighted_sum = update_info['sum'] * weight
 
                 if adjacent_voxel_key not in propagated_updates:
                     propagated_updates[adjacent_voxel_key] = {
-                        'point': adjusted_point,
+                        'point': np.array([new_px, new_py, pz]),
                         'sum': 0.0,
                         'count': 0
                     }
@@ -640,6 +643,15 @@ class SonarMapping3D:
                 propagated_updates[adjacent_voxel_key]['count'] += update_info['count']
 
         return propagated_updates
+
+    def propagate_bearing_updates(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
+        """
+        Wrapper that calls optimized version
+        Kept for backward compatibility
+        """
+        return self.propagate_bearing_updates_optimized(
+            voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world
+        )
 
     def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates):
         """
@@ -663,8 +675,8 @@ class SonarMapping3D:
                 last_hit_idx = r_idx
                 high_intensity_indices.append(r_idx)
 
-        # DEBUG: Print ray processing info for first frame, first few bearings
-        if self.frame_count == 0 and abs(bearing_angle) < 0.5:  # Central bearings only
+        # DEBUG: Print ray processing info for first frame, first few bearings (DISABLED)
+        if False:  # Disabled for performance
             max_intensity = np.max(intensity_profile)
             print(f"\n=== Ray bearing={np.degrees(bearing_angle):.1f}°, max_intensity={max_intensity} ===")
             print(f"  Threshold: {self.intensity_threshold}")
@@ -674,15 +686,15 @@ class SonarMapping3D:
         # If no hit found, skip this ray entirely (no information)
         if first_hit_idx == -1:
             # No reflection: don't update as free space (we don't know if it's free or just out of range)
-            if self.frame_count == 0 and abs(bearing_angle) < 0.5:
+            if False:  # Disabled for performance
                 print(f"  → SKIPPED: No reflection detected (no map update)")
             return
 
         # Calculate vertical aperture parameters
         half_aperture = self.vertical_aperture / 2
 
-        # DEBUG: Print free space processing
-        if self.frame_count == 0 and abs(bearing_angle) < 0.5:
+        # DEBUG: Print free space processing (DISABLED)
+        if False:  # Disabled for performance
             print(f"  Free space: Processing r_idx 0 to {first_hit_idx} (before first hit)")
 
         # Update free space before first hit (with sparse sampling)
@@ -743,8 +755,8 @@ class SonarMapping3D:
             occupied_vertical_factor = 3.0  # Increased from 1.5 to reduce point count
             num_vertical_steps = max(2, int(vertical_spread / (self.voxel_resolution * occupied_vertical_factor)))
 
-            # DEBUG: Print vertical sampling for first ray
-            if self.frame_count == 0 and abs(bearing_angle) < 0.5 and r_idx == high_intensity_indices[0]:
+            # DEBUG: Print vertical sampling for first ray (DISABLED)
+            if False:  # Disabled for performance
                 print(f"    r_idx={r_idx}, range_m={range_m:.2f}m, vertical_spread={vertical_spread:.3f}m, num_vertical_steps={num_vertical_steps}")
 
             # This is a high intensity region: mark as occupied
@@ -779,8 +791,8 @@ class SonarMapping3D:
                 voxel_updates[voxel_key]['sum'] += log_odds_update
                 voxel_updates[voxel_key]['count'] += 1
 
-        # DEBUG: Print voxel summary (NOTE: voxel_updates accumulates across ALL rays in this frame)
-        if self.frame_count == 0 and abs(bearing_angle) < 0.5:
+        # DEBUG: Print voxel summary (NOTE: voxel_updates accumulates across ALL rays in this frame) (DISABLED)
+        if False:  # Disabled for performance
             print(f"  Total voxels accumulated so far (all rays): {len(voxel_updates)}")
 
     def process_sonar_image(self, polar_image, robot_pose):
@@ -825,7 +837,8 @@ class SonarMapping3D:
         all_voxel_updates = {}  # Combined updates (original + propagated)
 
         # Process subset of bearings for efficiency
-        bearing_divisor = 128  # Reduced from 256 to decrease point count
+        # With propagation radius=1, we need denser sampling to avoid gaps
+        bearing_divisor = 256  # Increased from 128 for better coverage with propagation
         bearing_step = max(1, bearing_bins // bearing_divisor)
 
         # Track processed bearings for propagation
@@ -911,10 +924,14 @@ class SonarMapping3D:
                 print(f"  Total voxels in map: {total_voxels}")
                 print(f"  Bearings processed: {len(processed_bearings)} (step={bearing_step})")
 
-                if self.enable_propagation and len(self.performance_stats['propagation_times']) > 0:
-                    avg_prop_time = np.mean(self.performance_stats['propagation_times'][-10:])
-                    print(f"  Avg propagation time: {avg_prop_time:.4f}s")
-                    print(f"  Propagation enabled: radius={self.propagation_radius}, sigma={self.propagation_sigma}")
+                if self.enable_propagation:
+                    print(f"  Propagation: ENABLED (radius={self.propagation_radius}, sigma={self.propagation_sigma:.1f})")
+                    if len(self.performance_stats['propagation_times']) > 0:
+                        avg_prop_time = np.mean(self.performance_stats['propagation_times'][-10:])
+                        prop_percent = (avg_prop_time / avg_frame_time) * 100
+                        print(f"    Propagation time: {avg_prop_time:.4f}s ({prop_percent:.1f}% of frame time)")
+                else:
+                    print(f"  Propagation: DISABLED")
 
                 # Memory usage estimate (rough)
                 memory_mb = (total_voxels * 100) / (1024 * 1024)  # ~100 bytes per voxel estimate
