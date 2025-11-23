@@ -42,7 +42,7 @@ slam_node:
     min_pcm: 3  # the min number of pairwise consistent loop closures (increased from 2 - stronger outlier rejection)
 
     # 2D Mapping parameters
-    enable_2d_mapping: true
+    enable_2d_mapping: false  # Disabled for 3D mapping performance
     map_resolution: 0.1  # meters per pixel
     map_size: [4000, 4000]  # width, height in pixels (max map size to prevent clipping)
     sonar_range: 30.0  # meters

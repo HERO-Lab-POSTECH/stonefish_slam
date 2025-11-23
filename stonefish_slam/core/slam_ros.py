@@ -317,13 +317,13 @@ class SLAMNode(SLAM, Node):
         self.get_logger().info(f"Subscribing to feature topic: {SONAR_FEATURE_TOPIC}")
         self.get_logger().info(f"Subscribing to odom topic: {LOCALIZATION_ODOM_TOPIC}")
 
-        # Sonar image subscriber for 2D mapping
-        if self.enable_2d_mapping:
+        # Sonar image subscriber for 2D/3D mapping
+        if self.enable_2d_mapping or self.enable_3d_mapping:
             self.sonar_sub = Subscriber(self, Image, '/bluerov2/fls/image', qos_profile=qos_sub_profile)
             self.get_logger().info("Subscribing to sonar image: /bluerov2/fls/image")
 
         # define the sync policy
-        if self.enable_2d_mapping:
+        if self.enable_2d_mapping or self.enable_3d_mapping:
             self.time_sync = ApproximateTimeSynchronizer(
                 [self.feature_sub, self.odom_sub, self.sonar_sub],
                 20,
@@ -544,54 +544,56 @@ class SLAMNode(SLAM, Node):
             if self.nssm_params.enable and self.add_nonsequential_scan_matching():
                 self.update_factor_graph()
 
-            # 4. Update 2D map immediately (synchronous)
-            if self.enable_2d_mapping and (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
+            # 4. Update 2D/3D maps immediately (synchronous)
+            if (self.enable_2d_mapping or self.enable_3d_mapping) and (len(self.keyframes) - self.last_map_update_kf >= self.map_update_interval):
                 # Get new keyframes for incremental update
                 new_keyframes = list(self.keyframes[self.last_map_update_kf:])
 
                 if new_keyframes:
                     try:
-                        # Construct source_frame with namespace (use FRD for correct NED mapping)
-                        source_frame = 'base_link_frd' if self.rov_id == "" else f"{self.rov_id}/base_link_frd"
+                        # Update 2D map if enabled
+                        if self.enable_2d_mapping and self.mapper:
+                            # Construct source_frame with namespace (use FRD for correct NED mapping)
+                            source_frame = 'base_link_frd' if self.rov_id == "" else f"{self.rov_id}/base_link_frd"
 
-                        # Update map immediately (synchronous - no queue, no thread)
-                        self.mapper.update_global_map_from_slam(
-                            new_keyframes,  # New keyframes to process
-                            tf2_buffer=None,  # Disabled: use keyframe.pose
-                            target_frame='world_ned',
-                            source_frame=source_frame,
-                            all_slam_keyframes=self.keyframes  # Complete list for bounds calculation
-                        )
-
-                        # Get and publish map image immediately
-                        map_image = self.mapper.get_map_image()
-                        self.get_logger().info(
-                            f"get_map_image() returned: shape={map_image.shape if map_image is not None else None}, "
-                            f"size={map_image.size if map_image is not None else 0}"
-                        )
-
-                        if map_image is not None and map_image.size > 0:
-                            self.get_logger().info(f"Converting to ROS Image message...")
-                            image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
-                            image_msg.header.stamp = self.get_clock().now().to_msg()
-                            image_msg.header.frame_id = "map"
-
-                            self.get_logger().info(
-                                f"Publishing to {self.map_2d_pub.topic_name if hasattr(self.map_2d_pub, 'topic_name') else 'unknown'}"
+                            # Update map immediately (synchronous - no queue, no thread)
+                            self.mapper.update_global_map_from_slam(
+                                new_keyframes,  # New keyframes to process
+                                tf2_buffer=None,  # Disabled: use keyframe.pose
+                                target_frame='world_ned',
+                                source_frame=source_frame,
+                                all_slam_keyframes=self.keyframes  # Complete list for bounds calculation
                             )
-                            self.map_2d_pub.publish(image_msg)
-                            self.get_logger().info("publish() called successfully")
 
+                            # Get and publish map image immediately
+                            map_image = self.mapper.get_map_image()
                             self.get_logger().info(
-                                f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
-                                f"{len(new_keyframes)} new keyframes, "
-                                f"bounds=X[{self.mapper.min_x:.1f},{self.mapper.max_x:.1f}] "
-                                f"Y[{self.mapper.min_y:.1f},{self.mapper.max_y:.1f}]"
+                                f"get_map_image() returned: shape={map_image.shape if map_image is not None else None}, "
+                                f"size={map_image.size if map_image is not None else 0}"
                             )
-                        else:
-                            self.get_logger().error(f"Map image is None or empty! Cannot publish.")
 
-                        # 5. Update 3D map (in same keyframe update block)
+                            if map_image is not None and map_image.size > 0:
+                                self.get_logger().info(f"Converting to ROS Image message...")
+                                image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
+                                image_msg.header.stamp = self.get_clock().now().to_msg()
+                                image_msg.header.frame_id = "map"
+
+                                self.get_logger().info(
+                                    f"Publishing to {self.map_2d_pub.topic_name if hasattr(self.map_2d_pub, 'topic_name') else 'unknown'}"
+                                )
+                                self.map_2d_pub.publish(image_msg)
+                                self.get_logger().info("publish() called successfully")
+
+                                self.get_logger().info(
+                                    f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
+                                    f"{len(new_keyframes)} new keyframes, "
+                                    f"bounds=X[{self.mapper.min_x:.1f},{self.mapper.max_x:.1f}] "
+                                    f"Y[{self.mapper.min_y:.1f},{self.mapper.max_y:.1f}]"
+                                )
+                            else:
+                                self.get_logger().error(f"Map image is None or empty! Cannot publish.")
+
+                        # 5. Update 3D map (independent of 2D mapping)
                         if self.enable_3d_mapping and self.mapper_3d:
                             try:
                                 # Update 3D map from same new keyframes

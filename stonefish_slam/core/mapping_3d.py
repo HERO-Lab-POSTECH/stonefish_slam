@@ -405,7 +405,7 @@ class SonarMapping3D:
             'dynamic_expansion': True,     # Enable dynamic map expansion
             'adaptive_update': True,       # Enable adaptive updating (linear protection)
             # Bearing propagation parameters (NEW)
-            'enable_propagation': True,    # Enable bearing propagation (optimized for performance)
+            'enable_propagation': False,   # DISABLED for performance (30-40% overhead)
             'propagation_radius': 1,       # Number of adjacent bearings to propagate to (reduced from 2)
             'propagation_sigma': 1.0,      # Gaussian decay sigma for propagation weight (reduced from 1.5)
             'enable_profiling': True,      # Enable performance profiling
@@ -985,8 +985,8 @@ class SonarMapping3D:
         all_voxel_updates = {}  # Combined updates (original + propagated)
 
         # Process subset of bearings for efficiency
-        # With propagation radius=1, we need denser sampling to avoid gaps
-        bearing_divisor = 256  # Increased from 128 for better coverage with propagation
+        # Reduced divisor since propagation is disabled
+        bearing_divisor = 128  # Reduced from 256 (50% fewer bearings processed)
         bearing_step = max(1, bearing_bins // bearing_divisor)
 
         # Track processed bearings for propagation
