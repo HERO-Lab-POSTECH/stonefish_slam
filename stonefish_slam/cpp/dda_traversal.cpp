@@ -8,8 +8,29 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
+#include <unordered_map>
 
 namespace py = pybind11;
+
+// Configuration for sonar ray processing
+struct SonarRayConfig {
+    double voxel_size;
+    double log_odds_free;
+    double max_range;
+    double min_range;
+    double vertical_aperture;
+    bool use_range_weighting;
+    double lambda_decay;
+    bool enable_gaussian_weighting;
+    double gaussian_sigma_factor;
+};
+
+// Voxel update result
+struct VoxelUpdate {
+    std::array<int, 3> key;
+    double log_odds_sum;
+    int count;
+};
 
 /**
  * @brief 3D DDA (Digital Differential Analyzer) voxel traversal
@@ -153,13 +174,152 @@ public:
         return voxel_list;
     }
 
+    /**
+     * @brief Process entire vertical fan for free space ray
+     *
+     * Performs DDA traversal for multiple vertical angles, accumulates voxel updates.
+     * This minimizes Python ↔ C++ boundary crossings (1 call instead of 10).
+     *
+     * @param sonar_origin Origin point in world frame
+     * @param ray_direction_horizontal Horizontal ray direction (unit vector)
+     * @param range_to_first_hit Maximum range to traverse
+     * @param num_vertical_steps Number of vertical samples (±N steps)
+     * @param config Sonar configuration parameters
+     * @return Vector of accumulated voxel updates
+     */
+    std::vector<VoxelUpdate> process_free_space_ray(
+        const Eigen::Vector3d& sonar_origin,
+        const Eigen::Vector3d& ray_direction_horizontal,
+        double range_to_first_hit,
+        int num_vertical_steps,
+        const SonarRayConfig& config
+    ) {
+        std::unordered_map<VoxelKey, VoxelUpdate, VoxelKeyHash> updates_map;
+
+        double half_aperture = config.vertical_aperture / 2.0;
+
+        // Vertical fan loop (moved from Python to C++)
+        for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
+            // Compute vertical angle
+            double vertical_angle = (num_vertical_steps > 0) ?
+                (v_step / (double)num_vertical_steps) * half_aperture : 0.0;
+
+            // Rotate horizontal direction by vertical angle
+            // Simple pitch rotation:
+            // x' = x * cos(v) - z * sin(v)
+            // y' = y
+            // z' = x * sin(v) + z * cos(v)
+            double cos_v = std::cos(vertical_angle);
+            double sin_v = std::sin(vertical_angle);
+
+            Eigen::Vector3d tilted_direction(
+                ray_direction_horizontal[0] * cos_v - ray_direction_horizontal[2] * sin_v,
+                ray_direction_horizontal[1],
+                ray_direction_horizontal[0] * sin_v + ray_direction_horizontal[2] * cos_v
+            );
+            tilted_direction.normalize();
+
+            // End point for this vertical angle
+            Eigen::Vector3d end_point = sonar_origin + tilted_direction * range_to_first_hit;
+
+            // DDA traversal
+            std::vector<std::array<int, 3>> voxels = traverse(sonar_origin, end_point, 500);
+
+            // Compute Gaussian weight once for this vertical angle
+            double gaussian_weight = 1.0;
+            if (config.enable_gaussian_weighting && half_aperture > 0) {
+                double normalized_angle = vertical_angle / half_aperture;
+                gaussian_weight = std::exp(-0.5 * std::pow(normalized_angle * config.gaussian_sigma_factor, 2));
+            }
+
+            // Process each voxel
+            for (const auto& voxel_arr : voxels) {
+                // Compute voxel center
+                Eigen::Vector3d voxel_center(
+                    voxel_arr[0] * config.voxel_size,
+                    voxel_arr[1] * config.voxel_size,
+                    voxel_arr[2] * config.voxel_size
+                );
+
+                // Compute range
+                double range = (voxel_center - sonar_origin).norm();
+
+                // Skip if below min_range
+                if (range <= config.min_range) continue;
+
+                // Range weighting
+                double range_weight = 1.0;
+                if (config.use_range_weighting) {
+                    range_weight = std::exp(-config.lambda_decay * range / config.max_range);
+                }
+
+                // Total log-odds update
+                double log_odds_update = config.log_odds_free * range_weight * gaussian_weight;
+
+                // Accumulate in map (handle duplicates)
+                VoxelKey key = voxel_to_key(voxel_arr);
+                if (updates_map.find(key) == updates_map.end()) {
+                    updates_map[key] = {voxel_arr, 0.0, 0};
+                }
+                updates_map[key].log_odds_sum += log_odds_update;
+                updates_map[key].count++;
+            }
+        }
+
+        // Convert map to vector
+        std::vector<VoxelUpdate> result;
+        result.reserve(updates_map.size());
+        for (const auto& [key, update] : updates_map) {
+            result.push_back(update);
+        }
+
+        return result;
+    }
+
 private:
     double voxel_size_;
+
+    // Helper: Convert voxel array to hashable key
+    struct VoxelKey {
+        int x, y, z;
+        bool operator==(const VoxelKey& other) const {
+            return x == other.x && y == other.y && z == other.z;
+        }
+    };
+
+    struct VoxelKeyHash {
+        size_t operator()(const VoxelKey& k) const {
+            return std::hash<int>()(k.x) ^ (std::hash<int>()(k.y) << 1) ^ (std::hash<int>()(k.z) << 2);
+        }
+    };
+
+    VoxelKey voxel_to_key(const std::array<int, 3>& arr) const {
+        return {arr[0], arr[1], arr[2]};
+    }
 };
 
 // Pybind11 module definition
 PYBIND11_MODULE(dda_traversal, m) {
     m.doc() = "DDA 3D voxel traversal (Amanatides-Woo 1987)";
+
+    // Add struct bindings
+    py::class_<SonarRayConfig>(m, "SonarRayConfig")
+        .def(py::init<>())
+        .def_readwrite("voxel_size", &SonarRayConfig::voxel_size)
+        .def_readwrite("log_odds_free", &SonarRayConfig::log_odds_free)
+        .def_readwrite("max_range", &SonarRayConfig::max_range)
+        .def_readwrite("min_range", &SonarRayConfig::min_range)
+        .def_readwrite("vertical_aperture", &SonarRayConfig::vertical_aperture)
+        .def_readwrite("use_range_weighting", &SonarRayConfig::use_range_weighting)
+        .def_readwrite("lambda_decay", &SonarRayConfig::lambda_decay)
+        .def_readwrite("enable_gaussian_weighting", &SonarRayConfig::enable_gaussian_weighting)
+        .def_readwrite("gaussian_sigma_factor", &SonarRayConfig::gaussian_sigma_factor);
+
+    py::class_<VoxelUpdate>(m, "VoxelUpdate")
+        .def(py::init<>())
+        .def_readwrite("key", &VoxelUpdate::key)
+        .def_readwrite("log_odds_sum", &VoxelUpdate::log_odds_sum)
+        .def_readwrite("count", &VoxelUpdate::count);
 
     py::class_<DDATraversal>(m, "DDATraversal")
         .def(py::init<double>(),
@@ -174,5 +334,13 @@ PYBIND11_MODULE(dda_traversal, m) {
         .def("world_to_key",
              &DDATraversal::world_to_key,
              py::arg("point"),
-             "Convert world coordinates to voxel key");
+             "Convert world coordinates to voxel key")
+        .def("process_free_space_ray",
+             &DDATraversal::process_free_space_ray,
+             py::arg("sonar_origin"),
+             py::arg("ray_direction_horizontal"),
+             py::arg("range_to_first_hit"),
+             py::arg("num_vertical_steps"),
+             py::arg("config"),
+             "Process entire vertical fan for free space (batch processing)");
 }

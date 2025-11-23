@@ -52,6 +52,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **C++ 표준 업그레이드** (`CMakeLists.txt`)
+  - C++14 → C++17 (structured bindings 지원으로 배치 처리 코드 가독성 향상)
+
+- **DDA 배치 처리 설계** (`dda_traversal.cpp`, `mapping_3d.py`)
+  - 새 구조체: `SonarRayConfig` (모든 파라미터를 한 번에 전달)
+  - 새 구조체: `VoxelUpdate` (누적 log-odds와 count 반환)
+  - 새 API: `process_free_space_ray()` - 전체 수직 팬 처리 (기존 per-ray 호출 대체)
+  - Python 쪽 변경: Vertical loop 제거, 배치 결과 처리로 단순화
+
 - **Free space traversal 성능 최적화** (`mapping_3d.py`)
   - 기존 Python loop → DDA C++ 호출로 교체 (`use_dda_traversal=True` 기본)
   - 모든 기존 로직 보존 (range weighting, Gaussian weighting, adaptive update)
@@ -90,6 +99,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `enable_profiling`: 성능 측정 활성화 여부 (기본값: True)
 
 ### Fixed
+
+- **DDA 통합 성능 문제 해결 (배치 처리로 재설계)** (`dda_traversal.cpp`, `mapping_3d.py`)
+  - 문제: DDA 통합 후 오히려 성능 저하 (2-3 Hz → 1-2 Hz)
+  - 원인: Vertical loop (각 레이당 10회) 실행 시 Python에서 C++ 호출 반복
+  - 영향: Python ↔ C++ 경계 교차 320회/프레임 (치명적 오버헤드)
+  - 해결: Vertical loop를 C++로 이동, 배치 처리 구현
+  - 새 API: `process_free_space_ray()` - 전체 수직 팬 한 번에 처리
+  - 성능: 경계 교차 320회 → 32회 (90% 감소)
+  - 기술: SonarRayConfig 구조체로 파라미터 전달, VoxelUpdate로 누적 결과 반환
+  - 예상 성능 개선: 1-2 Hz → 10-15 Hz (10배 향상)
 
 - **3D 맵핑 포인트 클라우드 empty 문제 해결** (`mapping_3d.py`)
   - 원인: `max_effective_range=15m`가 `max_range=30m`보다 작아서 15~30m 타겟이 weight=0 받음

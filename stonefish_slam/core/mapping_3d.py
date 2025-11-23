@@ -517,7 +517,20 @@ class SonarMapping3D:
             try:
                 from stonefish_slam import dda_traversal
                 self.dda_traverser = dda_traversal.DDATraversal(self.voxel_resolution)
-                print(f"[INFO] Using C++ DDA traversal (voxel_size={self.voxel_resolution}m)")
+
+                # Create config object for batch processing
+                self.dda_config = dda_traversal.SonarRayConfig()
+                self.dda_config.voxel_size = self.voxel_resolution
+                self.dda_config.log_odds_free = self.octree.log_odds_free
+                self.dda_config.max_range = self.max_range
+                self.dda_config.min_range = self.min_range
+                self.dda_config.vertical_aperture = self.vertical_aperture
+                self.dda_config.use_range_weighting = self.use_range_weighting
+                self.dda_config.lambda_decay = self.lambda_decay
+                self.dda_config.enable_gaussian_weighting = self.enable_gaussian_weighting
+                self.dda_config.gaussian_sigma_factor = self.gaussian_sigma_factor
+
+                print(f"[INFO] Using C++ DDA batch processing (voxel_size={self.voxel_resolution}m)")
             except ImportError as e:
                 self.use_dda = False
                 print(f"[WARN] C++ DDA module not found ({e}), using Python traversal")
@@ -751,79 +764,51 @@ class SonarMapping3D:
             print(f"  Free space: Processing r_idx 0 to {first_hit_idx} (before first hit)")
 
         # Update free space before first hit (with sparse sampling)
-        # Use C++ DDA traversal if available, otherwise fall back to Python
+        # Use C++ DDA batch processing if available
         if self.use_dda and first_hit_idx > 0:
-            # C++ DDA traversal for free space (much faster)
-            # Calculate sparse vertical sampling
-            sonar_origin_world = T_sonar_to_world[:3, 3]
+            # Calculate range to first hit
+            range_to_first_hit = self.max_range - (first_hit_idx - 1) * self.range_resolution
 
-            # Estimate vertical spread at mid-range for sampling
+            # Horizontal ray direction at bearing_angle
+            ray_direction_horizontal = np.array([
+                np.cos(bearing_angle),
+                np.sin(bearing_angle),
+                0.0
+            ])
+
+            # Transform to world frame
+            sonar_origin_world = T_sonar_to_world[:3, 3]
+            ray_direction_world = T_sonar_to_world[:3, :3] @ ray_direction_horizontal
+            ray_direction_world = ray_direction_world / np.linalg.norm(ray_direction_world)
+
+            # Compute vertical steps
             mid_range = self.max_range - (first_hit_idx / 2) * self.range_resolution
             vertical_spread = mid_range * np.tan(half_aperture)
             free_vertical_factor = 8.0
             num_vertical_steps = max(1, int(vertical_spread / (self.voxel_resolution * free_vertical_factor)))
 
-            # Base log-odds for free space
-            base_log_odds_free = self.octree.log_odds_free
+            # SINGLE C++ call for entire vertical fan
+            try:
+                voxel_updates_list = self.dda_traverser.process_free_space_ray(
+                    sonar_origin_world,
+                    ray_direction_world,
+                    range_to_first_hit,
+                    num_vertical_steps,
+                    self.dda_config
+                )
 
-            # Iterate over vertical angles
-            for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
-                # Calculate vertical angle within aperture
-                vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
+                # Merge results into voxel_updates dict
+                for update in voxel_updates_list:
+                    key = tuple(update.key)
+                    if key not in voxel_updates:
+                        voxel_center = np.array(update.key, dtype=float) * self.voxel_resolution
+                        voxel_updates[key] = {'point': voxel_center, 'sum': 0.0, 'count': 0}
+                    voxel_updates[key]['sum'] += update.log_odds_sum
+                    voxel_updates[key]['count'] += update.count
 
-                # Calculate ray end point (just before first hit)
-                range_end = self.max_range - (first_hit_idx - 1) * self.range_resolution
-
-                # 3D end point in sonar frame
-                x_end = range_end * np.cos(vertical_angle) * np.cos(bearing_angle)
-                y_end = range_end * np.cos(vertical_angle) * np.sin(bearing_angle)
-                z_end = range_end * np.sin(vertical_angle)
-
-                # Transform to world frame
-                pt_end_sonar = np.array([x_end, y_end, z_end, 1.0])
-                pt_end_world = T_sonar_to_world @ pt_end_sonar
-
-                # DDA traversal from sonar origin to end point
-                try:
-                    voxel_keys = self.dda_traverser.traverse(
-                        sonar_origin_world,
-                        pt_end_world[:3],
-                        max_voxels=500
-                    )
-                except Exception as e:
-                    print(f"[WARN] DDA traversal failed: {e}, falling back to Python")
-                    voxel_keys = []
-
-                # Apply range weighting and Gaussian to each voxel
-                for voxel_key_arr in voxel_keys:
-                    voxel_key = tuple(voxel_key_arr)
-
-                    # Calculate actual range for this voxel
-                    voxel_center = np.array(voxel_key_arr) * self.voxel_resolution
-                    range_m = np.linalg.norm(voxel_center - sonar_origin_world)
-
-                    # Skip if below min_range
-                    if range_m <= self.min_range:
-                        continue
-
-                    # Apply range weighting
-                    if self.use_range_weighting:
-                        range_weight = self.compute_range_weight(range_m)
-                        log_odds_update = base_log_odds_free * range_weight
-                    else:
-                        log_odds_update = base_log_odds_free
-
-                    # Apply Gaussian weighting if enabled
-                    if self.enable_gaussian_weighting:
-                        normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
-                        gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
-                        log_odds_update *= gaussian_weight
-
-                    # Accumulate update
-                    if voxel_key not in voxel_updates:
-                        voxel_updates[voxel_key] = {'point': voxel_center, 'sum': 0.0, 'count': 0}
-                    voxel_updates[voxel_key]['sum'] += log_odds_update
-                    voxel_updates[voxel_key]['count'] += 1
+            except Exception as e:
+                print(f"[ERROR] DDA batch processing failed: {e}")
+                # Fall through to Python fallback below
         else:
             # Fallback to original Python traversal
             free_sampling_step = 2  # Reduced from 10 to 2 for better coverage (0.12m intervals)
