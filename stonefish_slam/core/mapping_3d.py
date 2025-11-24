@@ -505,14 +505,17 @@ class SonarMapping3D:
                 ray_config.min_range = self.min_range
                 ray_config.range_resolution = self.range_resolution
                 ray_config.vertical_aperture = self.vertical_aperture
-                ray_config.bearing_resolution = self.horizontal_fov / self.image_width
+                # horizontal_fov: degrees for C++ angle calculation
+                ray_config.horizontal_fov = np.degrees(self.horizontal_fov)
+                # bearing_resolution: radians (proper interval calculation for np.linspace)
+                ray_config.bearing_resolution = self.horizontal_fov / (self.image_width - 1)
                 ray_config.log_odds_occupied = self.log_odds_occupied
                 ray_config.log_odds_free = self.log_odds_free
                 ray_config.use_range_weighting = default_config.get('use_range_weighting', True)
                 ray_config.lambda_decay = default_config.get('lambda_decay', 0.1)
                 ray_config.enable_gaussian_weighting = default_config.get('enable_gaussian_weighting', False)
                 ray_config.voxel_resolution = self.voxel_resolution
-                ray_config.bearing_step = default_config.get('bearing_step', 256)
+                ray_config.bearing_step = default_config.get('bearing_step', 2)  # Fixed: process every 2nd bearing (was 256!)
                 ray_config.intensity_threshold = self.intensity_threshold
 
                 # Create RayProcessor with shared octree

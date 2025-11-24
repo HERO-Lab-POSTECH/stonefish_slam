@@ -350,11 +350,13 @@ double RayProcessor::compute_vertical_angle(int v_step, int num_vertical_steps) 
 
 // Compute bearing angle
 double RayProcessor::compute_bearing_angle(int bearing_idx, int num_bearings) const {
-    // Center bearing at 0 (forward)
-    // Positive = right, negative = left
-    int center_idx = num_bearings / 2;
-    int offset_idx = bearing_idx - center_idx;
-    return offset_idx * config_.bearing_resolution;
+    // Match Python's np.linspace(-fov/2, +fov/2, num_bearings)
+    // np.linspace includes endpoints, so there are (num_bearings - 1) intervals
+    // Example: num_bearings=512, bearing_idx=0 → -65°, bearing_idx=511 → +65°
+    double fov_rad = config_.horizontal_fov * M_PI / 180.0;
+    double start_angle = -fov_rad / 2.0;
+    double step = fov_rad / (num_bearings - 1);
+    return start_angle + bearing_idx * step;
 }
 
 // Compute ray direction
@@ -491,6 +493,7 @@ PYBIND11_MODULE(ray_processor, m) {
         .def_readwrite("min_range", &RayProcessorConfig::min_range)
         .def_readwrite("range_resolution", &RayProcessorConfig::range_resolution)
         .def_readwrite("vertical_aperture", &RayProcessorConfig::vertical_aperture)
+        .def_readwrite("horizontal_fov", &RayProcessorConfig::horizontal_fov)
         .def_readwrite("bearing_resolution", &RayProcessorConfig::bearing_resolution)
         .def_readwrite("free_vertical_factor", &RayProcessorConfig::free_vertical_factor)
         .def_readwrite("occupied_vertical_factor", &RayProcessorConfig::occupied_vertical_factor)

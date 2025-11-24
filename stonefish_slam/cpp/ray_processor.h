@@ -29,6 +29,7 @@ struct RayProcessorConfig {
 
     // Angular parameters
     double vertical_aperture;           // Vertical beam aperture (radians)
+    double horizontal_fov;              // Horizontal field of view (degrees)
     double bearing_resolution;          // Horizontal angular resolution (radians)
 
     // Vertical sampling parameters
@@ -56,6 +57,7 @@ struct RayProcessorConfig {
           min_range(0.5),
           range_resolution(0.06),
           vertical_aperture(20.0 * M_PI / 180.0),
+          horizontal_fov(130.0),
           bearing_resolution(0.0175),
           free_vertical_factor(8.0),
           occupied_vertical_factor(3.0),
