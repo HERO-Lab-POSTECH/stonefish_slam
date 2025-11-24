@@ -1,5 +1,51 @@
 # Stonefish SLAM Troubleshooting Guide
 
+## [2025-11-24] OctoMap API 사용 오류
+
+**Category**: Bug Fix
+
+**Situation**:
+C++ OctoMap backend에서 `setLogOdds()` 직접 호출로 수동 log-odds 설정. 결과적으로 pruning이 미수행되고 메모리 비효율 발생.
+
+**Cause**:
+OctoMap의 공식 API `updateNode()`를 사용하지 않음. `setLogOdds()`는 internal 메서드로 octree 구조 정보 미갱신 → identical children merge 불가능 → 메모리 누적.
+
+**Solution**:
+1. octree_mapping.cpp의 node update 로직 변경:
+   ```cpp
+   // 수정 전: 자동 pruning 없음
+   node->setLogOdds(log_odds_update);
+
+   // 수정 후: 자동 pruning + merge
+   tree_->updateNode(key, log_odds_update);
+   ```
+
+2. Log-odds 반환 추가 (Nx4 array):
+   ```cpp
+   // Nx3 → Nx4 (x, y, z, log_odds) 포함
+   coords_array.push_back(coord.x());
+   coords_array.push_back(coord.y());
+   coords_array.push_back(coord.z());
+   coords_array.push_back(node->getLogOdds());
+   ```
+
+3. Log-odds 범위 정규화 (mapping_3d.py):
+   ```python
+   # -2.0 ~ 3.5 (OctoMap 기본값)로 clamping
+   log_odds = np.clip(log_odds, -2.0, 3.5)
+   ```
+
+**Files**:
+- `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/octree_mapping.cpp` (updateNode 적용)
+- `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/core/mapping_3d.py` (범위 정규화)
+
+**Note**:
+- updateNode() 사용으로 메모리 효율성 향상, identical children 자동 merge
+- Log-odds 값 정확히 저장/반환되므로 Python에서 occupancy 확률 계산 가능
+- 테스트: 1.5 log-odds → prob = 0.818 (정확함)
+
+---
+
 ## [2025-11-23] 3D Mapping 성능 병목 식별
 
 **Category**: Performance

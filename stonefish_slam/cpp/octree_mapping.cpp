@@ -126,33 +126,15 @@ void OctreeMapping::insert_point_cloud(
     }
 
     // Sequential phase: merge all updates into tree
-    // Apply updates in batches to reduce Python GIL-like overhead
-    double min_log = static_cast<double>(tree_->getClampingThresMinLog());
-    double max_log = static_cast<double>(tree_->getClampingThresMaxLog());
-
+    // Use OctoMap's updateNode() API for incremental updates (enables pruning)
     for (const auto& batch : thread_batches) {
-        // Process entire batch without per-update locking
-        // OctoMap tree updates are sequential here, but key computation was parallel
         for (size_t i = 0; i < batch.keys.size(); ++i) {
             const auto& key = batch.keys[i];
             double log_odds_update = batch.log_odds_updates[i];
 
-            // Get or create node
-            octomap::OcTreeNode* node = tree_->search(key);
-            if (!node) {
-                // Create node with neutral probability (log-odds = 0)
-                node = tree_->updateNode(key, 0.0f);
-            }
-
-            if (node) {
-                // Get current log-odds
-                double current_log_odds = node->getLogOdds();
-                // Add update
-                double new_log_odds = current_log_odds + log_odds_update;
-                // Clamp to prevent overflow
-                new_log_odds = std::max(min_log, std::min(new_log_odds, max_log));
-                node->setLogOdds(static_cast<float>(new_log_odds));
-            }
+            // Use updateNode() API for incremental update
+            // This ensures pruning is performed automatically
+            tree_->updateNode(key, static_cast<float>(log_odds_update), true);
         }
     }
 
@@ -168,27 +150,10 @@ void OctreeMapping::insert_point_cloud(
         // Get log-odds update for this point
         double log_odds_update = log_odds_ptr[i];
 
-        // Update node using OctoMap's built-in log-odds logic
+        // Use updateNode() API for incremental update (enables pruning)
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
-            // Get or create node
-            octomap::OcTreeNode* node = tree_->search(key);
-            if (!node) {
-                // Create node with neutral probability (log-odds = 0)
-                node = tree_->updateNode(key, 0.0f);
-            }
-
-            if (node) {
-                // Get current log-odds
-                double current_log_odds = node->getLogOdds();
-                // Add update
-                double new_log_odds = current_log_odds + log_odds_update;
-                // Clamp to prevent overflow (cast to double for type matching)
-                double min_log = static_cast<double>(tree_->getClampingThresMinLog());
-                double max_log = static_cast<double>(tree_->getClampingThresMaxLog());
-                new_log_odds = std::max(min_log, std::min(new_log_odds, max_log));
-                node->setLogOdds(static_cast<float>(new_log_odds));
-            }
+            tree_->updateNode(key, static_cast<float>(log_odds_update), true);
         }
     }
 #endif
@@ -214,12 +179,12 @@ py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
         }
     }
 
-    // Allocate NumPy array (N x 3)
-    py::array_t<double> result(std::vector<ssize_t>{static_cast<ssize_t>(occupied_count), 3});
+    // Allocate NumPy array (N x 4: x, y, z, log_odds)
+    py::array_t<double> result(std::vector<ssize_t>{static_cast<ssize_t>(occupied_count), 4});
     auto result_buf = result.request();
     double* result_ptr = static_cast<double*>(result_buf.ptr);
 
-    // Second pass: fill array with voxel centers
+    // Second pass: fill array with voxel centers and log-odds
     size_t idx = 0;
     for (octomap::OcTree::leaf_iterator it = tree_->begin_leafs();
          it != tree_->end_leafs(); ++it) {
@@ -228,9 +193,10 @@ py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
             if (occupancy >= threshold) {
                 // Get voxel center coordinates using keyToCoord (more reliable)
                 octomap::point3d coord = tree_->keyToCoord(it.getKey());
-                result_ptr[idx * 3 + 0] = coord.x();
-                result_ptr[idx * 3 + 1] = coord.y();
-                result_ptr[idx * 3 + 2] = coord.z();
+                result_ptr[idx * 4 + 0] = coord.x();
+                result_ptr[idx * 4 + 1] = coord.y();
+                result_ptr[idx * 4 + 2] = coord.z();
+                result_ptr[idx * 4 + 3] = it->getLogOdds();  // Add log-odds value
                 idx++;
             }
         }
@@ -304,7 +270,7 @@ PYBIND11_MODULE(octree_mapping, m) {
              "Args:\n"
              "    threshold: Occupancy probability threshold (0.0 to 1.0)\n\n"
              "Returns:\n"
-             "    Nx3 NumPy array of occupied voxel centers")
+             "    Nx4 NumPy array of occupied voxel centers [x, y, z, log_odds]")
         .def("query_cell",
              &OctreeMapping::query_cell,
              py::arg("x"),

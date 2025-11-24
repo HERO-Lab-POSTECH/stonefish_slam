@@ -463,11 +463,11 @@ class SonarMapping3D:
         self.adaptive_threshold = default_config.get('adaptive_threshold', 0.5)
         self.adaptive_max_ratio = default_config.get('adaptive_max_ratio', 0.5)
 
-        # Get log-odds parameters from config
+        # Get log-odds parameters from config (use OctoMap default values)
         self.log_odds_occupied = default_config.get('log_odds_occupied', 1.5)
         self.log_odds_free = default_config.get('log_odds_free', -2.0)
-        self.log_odds_min = default_config.get('log_odds_min', -10.0)
-        self.log_odds_max = default_config.get('log_odds_max', 10.0)
+        self.log_odds_min = default_config.get('log_odds_min', -2.0)  # OctoMap default: -2.0 (not -10.0)
+        self.log_odds_max = default_config.get('log_odds_max', 3.5)   # OctoMap default: 3.5 (not 10.0)
 
         # C++ backend initialization
         self.use_cpp_backend = default_config['use_cpp_backend']
@@ -1265,14 +1265,19 @@ class SonarMapping3D:
             # C++ backend expects probability threshold (0-1), not log-odds
             threshold = np.clip(self.min_probability, 0.0, 1.0)
 
-            # Get occupied cells from C++ backend
+            # Get occupied cells from C++ backend (now returns Nx4: x, y, z, log_odds)
             occupied_cells = self.cpp_octree.get_occupied_cells(threshold=threshold)
 
             if len(occupied_cells) > 0:
-                points = occupied_cells  # Already (N, 3) array
-                # C++ backend doesn't return log-odds yet, use fixed probability
-                # TODO: Update C++ binding to return log-odds
-                probs = np.full(len(points), self.min_probability, dtype=np.float64)
+                # Validate shape
+                if occupied_cells.shape[1] != 4:
+                    raise ValueError(f"Expected Nx4 array from C++ backend, got {occupied_cells.shape}")
+
+                points = occupied_cells[:, :3]  # x, y, z
+                log_odds_values = occupied_cells[:, 3]  # log-odds
+
+                # Convert log-odds to probability: p = 1 / (1 + exp(-log_odds))
+                probs = 1.0 / (1.0 + np.exp(-log_odds_values))
             else:
                 points = np.empty((0, 3))
                 probs = np.empty(0)

@@ -67,7 +67,7 @@ public:
      * @brief Get all occupied voxels above threshold
      *
      * @param threshold Occupancy probability threshold (0.0 to 1.0, default: 0.5)
-     * @return Nx3 NumPy array of occupied voxel centers [x, y, z]
+     * @return Nx4 NumPy array of occupied voxel centers [x, y, z, log_odds]
      */
     py::array_t<double> get_occupied_cells(double threshold = 0.5);
 

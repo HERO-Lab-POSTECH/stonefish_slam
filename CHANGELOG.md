@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OctoMap API 사용 오류 수정** (2025-11-24)
+  - `setLogOdds()` 직접 호출 대신 `updateNode()` 사용으로 변경
+  - 문제: 수동 log-odds 설정으로 pruning 미수행, 메모리 비효율
+  - 해결: OctoMap 공식 API `tree_->updateNode(key, log_odds)` 사용으로 자동 pruning 및 merge 적용
+  - 결과: 메모리 효율성 향상, identical children 자동 병합
+  - 파일: `stonefish_slam/cpp/octree_mapping.cpp` (line ~92)
+
+- **Log-odds 반환 기능 구현** (`octree_mapping.cpp`, `mapping_3d.py`)
+  - 문제: `get_occupied_cells()`가 Nx3 array만 반환 (x, y, z만)
+  - 해결: Nx4 array로 변경 (x, y, z, log_odds)
+  - 결과: Python에서 각 voxel의 정확한 occupancy 확률 사용 가능
+  - 파일: `octree_mapping.cpp` (output padding 추가), `mapping_3d.py` (unpacking 수정)
+
+- **Log-odds 범위 정규화** (`mapping_3d.py`)
+  - 문제: Python backend 범위 `-10~+10` (과도), C++ backend와 불일치
+  - 해결: OctoMap 기본값 `-2.0~+3.5` 사용으로 통일
+  - 결과: C++/Python backend 일관성 확보, threshold 계산 정확
+  - 파일: `mapping_3d.py` (log_odds clamping 범위 수정)
+
 - **Phase 3 Critical Bug Fixes** (`octree_mapping.cpp`)
   - `insert_point_cloud()`: Log-odds 값을 직접 사용 (boolean 대신)
     - 기존: `logodds = occupied ? occupied_logodds : free_logodds`
