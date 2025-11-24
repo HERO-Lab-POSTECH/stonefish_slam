@@ -398,14 +398,14 @@ class SonarMapping3D:
         default_config = {
             'horizontal_fov': 130.0,      # degrees (-65 to +65)
             'vertical_aperture': 20.0,     # degrees (vertical aperture)
-            'max_range': 30.0,             # meters (updated from 20.0)
+            'max_range': 40.0,             # meters (updated from 30.0)
             'min_range': 0.5,              # meters
             'intensity_threshold': 50,     # 0-255 scale (match 2D mapping)
             'image_width': 512,            # Sonar image width (bearings)
             'image_height': 500,          # Sonar image height (ranges)
             # Sonar mounting (BlueROV2 actual mounting, FRD frame)
             'sonar_position': [0.25, 0.0, 0.08],  # meters from base_link
-            'sonar_tilt': -0.5236,         # 30° downward (negative pitch in FRD)
+            'sonar_tilt': -0.174533,       # 10° downward (negative pitch in FRD)
             # Octree parameters
             'voxel_resolution': 0.1,       # 10cm voxels (hierarchical octree optimized)
             'min_probability': 0.6,        # Minimum probability for occupied

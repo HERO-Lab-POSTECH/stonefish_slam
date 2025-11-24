@@ -38,7 +38,7 @@ struct RayProcessorConfig {
 
     // Log-odds parameters
     double log_odds_occupied;           // Log-odds update for occupied voxels (e.g., 0.85)
-    double log_odds_free;               // Log-odds update for free space (e.g., -0.4)
+    double log_odds_free;               // Log-odds update for free space (e.g., -2.0, matched with Python)
 
     // Weighting parameters
     bool use_range_weighting;           // Enable range-based weighting
@@ -62,7 +62,7 @@ struct RayProcessorConfig {
           free_vertical_factor(8.0),
           occupied_vertical_factor(3.0),
           log_odds_occupied(0.85),
-          log_odds_free(-0.4),
+          log_odds_free(-2.0),  // Fixed: Match Python value for consistent free space updates
           use_range_weighting(true),
           lambda_decay(2.0),
           enable_gaussian_weighting(false),

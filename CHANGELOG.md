@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Free Space 확률 업데이트 버그 수정 (3가지)** (2025-11-24)
+  - **Phase 1: Config 값 일관성 확보**
+    - 문제: C++ log_odds_free=-0.4, Python=-2.0 불일치로 free space 감소폭 1/5로 약화
+    - 수정: `octree_mapping.cpp`, `ray_processor.h` 모두 -2.0으로 통일
+    - 결과: Free space 확률이 정상적으로 감소하여 occupied와 균형 유지
+  - **Phase 2: Clamping Threshold 대칭화**
+    - 문제: Min=0.12 (log-odds -2.0), Max=0.97 (log-odds +3.5) 비대칭
+    - 수정: Min=0.03 (log-odds -3.5)으로 대칭화
+    - 결과: Free/occupied 확률이 동일한 누적 범위 확보 (±3.5 대칭)
+  - **Phase 3: 시각화 필터링 이중 체크 제거**
+    - 문제: `isNodeOccupied()` (p>0.5 체크) + threshold (p>0.X) 이중 필터링
+    - 수정: `get_occupied_cells()`에서 `isNodeOccupied()` 제거, threshold만 사용
+    - 결과: Free space voxel (p<0.5)도 threshold 기준으로 반환 가능
+  - 파일: `cpp/octree_mapping.cpp`, `cpp/ray_processor.h`
+
+### Fixed
+
 - **CRITICAL: C++ RayProcessor OpenMP/GIL 세그먼트 폴트 해결** (2025-11-24)
   - 근본 원인: OpenMP 스레드가 Python GIL 없이 pybind11 API 호출
   - 문제 현상: 256 bearing 처리 시 세그먼트 폴트 (exit code -11)

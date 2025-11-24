@@ -36,4 +36,4 @@ feature_extraction_sim_node:
       num_beams: 512  # number of beams (image width)
       num_bins: 500  # number of range bins (image height)
       range_min: 0.5  # minimum range in meters
-      range_max: 30.0  # maximum range in meters
+      range_max: 40.0  # maximum range in meters

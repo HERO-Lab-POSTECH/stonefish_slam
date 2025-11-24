@@ -12,7 +12,7 @@
 OctreeMapping::OctreeMapping(double resolution)
     : resolution_(resolution),
       log_odds_occupied_(0.85),
-      log_odds_free_(-0.4)
+      log_odds_free_(-2.0)  // Fixed: Match Python value for consistent free space updates
 {
     if (resolution_ <= 0.0) {
         throw std::invalid_argument("Resolution must be positive");
@@ -22,8 +22,9 @@ OctreeMapping::OctreeMapping(double resolution)
     tree_ = std::make_unique<octomap::OcTree>(resolution_);
 
     // Set default clamping thresholds (prevent extreme probabilities)
-    tree_->setClampingThresMin(0.12);  // Min probability ~12%
-    tree_->setClampingThresMax(0.97);  // Max probability ~97%
+    // Fixed: Symmetric clamping ±3.5 log-odds for balanced free/occupied updates
+    tree_->setClampingThresMin(0.03);  // log-odds -3.5 (was -2.0, asymmetric)
+    tree_->setClampingThresMax(0.97);  // log-odds +3.5
 
     // Enable automatic pruning for memory efficiency
     tree_->enableChangeDetection(true);
@@ -167,15 +168,14 @@ py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
         throw std::invalid_argument("Threshold must be in [0, 1]");
     }
 
-    // First pass: count occupied cells
+    // First pass: count cells above threshold
+    // Fixed: Removed isNodeOccupied() double-filtering to allow free space visualization
     size_t occupied_count = 0;
     for (octomap::OcTree::leaf_iterator it = tree_->begin_leafs();
          it != tree_->end_leafs(); ++it) {
-        if (tree_->isNodeOccupied(*it)) {
-            double occupancy = it->getOccupancy();
-            if (occupancy >= threshold) {
-                occupied_count++;
-            }
+        double occupancy = it->getOccupancy();
+        if (occupancy >= threshold) {
+            occupied_count++;
         }
     }
 
@@ -185,20 +185,19 @@ py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
     double* result_ptr = static_cast<double*>(result_buf.ptr);
 
     // Second pass: fill array with voxel centers and log-odds
+    // Fixed: Removed isNodeOccupied() double-filtering to allow free space visualization
     size_t idx = 0;
     for (octomap::OcTree::leaf_iterator it = tree_->begin_leafs();
          it != tree_->end_leafs(); ++it) {
-        if (tree_->isNodeOccupied(*it)) {
-            double occupancy = it->getOccupancy();
-            if (occupancy >= threshold) {
-                // Get voxel center coordinates using keyToCoord (more reliable)
-                octomap::point3d coord = tree_->keyToCoord(it.getKey());
-                result_ptr[idx * 4 + 0] = coord.x();
-                result_ptr[idx * 4 + 1] = coord.y();
-                result_ptr[idx * 4 + 2] = coord.z();
-                result_ptr[idx * 4 + 3] = it->getLogOdds();  // Add log-odds value
-                idx++;
-            }
+        double occupancy = it->getOccupancy();
+        if (occupancy >= threshold) {
+            // Get voxel center coordinates using keyToCoord (more reliable)
+            octomap::point3d coord = tree_->keyToCoord(it.getKey());
+            result_ptr[idx * 4 + 0] = coord.x();
+            result_ptr[idx * 4 + 1] = coord.y();
+            result_ptr[idx * 4 + 2] = coord.z();
+            result_ptr[idx * 4 + 3] = it->getLogOdds();  // Add log-odds value
+            idx++;
         }
     }
 
