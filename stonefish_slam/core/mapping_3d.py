@@ -19,6 +19,14 @@ from collections import defaultdict
 import gtsam
 import time  # For performance profiling
 
+# C++ Ray Processor import (with fallback)
+try:
+    from stonefish_slam.ray_processor import RayProcessor, RayProcessorConfig
+    CPP_RAY_PROCESSOR_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARNING] C++ RayProcessor not available: {e}")
+    CPP_RAY_PROCESSOR_AVAILABLE = False
+
 
 class OctNode:
     """
@@ -484,6 +492,43 @@ class SonarMapping3D:
                 self.use_cpp_backend = False
                 self.cpp_octree = None
                 # Fall through to Python octree initialization
+
+        # C++ Ray Processor initialization (depends on C++ octree)
+        self.use_cpp_ray_processor = default_config.get('use_cpp_ray_processor', True)
+        self.cpp_ray_processor = None
+
+        if self.use_cpp_ray_processor and CPP_RAY_PROCESSOR_AVAILABLE and self.use_cpp_backend:
+            try:
+                # Create RayProcessorConfig
+                ray_config = RayProcessorConfig()
+                ray_config.max_range = self.max_range
+                ray_config.min_range = self.min_range
+                ray_config.range_resolution = self.range_resolution
+                ray_config.vertical_aperture = self.vertical_aperture
+                ray_config.bearing_resolution = self.horizontal_fov / self.image_width
+                ray_config.log_odds_occupied = self.log_odds_occupied
+                ray_config.log_odds_free = self.log_odds_free
+                ray_config.use_range_weighting = default_config.get('use_range_weighting', True)
+                ray_config.lambda_decay = default_config.get('lambda_decay', 0.1)
+                ray_config.enable_gaussian_weighting = default_config.get('enable_gaussian_weighting', False)
+                ray_config.voxel_resolution = self.voxel_resolution
+                ray_config.bearing_step = default_config.get('bearing_step', 256)
+                ray_config.intensity_threshold = self.intensity_threshold
+
+                # Create RayProcessor with shared octree
+                self.cpp_ray_processor = RayProcessor(self.cpp_octree, ray_config)
+                print(f"[INFO] C++ RayProcessor initialized (OpenMP enabled, bearing_step={ray_config.bearing_step})")
+            except Exception as e:
+                print(f"[WARNING] Failed to initialize C++ RayProcessor: {e}")
+                self.use_cpp_ray_processor = False
+                self.cpp_ray_processor = None
+        else:
+            if self.use_cpp_ray_processor:
+                if not CPP_RAY_PROCESSOR_AVAILABLE:
+                    print(f"[INFO] C++ RayProcessor disabled (module not available)")
+                elif not self.use_cpp_backend:
+                    print(f"[INFO] C++ RayProcessor disabled (requires C++ octree backend)")
+            self.use_cpp_ray_processor = False
 
         # Initialize Python octree if C++ backend not used
         if not self.use_cpp_backend:
@@ -1081,103 +1126,136 @@ class SonarMapping3D:
         else:
             timing_accumulators = None
 
-        for b_idx in range(0, bearing_bins, bearing_step):
-            if self.enable_profiling:
-                ray_start = time.time()
+        # C++ vs Python ray processing decision
+        use_cpp_path = self.use_cpp_ray_processor and self.cpp_ray_processor is not None
 
-            bearing_angle = self.bearing_angles[b_idx]
-            intensity_profile = polar_image[:, b_idx]
+        if use_cpp_path:
+            # C++ Ray Processing Path
+            try:
+                if self.profiling_enabled:
+                    t_cpp_start = time.perf_counter()
 
-            # Clear voxel_updates for this bearing
-            voxel_updates.clear()
+                # Process entire sonar image with C++ (direct octree update)
+                self.cpp_ray_processor.process_sonar_image(polar_image, T_sonar_to_world)
 
-            # Process this ray and accumulate updates
-            self.process_sonar_ray(bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators)
+                if self.profiling_enabled:
+                    t_cpp_total = time.perf_counter() - t_cpp_start
+                    # Store in ray_processing slot for compatibility
+                    t_ray_total = t_cpp_total
 
-            # Add to all updates
-            for voxel_key, update_info in voxel_updates.items():
-                if voxel_key not in all_voxel_updates:
-                    all_voxel_updates[voxel_key] = {'point': update_info['point'], 'sum': 0.0, 'count': 0}
-                all_voxel_updates[voxel_key]['sum'] += update_info['sum']
-                all_voxel_updates[voxel_key]['count'] += update_info['count']
+                # C++ updates octree directly, no Python merge needed
+                num_voxels_updated = -1  # Unknown (C++ doesn't report count)
 
-            # Propagate to adjacent bearings if enabled
-            if self.enable_propagation and len(voxel_updates) > 0:
+            except Exception as e:
+                print(f"[ERROR] C++ RayProcessor failed: {e}")
+                print(f"[INFO] Falling back to Python implementation for this frame")
+                # Disable C++ for this frame and fall through to Python
+                use_cpp_path = False
+
+        if not use_cpp_path:
+            # Python Ray Processing Path (existing code)
+            for b_idx in range(0, bearing_bins, bearing_step):
                 if self.enable_profiling:
-                    prop_start = time.time()
+                    ray_start = time.time()
 
-                propagated = self.propagate_bearing_updates(
-                    voxel_updates, b_idx, bearing_bins, T_sonar_to_world
-                )
+                bearing_angle = self.bearing_angles[b_idx]
+                intensity_profile = polar_image[:, b_idx]
 
-                # Merge propagated updates
-                for voxel_key, update_info in propagated.items():
+                # Clear voxel_updates for this bearing
+                voxel_updates.clear()
+
+                # Process this ray and accumulate updates
+                self.process_sonar_ray(bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators)
+
+                # Add to all updates
+                for voxel_key, update_info in voxel_updates.items():
                     if voxel_key not in all_voxel_updates:
                         all_voxel_updates[voxel_key] = {'point': update_info['point'], 'sum': 0.0, 'count': 0}
                     all_voxel_updates[voxel_key]['sum'] += update_info['sum']
                     all_voxel_updates[voxel_key]['count'] += update_info['count']
 
+                # Propagate to adjacent bearings if enabled
+                if self.enable_propagation and len(voxel_updates) > 0:
+                    if self.enable_profiling:
+                        prop_start = time.time()
+
+                    propagated = self.propagate_bearing_updates(
+                        voxel_updates, b_idx, bearing_bins, T_sonar_to_world
+                    )
+
+                    # Merge propagated updates
+                    for voxel_key, update_info in propagated.items():
+                        if voxel_key not in all_voxel_updates:
+                            all_voxel_updates[voxel_key] = {'point': update_info['point'], 'sum': 0.0, 'count': 0}
+                        all_voxel_updates[voxel_key]['sum'] += update_info['sum']
+                        all_voxel_updates[voxel_key]['count'] += update_info['count']
+
+                    if self.enable_profiling:
+                        prop_time = time.time() - prop_start
+                        self.performance_stats['propagation_times'].append(prop_time)
+
+                processed_bearings.append(b_idx)
+
                 if self.enable_profiling:
-                    prop_time = time.time() - prop_start
-                    self.performance_stats['propagation_times'].append(prop_time)
+                    ray_time = time.time() - ray_start
+                    self.performance_stats['ray_times'].append(ray_time)
 
-            processed_bearings.append(b_idx)
-
-            if self.enable_profiling:
-                ray_time = time.time() - ray_start
-                self.performance_stats['ray_times'].append(ray_time)
-
-        # [B] Ray processing timing end
-        if self.profiling_enabled:
-            t_ray_total = time.perf_counter() - t_ray_start
+            # [B] Ray processing timing end
+            if self.profiling_enabled:
+                t_ray_total = time.perf_counter() - t_ray_start
 
         # [F] Bearing propagation timing (NOTE: already measured above if enabled)
         if self.profiling_enabled:
             t_prop_total = 0.0  # Measured inside loop above if enabled
 
-        # Apply averaged updates to all voxels
-        num_voxels_updated = 0
+        # Apply averaged updates to all voxels (only if Python path was used)
+        if not use_cpp_path:
+            # [G] Octree updates timing
+            if self.profiling_enabled:
+                t_octree_start = time.perf_counter()
 
-        # [G] Octree updates timing
-        if self.profiling_enabled:
-            t_octree_start = time.perf_counter()
+            num_voxels_updated = 0
 
-        if self.use_cpp_backend:
-            # C++ batch update path
-            if len(all_voxel_updates) > 0:
-                # Prepare batch arrays
-                points_list = []
-                log_odds_list = []
+            if self.use_cpp_backend:
+                # C++ batch update path
+                if len(all_voxel_updates) > 0:
+                    # Prepare batch arrays
+                    points_list = []
+                    log_odds_list = []
 
+                    for voxel_key, update_info in all_voxel_updates.items():
+                        # Calculate average update
+                        avg_update = update_info['sum'] / update_info['count']
+                        points_list.append(update_info['point'])
+                        log_odds_list.append(avg_update)
+
+                    # Convert to numpy arrays
+                    points = np.array(points_list, dtype=np.float64)
+                    log_odds = np.array(log_odds_list, dtype=np.float64)
+
+                    # Get sensor origin from transform
+                    sensor_origin = T_sonar_to_world[:3, 3]
+
+                    # Single batch insert call
+                    self.cpp_octree.insert_point_cloud(points, log_odds, sensor_origin)
+                    num_voxels_updated = len(points)
+            else:
+                # Python update path (existing)
                 for voxel_key, update_info in all_voxel_updates.items():
                     # Calculate average update
                     avg_update = update_info['sum'] / update_info['count']
-                    points_list.append(update_info['point'])
-                    log_odds_list.append(avg_update)
 
-                # Convert to numpy arrays
-                points = np.array(points_list, dtype=np.float64)
-                log_odds = np.array(log_odds_list, dtype=np.float64)
+                    # Apply update (adaptive only if positive log-odds = occupied)
+                    adaptive = (avg_update > 0)
+                    self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
+                    num_voxels_updated += 1
 
-                # Get sensor origin from transform
-                sensor_origin = T_sonar_to_world[:3, 3]
-
-                # Single batch insert call
-                self.cpp_octree.insert_point_cloud(points, log_odds, sensor_origin)
-                num_voxels_updated = len(points)
+            if self.profiling_enabled:
+                t_octree_total = time.perf_counter() - t_octree_start
         else:
-            # Python update path (existing)
-            for voxel_key, update_info in all_voxel_updates.items():
-                # Calculate average update
-                avg_update = update_info['sum'] / update_info['count']
-
-                # Apply update (adaptive only if positive log-odds = occupied)
-                adaptive = (avg_update > 0)
-                self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
-                num_voxels_updated += 1
-
-        if self.profiling_enabled:
-            t_octree_total = time.perf_counter() - t_octree_start
+            # C++ path already updated octree, skip Python merge
+            if self.profiling_enabled:
+                t_octree_total = 0.0  # No additional octree update needed
 
         # [A] Frame total timing end
         if self.profiling_enabled:
@@ -1485,14 +1563,18 @@ class SonarMapping3D:
 
         # Print formatted output
         frame_num = self.frame_count
+        mode_str = "C++ Ray Processor" if self.use_cpp_ray_processor and self.cpp_ray_processor is not None else "Python"
         print("\n" + "="*55)
         print(f"  3D MAPPING PROFILING (Frame #{frame_num})")
+        print(f"  Mode: {mode_str}")
         print("="*55)
         print("Frame Time Breakdown:")
         print(f"  Ray Processing:       {avg_ray:6.1f}ms ({pct_ray:5.1f}%) [{int(avg_rays)} rays]")
-        print(f"    ├─ DDA (C++):       {avg_dda:6.1f}ms ({pct_dda:5.1f}%)")
-        print(f"    ├─ Dict Merge:      {avg_merge:6.1f}ms ({pct_merge:5.1f}%)")
-        print(f"    └─ Occupied:        {avg_occupied:6.1f}ms ({pct_occupied:5.1f}%)")
+        if not self.use_cpp_ray_processor:
+            # Only show breakdown for Python mode
+            print(f"    ├─ DDA (C++):       {avg_dda:6.1f}ms ({pct_dda:5.1f}%)")
+            print(f"    ├─ Dict Merge:      {avg_merge:6.1f}ms ({pct_merge:5.1f}%)")
+            print(f"    └─ Occupied:        {avg_occupied:6.1f}ms ({pct_occupied:5.1f}%)")
         print(f"  Bearing Propagation:   {avg_prop:6.1f}ms ({pct_prop:5.1f}%)")
         print(f"  Octree Updates:        {avg_octree:6.1f}ms ({pct_octree:5.1f}%) [{int(avg_voxels)} voxels]")
         print("  " + "─"*51)

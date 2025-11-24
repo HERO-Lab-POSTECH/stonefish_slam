@@ -172,7 +172,29 @@ if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND)
   # Get Python include directories
   find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
-  # Manual library creation for ROS2
+  # First create a static library for OctreeMapping (for use by other modules)
+  add_library(octree_mapping_core STATIC stonefish_slam/cpp/octree_mapping.cpp)
+  target_link_libraries(octree_mapping_core PUBLIC
+    Eigen3::Eigen
+    ${OCTOMAP_LIBRARIES}
+    Python3::Module
+  )
+  target_include_directories(octree_mapping_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/stonefish_slam/cpp
+    ${OCTOMAP_INCLUDE_DIRS}
+    ${pybind11_INCLUDE_DIRS}
+    ${Python3_INCLUDE_DIRS}
+  )
+  # Enable Position Independent Code for linking into shared library
+  set_target_properties(octree_mapping_core PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+  )
+  if(OpenMP_CXX_FOUND)
+    target_link_libraries(octree_mapping_core PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_options(octree_mapping_core PUBLIC ${OpenMP_CXX_FLAGS})
+  endif()
+
+  # Then create Python module that wraps the static library
   add_library(octree_mapping MODULE stonefish_slam/cpp/octree_mapping.cpp)
 
   target_link_libraries(octree_mapping PRIVATE
@@ -213,6 +235,55 @@ if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND)
   message(STATUS "Octree Mapping module will be built with OctoMap and Python ${Python3_VERSION}")
 else()
   message(WARNING "pybind11, Eigen3, or OctoMap not found, Octree Mapping C++ module will not be built")
+endif()
+
+# Ray Processor module (High-performance sonar ray processing)
+if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND AND TARGET octree_mapping_core)
+  # Get Python include directories
+  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+
+  # Manual library creation for ROS2
+  add_library(ray_processor MODULE stonefish_slam/cpp/ray_processor.cpp)
+
+  target_link_libraries(ray_processor PRIVATE
+    pybind11::module
+    pybind11::lto
+    octree_mapping_core
+    Eigen3::Eigen
+    ${OCTOMAP_LIBRARIES}
+    Python3::Module
+  )
+
+  # Add OpenMP if available
+  if(OpenMP_CXX_FOUND)
+    target_link_libraries(ray_processor PRIVATE OpenMP::OpenMP_CXX)
+    target_compile_options(ray_processor PRIVATE ${OpenMP_CXX_FLAGS})
+    message(STATUS "Ray Processor: OpenMP enabled for parallel bearing processing")
+  else()
+    message(WARNING "Ray Processor: OpenMP not found, bearing processing will be single-threaded")
+  endif()
+
+  target_include_directories(ray_processor PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stonefish_slam/cpp
+    ${pybind11_INCLUDE_DIRS}
+    ${Python3_INCLUDE_DIRS}
+    ${OCTOMAP_INCLUDE_DIRS}
+  )
+
+  set_target_properties(ray_processor PROPERTIES
+    PREFIX "${PYTHON_MODULE_PREFIX}"
+    SUFFIX "${PYTHON_MODULE_EXTENSION}"
+    CXX_VISIBILITY_PRESET "hidden"
+  )
+
+  # Install to Python package directory
+  install(TARGETS ray_processor
+    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}
+  )
+
+  message(STATUS "Ray Processor module will be built with Eigen, OctoMap and Python ${Python3_VERSION}")
+else()
+  message(WARNING "pybind11, Eigen3, or OctoMap not found, Ray Processor C++ module will not be built")
 endif()
 
 # PCL module for fast ICP

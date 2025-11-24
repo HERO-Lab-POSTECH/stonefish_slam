@@ -1,82 +1,26 @@
-#include <pybind11/eigen.h>
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-#include <Eigen/Dense>
-#include <vector>
-#include <array>
-#include <cmath>
-#include <limits>
-#include <algorithm>
-#include <unordered_map>
+#include "dda_traversal.h"
 
-namespace py = pybind11;
-
-// Configuration for sonar ray processing
-struct SonarRayConfig {
-    double voxel_size;
-    double log_odds_free;
-    double max_range;
-    double min_range;
-    double vertical_aperture;
-    bool use_range_weighting;
-    double lambda_decay;
-    bool enable_gaussian_weighting;
-    double gaussian_sigma_factor;
-};
-
-// Voxel update result
-struct VoxelUpdate {
-    std::array<int, 3> key;
-    double log_odds_sum;
-    int count;
-};
-
-/**
- * @brief 3D DDA (Digital Differential Analyzer) voxel traversal
- *
- * Implements Amanatides & Woo (1987) algorithm for fast ray-voxel intersection.
- * Traverses voxels along a ray from start to end point with O(n) complexity
- * where n = number of voxels intersected.
- *
- * Reference: "A Fast Voxel Traversal Algorithm for Ray Tracing", Eurographics 1987
- */
-class DDATraversal {
-public:
-    /**
-     * @param voxel_size Voxel resolution in meters (default: 0.2m)
-     */
-    explicit DDATraversal(double voxel_size = 0.2) : voxel_size_(voxel_size) {
+// Constructor
+DDATraversal::DDATraversal(double voxel_size) : voxel_size_(voxel_size) {
         if (voxel_size_ <= 0.0) {
             throw std::invalid_argument("Voxel size must be positive");
         }
-    }
+}
 
-    /**
-     * @brief Convert world coordinates to voxel key (grid index)
-     * @param point World coordinates (x, y, z)
-     * @return Voxel key [ix, iy, iz]
-     */
-    std::array<int, 3> world_to_key(const Eigen::Vector3d& point) {
+// Convert world coordinates to voxel key
+std::array<int, 3> DDATraversal::world_to_key(const Eigen::Vector3d& point) {
         return {
             static_cast<int>(std::floor(point.x() / voxel_size_)),
             static_cast<int>(std::floor(point.y() / voxel_size_)),
             static_cast<int>(std::floor(point.z() / voxel_size_))
-        };
-    }
+    };
+}
 
-    /**
-     * @brief Traverse voxels from start to end using DDA algorithm
-     *
-     * @param start Start point in world coordinates
-     * @param end End point in world coordinates
-     * @param max_voxels Maximum voxels to traverse (safety limit)
-     * @return Vector of voxel keys [x, y, z] as integer grid indices
-     */
-    std::vector<std::array<int, 3>> traverse(
+// Traverse voxels from start to end using DDA algorithm
+std::vector<std::array<int, 3>> DDATraversal::traverse(
         const Eigen::Vector3d& start,
         const Eigen::Vector3d& end,
-        int max_voxels = 10000
+        int max_voxels
     ) {
         std::vector<std::array<int, 3>> voxel_list;
 
@@ -171,23 +115,11 @@ public:
             voxel_list.push_back(current_voxel);
         }
 
-        return voxel_list;
-    }
+    return voxel_list;
+}
 
-    /**
-     * @brief Process entire vertical fan for free space ray
-     *
-     * Performs DDA traversal for multiple vertical angles, accumulates voxel updates.
-     * This minimizes Python ↔ C++ boundary crossings (1 call instead of 10).
-     *
-     * @param sonar_origin Origin point in world frame
-     * @param ray_direction_horizontal Horizontal ray direction (unit vector)
-     * @param range_to_first_hit Maximum range to traverse
-     * @param num_vertical_steps Number of vertical samples (±N steps)
-     * @param config Sonar configuration parameters
-     * @return Vector of accumulated voxel updates
-     */
-    std::vector<VoxelUpdate> process_free_space_ray(
+// Process entire vertical fan for free space ray
+std::vector<VoxelUpdate> DDATraversal::process_free_space_ray(
         const Eigen::Vector3d& sonar_origin,
         const Eigen::Vector3d& ray_direction_horizontal,
         double range_to_first_hit,
@@ -273,30 +205,13 @@ public:
             result.push_back(update);
         }
 
-        return result;
-    }
+    return result;
+}
 
-private:
-    double voxel_size_;
-
-    // Helper: Convert voxel array to hashable key
-    struct VoxelKey {
-        int x, y, z;
-        bool operator==(const VoxelKey& other) const {
-            return x == other.x && y == other.y && z == other.z;
-        }
-    };
-
-    struct VoxelKeyHash {
-        size_t operator()(const VoxelKey& k) const {
-            return std::hash<int>()(k.x) ^ (std::hash<int>()(k.y) << 1) ^ (std::hash<int>()(k.z) << 2);
-        }
-    };
-
-    VoxelKey voxel_to_key(const std::array<int, 3>& arr) const {
-        return {arr[0], arr[1], arr[2]};
-    }
-};
+// Helper: Convert voxel array to hashable key
+DDATraversal::VoxelKey DDATraversal::voxel_to_key(const std::array<int, 3>& arr) const {
+    return {arr[0], arr[1], arr[2]};
+}
 
 // Pybind11 module definition
 PYBIND11_MODULE(dda_traversal, m) {
