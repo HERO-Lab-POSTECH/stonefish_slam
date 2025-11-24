@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **ray_processor.cpp: Voxel Deduplication 구현** (2025-11-24)
+  - 문제: 동일 voxel이 여러 ray에서 중복 업데이트됨 (occupied 압도적 우세)
+  - 해결: Hash map 기반 중복 제거 (`std::unordered_map<VoxelKey, double>`)
+  - VoxelKey 구조체: 부동소수점 → integer grid 변환으로 정확한 중복 체크
+  - Hash 함수: x, y, z 조합으로 충돌 최소화 (XOR + bit shift)
+  - Log-odds 합산: Free (-3.5) + Occupied (+0.85) 자동 상쇄
+  - 성능: unique_updates < total_updates (중복 제거 확인 가능)
+  - 효과: Free space update가 occupied에 압도되지 않아 동적 voxel 변화 가능
+  - 파일: `stonefish_slam/cpp/ray_processor.cpp` (Line 12-40, 140-186)
+
 ### Fixed
 
 - **Free Space 확률 업데이트 버그 수정 (3가지)** (2025-11-24)
