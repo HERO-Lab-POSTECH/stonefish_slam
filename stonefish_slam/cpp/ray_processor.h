@@ -140,12 +140,43 @@ public:
 
 private:
     /**
-     * @brief Process single ray (one bearing angle)
+     * @brief Structure to hold voxel updates before octree insertion
      *
-     * Performs:
-     * 1. Find first/last hit in intensity profile
-     * 2. Free space processing (DDA traversal)
-     * 3. Occupied space processing (vertical fan)
+     * Used internally to collect voxel data in OpenMP parallel regions
+     * without calling Python API (GIL-free).
+     */
+    struct VoxelUpdate {
+        double x, y, z;
+        double log_odds;
+    };
+
+    /**
+     * @brief Process single ray - internal version (GIL-free, OpenMP-safe)
+     *
+     * Collects voxel updates in C++ buffer instead of calling Python API.
+     * Used by process_sonar_image() in OpenMP parallel region.
+     *
+     * @param bearing_idx Bearing index in polar image
+     * @param num_bearings Total number of bearings (for angle calculation)
+     * @param intensity_profile Intensity values along range (1D array)
+     * @param T_sonar_to_world Transformation matrix
+     * @param sonar_origin_world Sonar origin in world frame (cached)
+     * @param voxel_updates Output buffer to collect voxel updates
+     */
+    void process_single_ray_internal(
+        int bearing_idx,
+        int num_bearings,
+        const std::vector<uint8_t>& intensity_profile,
+        const Eigen::Matrix4d& T_sonar_to_world,
+        const Eigen::Vector3d& sonar_origin_world,
+        std::vector<VoxelUpdate>& voxel_updates
+    );
+
+    /**
+     * @brief Process single ray - legacy version for Python API
+     *
+     * Maintains backward compatibility with external Python calls.
+     * Uses internal version and inserts to octree immediately.
      *
      * @param bearing_idx Bearing index in polar image
      * @param num_bearings Total number of bearings (for angle calculation)
@@ -160,7 +191,27 @@ private:
     );
 
     /**
-     * @brief Process occupied voxels with vertical fan
+     * @brief Process occupied voxels - internal version (GIL-free, OpenMP-safe)
+     *
+     * Collects occupied voxel updates in C++ buffer.
+     * Used by process_single_ray_internal() in OpenMP parallel region.
+     *
+     * @param hit_indices Indices of range bins with high intensity
+     * @param bearing_angle Horizontal bearing angle (radians)
+     * @param T_sonar_to_world Transformation matrix
+     * @param sonar_origin_world Sonar origin in world frame (cached)
+     * @param voxel_updates Output buffer to collect voxel updates
+     */
+    void process_occupied_voxels_internal(
+        const std::vector<int>& hit_indices,
+        double bearing_angle,
+        const Eigen::Matrix4d& T_sonar_to_world,
+        const Eigen::Vector3d& sonar_origin_world,
+        std::vector<VoxelUpdate>& voxel_updates
+    );
+
+    /**
+     * @brief Process occupied voxels - legacy version for Python API
      *
      * For each range bin with high intensity:
      * 1. Create vertical fan of points (±num_vertical_steps)

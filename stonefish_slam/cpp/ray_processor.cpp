@@ -41,7 +41,7 @@ void RayProcessor::process_sonar_image(
     py::array_t<uint8_t> polar_image,
     const Eigen::Matrix4d& T_sonar_to_world
 ) {
-    // Input validation
+    // Step 1: Extract data while holding GIL
     auto img_buf = polar_image.request();
     if (img_buf.ndim != 2) {
         throw std::runtime_error("Polar image must be 2D array (num_range_bins × num_bearings)");
@@ -57,31 +57,104 @@ void RayProcessor::process_sonar_image(
         bearing_indices.push_back(b);
     }
 
-    // Parallel processing across bearings (each bearing is independent)
-    // Note: OctoMap's updateNode() is thread-safe (uses internal locking)
+    // Step 2: Prepare C++ buffers for each thread
+    int num_threads = 1;
 #ifdef _OPENMP
-    #pragma omp parallel for schedule(dynamic)
+    num_threads = omp_get_max_threads();
 #endif
-    for (size_t i = 0; i < bearing_indices.size(); ++i) {
-        int b_idx = bearing_indices[i];
+    std::vector<std::vector<VoxelUpdate>> thread_updates(num_threads);
 
-        // Extract intensity profile for this bearing (column-major access)
-        std::vector<uint8_t> intensity_profile(num_range_bins);
-        for (int r = 0; r < num_range_bins; ++r) {
-            intensity_profile[r] = img_ptr[r * num_bearings + b_idx];
+    // Pre-allocate reasonable capacity per thread (estimate: ~1000 voxels per ray)
+    for (auto& updates : thread_updates) {
+        updates.reserve(bearing_indices.size() * 1000 / num_threads);
+    }
+
+    Eigen::Vector3d sonar_origin_world = T_sonar_to_world.block<3, 1>(0, 3);
+
+    // Step 3: Release GIL and process in parallel (pure C++ operations)
+    {
+        py::gil_scoped_release release;
+
+        // Parallel processing across bearings (each bearing is independent)
+#ifdef _OPENMP
+        #pragma omp parallel for schedule(dynamic)
+#endif
+        for (size_t i = 0; i < bearing_indices.size(); ++i) {
+            int tid = 0;
+#ifdef _OPENMP
+            tid = omp_get_thread_num();
+#endif
+            std::vector<VoxelUpdate>& local_updates = thread_updates[tid];
+
+            int b_idx = bearing_indices[i];
+
+            // Extract intensity profile for this bearing (column-major access)
+            std::vector<uint8_t> intensity_profile(num_range_bins);
+            for (int r = 0; r < num_range_bins; ++r) {
+                intensity_profile[r] = img_ptr[r * num_bearings + b_idx];
+            }
+
+            // Process this ray (collect voxel updates in local_updates)
+            process_single_ray_internal(b_idx, num_bearings, intensity_profile,
+                                       T_sonar_to_world, sonar_origin_world,
+                                       local_updates);
+        }
+    }  // GIL automatically reacquired here
+
+    // Step 4: Merge all thread results and update octree (with GIL)
+    size_t total_updates = 0;
+    for (const auto& updates : thread_updates) {
+        total_updates += updates.size();
+    }
+
+    if (total_updates > 0) {
+        // Merge all updates into single batch
+        std::vector<VoxelUpdate> all_updates;
+        all_updates.reserve(total_updates);
+
+        for (const auto& updates : thread_updates) {
+            all_updates.insert(all_updates.end(), updates.begin(), updates.end());
         }
 
-        // Process this ray (pass num_bearings for correct angle calculation)
-        process_single_ray(b_idx, num_bearings, intensity_profile, T_sonar_to_world);
+        // Convert to NumPy arrays and insert
+        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(total_updates), 3};
+        py::array_t<double> points_np(points_shape);
+        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(total_updates));
+        py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
+
+        auto points_buf = points_np.request();
+        auto log_odds_buf = log_odds_np.request();
+        auto origin_buf = origin_np.request();
+
+        double* points_ptr = static_cast<double*>(points_buf.ptr);
+        double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
+        double* origin_ptr = static_cast<double*>(origin_buf.ptr);
+
+        // Fill data
+        for (size_t i = 0; i < total_updates; ++i) {
+            points_ptr[i * 3 + 0] = all_updates[i].x;
+            points_ptr[i * 3 + 1] = all_updates[i].y;
+            points_ptr[i * 3 + 2] = all_updates[i].z;
+            log_odds_ptr[i] = all_updates[i].log_odds;
+        }
+
+        origin_ptr[0] = sonar_origin_world[0];
+        origin_ptr[1] = sonar_origin_world[1];
+        origin_ptr[2] = sonar_origin_world[2];
+
+        // Single batch insert to octree
+        octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
     }
 }
 
-// Process single ray
-void RayProcessor::process_single_ray(
+// Internal version: collect voxel updates in C++ buffer (GIL-free, OpenMP-safe)
+void RayProcessor::process_single_ray_internal(
     int bearing_idx,
     int num_bearings,
     const std::vector<uint8_t>& intensity_profile,
-    const Eigen::Matrix4d& T_sonar_to_world
+    const Eigen::Matrix4d& T_sonar_to_world,
+    const Eigen::Vector3d& sonar_origin_world,
+    std::vector<VoxelUpdate>& voxel_updates
 ) {
     // 1. Find first/last hit
     int first_hit_idx = find_first_hit(intensity_profile);
@@ -102,7 +175,6 @@ void RayProcessor::process_single_ray(
         Eigen::Vector3d ray_direction_sonar = compute_ray_direction(bearing_angle);
 
         // Transform to world frame
-        Eigen::Vector3d sonar_origin_world = T_sonar_to_world.block<3, 1>(0, 3);
         Eigen::Vector3d ray_direction_world = T_sonar_to_world.block<3, 3>(0, 0) * ray_direction_sonar;
         ray_direction_world.normalize();
 
@@ -117,8 +189,6 @@ void RayProcessor::process_single_ray(
         int num_vertical_steps = compute_num_vertical_steps(mid_range, config_.free_vertical_factor);
 
         // Process free space with vertical fan (internal DDA traversal)
-        std::vector<Eigen::Vector3d> all_free_voxels;
-
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             // Compute vertical angle
             double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
@@ -136,36 +206,13 @@ void RayProcessor::process_single_ray(
             // End point for this vertical angle
             Eigen::Vector3d end_point = sonar_origin_world + tilted_direction_world * range_to_first_hit;
 
-            // DDA traversal
+            // DDA traversal (pure C++)
             std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, 500);
 
-            // Add to collection
-            all_free_voxels.insert(all_free_voxels.end(), voxels.begin(), voxels.end());
-        }
-
-        // Batch insert free space voxels
-        if (!all_free_voxels.empty()) {
-            std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(all_free_voxels.size()), 3};
-            py::array_t<double> points_np(points_shape);
-            py::array_t<double> log_odds_np(static_cast<py::ssize_t>(all_free_voxels.size()));
-            py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
-
-            auto points_buf = points_np.request();
-            auto log_odds_buf = log_odds_np.request();
-            auto origin_buf = origin_np.request();
-
-            double* points_ptr = static_cast<double*>(points_buf.ptr);
-            double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
-            double* origin_ptr = static_cast<double*>(origin_buf.ptr);
-
-            // Fill data with range weighting
-            for (size_t i = 0; i < all_free_voxels.size(); ++i) {
-                points_ptr[i * 3 + 0] = all_free_voxels[i][0];
-                points_ptr[i * 3 + 1] = all_free_voxels[i][1];
-                points_ptr[i * 3 + 2] = all_free_voxels[i][2];
-
+            // Add to voxel updates with range weighting
+            for (const auto& voxel : voxels) {
                 // Compute range from sonar origin
-                double range = (all_free_voxels[i] - sonar_origin_world).norm();
+                double range = (voxel - sonar_origin_world).norm();
 
                 // Range weighting
                 double log_odds_update = config_.log_odds_free;
@@ -174,15 +221,8 @@ void RayProcessor::process_single_ray(
                     log_odds_update *= range_weight;
                 }
 
-                log_odds_ptr[i] = log_odds_update;
+                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update});
             }
-
-            origin_ptr[0] = sonar_origin_world[0];
-            origin_ptr[1] = sonar_origin_world[1];
-            origin_ptr[2] = sonar_origin_world[2];
-
-            // Insert to octree (thread-safe)
-            octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
         }
     }
 
@@ -190,18 +230,65 @@ void RayProcessor::process_single_ray(
     std::vector<int> hit_indices = extract_hit_indices(intensity_profile, first_hit_idx, last_hit_idx);
     if (!hit_indices.empty()) {
         double bearing_angle = compute_bearing_angle(bearing_idx, num_bearings);
-        process_occupied_voxels(hit_indices, bearing_angle, T_sonar_to_world);
+        process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,
+                                        sonar_origin_world, voxel_updates);
     }
 }
 
-// Process occupied voxels with vertical fan
-void RayProcessor::process_occupied_voxels(
-    const std::vector<int>& hit_indices,
-    double bearing_angle,
+// Legacy version: for external Python calls (maintains API compatibility)
+void RayProcessor::process_single_ray(
+    int bearing_idx,
+    int num_bearings,
+    const std::vector<uint8_t>& intensity_profile,
     const Eigen::Matrix4d& T_sonar_to_world
 ) {
+    // Use internal version with temporary buffer, then insert to octree
+    std::vector<VoxelUpdate> voxel_updates;
+    voxel_updates.reserve(1000);  // Typical ray size
+
     Eigen::Vector3d sonar_origin_world = T_sonar_to_world.block<3, 1>(0, 3);
 
+    process_single_ray_internal(bearing_idx, num_bearings, intensity_profile,
+                                T_sonar_to_world, sonar_origin_world, voxel_updates);
+
+    // Convert to NumPy and insert to octree
+    if (!voxel_updates.empty()) {
+        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(voxel_updates.size()), 3};
+        py::array_t<double> points_np(points_shape);
+        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(voxel_updates.size()));
+        py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
+
+        auto points_buf = points_np.request();
+        auto log_odds_buf = log_odds_np.request();
+        auto origin_buf = origin_np.request();
+
+        double* points_ptr = static_cast<double*>(points_buf.ptr);
+        double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
+        double* origin_ptr = static_cast<double*>(origin_buf.ptr);
+
+        for (size_t i = 0; i < voxel_updates.size(); ++i) {
+            points_ptr[i * 3 + 0] = voxel_updates[i].x;
+            points_ptr[i * 3 + 1] = voxel_updates[i].y;
+            points_ptr[i * 3 + 2] = voxel_updates[i].z;
+            log_odds_ptr[i] = voxel_updates[i].log_odds;
+        }
+
+        origin_ptr[0] = sonar_origin_world[0];
+        origin_ptr[1] = sonar_origin_world[1];
+        origin_ptr[2] = sonar_origin_world[2];
+
+        octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
+    }
+}
+
+// Internal version: collect occupied voxels in C++ buffer (GIL-free, OpenMP-safe)
+void RayProcessor::process_occupied_voxels_internal(
+    const std::vector<int>& hit_indices,
+    double bearing_angle,
+    const Eigen::Matrix4d& T_sonar_to_world,
+    const Eigen::Vector3d& sonar_origin_world,
+    std::vector<VoxelUpdate>& voxel_updates
+) {
     // Process each range bin with high intensity
     for (int r_idx : hit_indices) {
         // Calculate range (FLS convention: row 0 = far, row max = near)
@@ -248,28 +335,9 @@ void RayProcessor::process_occupied_voxels(
             base_log_odds *= range_weight;
         }
 
-        // Prepare batch arrays for octree insertion
-        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(num_vertical_points), 3};
-        py::array_t<double> points_np(points_shape);
-        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(num_vertical_points));
-        py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
-
-        auto points_buf = points_np.request();
-        auto log_odds_buf = log_odds_np.request();
-        auto origin_buf = origin_np.request();
-
-        double* points_ptr = static_cast<double*>(points_buf.ptr);
-        double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
-        double* origin_ptr = static_cast<double*>(origin_buf.ptr);
-
-        // Fill arrays with Gaussian weighting if enabled
+        // Fill voxel updates with Gaussian weighting if enabled
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             int idx = v_step + num_vertical_steps;
-
-            // Copy world coordinates
-            points_ptr[idx * 3 + 0] = points_world(0, idx);
-            points_ptr[idx * 3 + 1] = points_world(1, idx);
-            points_ptr[idx * 3 + 2] = points_world(2, idx);
 
             // Compute log-odds with optional Gaussian weighting
             double log_odds_update = base_log_odds;
@@ -280,15 +348,54 @@ void RayProcessor::process_occupied_voxels(
                 log_odds_update *= gaussian_weight;
             }
 
-            log_odds_ptr[idx] = log_odds_update;
+            voxel_updates.push_back({
+                points_world(0, idx),
+                points_world(1, idx),
+                points_world(2, idx),
+                log_odds_update
+            });
+        }
+    }
+}
+
+// Legacy version: for external Python calls (maintains API compatibility)
+void RayProcessor::process_occupied_voxels(
+    const std::vector<int>& hit_indices,
+    double bearing_angle,
+    const Eigen::Matrix4d& T_sonar_to_world
+) {
+    std::vector<VoxelUpdate> voxel_updates;
+    Eigen::Vector3d sonar_origin_world = T_sonar_to_world.block<3, 1>(0, 3);
+
+    process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,
+                                     sonar_origin_world, voxel_updates);
+
+    // Convert to NumPy and insert to octree
+    if (!voxel_updates.empty()) {
+        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(voxel_updates.size()), 3};
+        py::array_t<double> points_np(points_shape);
+        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(voxel_updates.size()));
+        py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
+
+        auto points_buf = points_np.request();
+        auto log_odds_buf = log_odds_np.request();
+        auto origin_buf = origin_np.request();
+
+        double* points_ptr = static_cast<double*>(points_buf.ptr);
+        double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
+        double* origin_ptr = static_cast<double*>(origin_buf.ptr);
+
+        for (size_t i = 0; i < voxel_updates.size(); ++i) {
+            points_ptr[i * 3 + 0] = voxel_updates[i].x;
+            points_ptr[i * 3 + 1] = voxel_updates[i].y;
+            points_ptr[i * 3 + 2] = voxel_updates[i].z;
+            log_odds_ptr[i] = voxel_updates[i].log_odds;
         }
 
-        // Set origin
         origin_ptr[0] = sonar_origin_world[0];
         origin_ptr[1] = sonar_origin_world[1];
         origin_ptr[2] = sonar_origin_world[2];
 
-        // Batch insert into octree (thread-safe)
         octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
     }
 }

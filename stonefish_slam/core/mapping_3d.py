@@ -494,6 +494,7 @@ class SonarMapping3D:
                 # Fall through to Python octree initialization
 
         # C++ Ray Processor initialization (depends on C++ octree)
+        # C++ ray processor: Fixed OpenMP/GIL issue with scoped release pattern (2025-11-24)
         self.use_cpp_ray_processor = default_config.get('use_cpp_ray_processor', True)
         self.cpp_ray_processor = None
 

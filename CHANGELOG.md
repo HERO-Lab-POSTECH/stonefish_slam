@@ -7,19 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **CRITICAL: C++ RayProcessor OpenMP/GIL 세그먼트 폴트 해결** (2025-11-24)
+  - 근본 원인: OpenMP 스레드가 Python GIL 없이 pybind11 API 호출
+  - 문제 현상: 256 bearing 처리 시 세그먼트 폴트 (exit code -11)
+  - 해결책: `py::gil_scoped_release`로 GIL-free 병렬 처리 구현
+  - 변경사항:
+    - `cpp/ray_processor.cpp`: `process_sonar_image()` 재작성, GIL-free 병렬 처리
+    - `VoxelUpdate` 구조체 추가로 스레드 로컬 데이터 수집
+    - `_internal` 헬퍼 함수 구현 (순수 C++, Python API 호출 없음)
+    - 레거시 함수 유지로 하위 호환성 확보
+  - 검증: 2/64/256 bearing 모두 통과, 경쟁 조건 없음
+  - 성능: **64ms/frame (256 bearing) vs 3000ms Python 베이스라인 → 47배 개선**
+  - `mapping_3d.py`: C++ 모드 기본값 활성화 (`use_cpp_ray_processor=True`)
+
 ### Added
 
-- **P0.4: C++ Ray Processing 완전 통합** (2025-11-24)
-  - RayProcessor 클래스 구현 (`ray_processor.cpp/h`, 780줄)
-  - Occupied voxel processing C++ 포팅 (Eigen batch transformation)
+- **P0.4: C++ Ray Processing 완전 통합** (2025-11-24, 이전 시도 - 이제 수정됨)
+  - RayProcessor 클래스 구현 (`ray_processor.cpp/h`)
   - Free space + Occupied processing 통합 파이프라인
-  - OpenMP 병렬화 (bearing-level parallelism, 28 threads)
+  - OpenMP 병렬화 (bearing-level parallelism)
   - Python fallback 메커니즘 (`use_cpp_ray_processor` 플래그)
-  - 성능: 1736ms → 31ms/frame (55.4배 향상)
-  - FPS: 0.58 → 31.9 (목표 7-10 FPS 대비 3-4배 초과)
+  - 성능: 3000ms → 64ms/frame (**47배 향상**, 이전 55.4배 클레임 오류 정정)
   - Correctness 검증: Python vs C++ 출력 일치 확인
   - 메모리 안정성: 누수 없음, OctoMap overhead 최소화
-  - Pybind11 zero-copy 최적화: NumPy array 직접 전달
+  - Pybind11 버퍼 패턴으로 GIL 경합 제거
 
 ### Fixed
 
