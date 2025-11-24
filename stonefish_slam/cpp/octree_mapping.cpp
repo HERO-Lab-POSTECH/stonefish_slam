@@ -169,7 +169,7 @@ py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
     }
 
     // First pass: count cells above threshold
-    // Fixed: Removed isNodeOccupied() double-filtering to allow free space visualization
+    // Fixed: Removed isNodeOccupied() double-filtering, use threshold only (occupied voxels)
     size_t occupied_count = 0;
     for (octomap::OcTree::leaf_iterator it = tree_->begin_leafs();
          it != tree_->end_leafs(); ++it) {
@@ -185,7 +185,7 @@ py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
     double* result_ptr = static_cast<double*>(result_buf.ptr);
 
     // Second pass: fill array with voxel centers and log-odds
-    // Fixed: Removed isNodeOccupied() double-filtering to allow free space visualization
+    // Fixed: Removed isNodeOccupied() double-filtering, use threshold only (occupied voxels)
     size_t idx = 0;
     for (octomap::OcTree::leaf_iterator it = tree_->begin_leafs();
          it != tree_->end_leafs(); ++it) {
