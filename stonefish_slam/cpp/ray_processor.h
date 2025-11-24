@@ -62,7 +62,7 @@ struct RayProcessorConfig {
           free_vertical_factor(8.0),
           occupied_vertical_factor(3.0),
           log_odds_occupied(0.85),
-          log_odds_free(-2.0),  // Fixed: Match Python value for consistent free space updates
+          log_odds_free(-3.5),  // Extreme free space decrease for testing (clamping min)
           use_range_weighting(true),
           lambda_decay(2.0),
           enable_gaussian_weighting(false),
