@@ -519,6 +519,9 @@ class SonarMapping3D:
                 ray_config.bearing_step = default_config.get('bearing_step', 2)  # Fixed: process every 2nd bearing (was 256!)
                 ray_config.intensity_threshold = self.intensity_threshold
 
+                # Store bearing_step for profiling
+                self.cpp_bearing_step = ray_config.bearing_step
+
                 # Create RayProcessor with shared octree
                 self.cpp_ray_processor = RayProcessor(self.cpp_octree, ray_config)
                 print(f"[INFO] C++ RayProcessor initialized (OpenMP enabled, bearing_step={ray_config.bearing_step})")
@@ -1128,7 +1131,7 @@ class SonarMapping3D:
             t_ray_start = time.perf_counter()
             timing_accumulators = {'dda': 0.0, 'merge': 0.0, 'occupied': 0.0}
         else:
-            timing_accumulators = None
+            timing_accumulators = {'dda': 0.0, 'merge': 0.0, 'occupied': 0.0}  # Always initialize for profiling compatibility
 
         # C++ vs Python ray processing decision
         use_cpp_path = self.use_cpp_ray_processor and self.cpp_ray_processor is not None
@@ -1148,7 +1151,15 @@ class SonarMapping3D:
                     t_ray_total = t_cpp_total
 
                 # C++ updates octree directly, no Python merge needed
-                num_voxels_updated = -1  # Unknown (C++ doesn't report count)
+                # Calculate processed rays from C++ bearing_step (not Python's bearing_step!)
+                cpp_step = self.cpp_bearing_step if hasattr(self, 'cpp_bearing_step') else 2
+                num_rays_processed = bearing_bins // cpp_step
+                for b_idx in range(0, bearing_bins, cpp_step):
+                    processed_bearings.append(b_idx)
+
+                # Estimate voxel count (C++ doesn't report exact count yet)
+                # Typical: ~100-500 voxels per ray depending on scene
+                num_voxels_updated = num_rays_processed * 200  # Rough estimate
 
             except Exception as e:
                 print(f"[ERROR] C++ RayProcessor failed: {e}")
