@@ -87,6 +87,12 @@ void RayProcessor::process_sonar_image(
     int num_bearings = img_buf.shape[1];
     const uint8_t* img_ptr = static_cast<const uint8_t*>(img_buf.ptr);
 
+    // Compute first-hit map for shadow validation (while holding GIL)
+    std::vector<double> first_hit_map = compute_first_hit_map(polar_image);
+
+    // Compute inverse transform for shadow validation
+    Eigen::Matrix4d T_world_to_sonar = T_sonar_to_world.inverse();
+
     // Process bearings with step (e.g., every 2nd bearing for performance)
     std::vector<int> bearing_indices;
     for (int b = 0; b < num_bearings; b += config_.bearing_step) {
@@ -132,7 +138,8 @@ void RayProcessor::process_sonar_image(
 
             // Process this ray (collect voxel updates in local_updates)
             process_single_ray_internal(b_idx, num_bearings, intensity_profile,
-                                       T_sonar_to_world, sonar_origin_world,
+                                       T_sonar_to_world, T_world_to_sonar,
+                                       sonar_origin_world, first_hit_map,
                                        local_updates);
         }
     }  // GIL automatically reacquired here
@@ -251,7 +258,9 @@ void RayProcessor::process_single_ray_internal(
     int num_bearings,
     const std::vector<uint8_t>& intensity_profile,
     const Eigen::Matrix4d& T_sonar_to_world,
+    const Eigen::Matrix4d& T_world_to_sonar,
     const Eigen::Vector3d& sonar_origin_world,
+    const std::vector<double>& first_hit_map,
     std::vector<VoxelUpdate>& voxel_updates
 ) {
     // 1. Find first hit only (ignore anything after first reflection)
@@ -260,10 +269,10 @@ void RayProcessor::process_single_ray_internal(
     // 2. Free space processing (DDA traversal to first hit or max range)
     double range_to_first_hit;
     if (first_hit_idx < 0) {
-        // No hit: Unknown 영역으로 유지 (업데이트 안 함)
-        // Simulator가 아닌 실제 환경 대응: no-hit는 장애물 없음이 아니라 감지 불가
-        return;
-    } else {
+        // No reflection within max_range → entire measured range is free space
+        first_hit_idx = static_cast<int>(intensity_profile.size());
+    }
+    {
         // Normal case: free space up to first hit
         // Range to first hit (FLS convention: row 0 = far, row max = near)
         // CRITICAL FIX: Use (first_hit_idx + 1) to prevent free space from overlapping
@@ -336,6 +345,11 @@ void RayProcessor::process_single_ray_internal(
 
             // Add to voxel updates with range weighting
             for (const auto& voxel : voxels) {
+                // SHADOW VALIDATION: Skip voxels in shadow region
+                if (is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_bearings)) {
+                    continue;  // Voxel is beyond first hit, skip free space update
+                }
+
                 // Compute range from sonar origin
                 double range = (voxel - sonar_origin_world).norm();
 
@@ -403,14 +417,22 @@ void RayProcessor::process_single_ray(
     const std::vector<uint8_t>& intensity_profile,
     const Eigen::Matrix4d& T_sonar_to_world
 ) {
+    // NOTE: Legacy API does NOT support shadow validation
+    // For full shadow validation, use process_sonar_image() instead
+
     // Use internal version with temporary buffer, then insert to octree
     std::vector<VoxelUpdate> voxel_updates;
     voxel_updates.reserve(1000);  // Typical ray size
 
     Eigen::Vector3d sonar_origin_world = T_sonar_to_world.block<3, 1>(0, 3);
+    Eigen::Matrix4d T_world_to_sonar = T_sonar_to_world.inverse();
+
+    // Create dummy first_hit_map (no shadow validation for single ray)
+    std::vector<double> first_hit_map(num_bearings, config_.max_range);
 
     process_single_ray_internal(bearing_idx, num_bearings, intensity_profile,
-                                T_sonar_to_world, sonar_origin_world, voxel_updates);
+                                T_sonar_to_world, T_world_to_sonar,
+                                sonar_origin_world, first_hit_map, voxel_updates);
 
     // Convert to NumPy and insert to octree
     if (!voxel_updates.empty()) {
@@ -662,6 +684,86 @@ int RayProcessor::compute_num_vertical_steps(double range_m) const {
     return std::max(1, num_steps);
 }
 
+// Compute first hit range map
+std::vector<double> RayProcessor::compute_first_hit_map(
+    const py::array_t<uint8_t>& polar_image
+) const {
+    // Extract image dimensions
+    auto img_buf = polar_image.request();
+    if (img_buf.ndim != 2) {
+        throw std::runtime_error("Polar image must be 2D array (num_range_bins × num_bearings)");
+    }
+
+    int num_range_bins = img_buf.shape[0];
+    int num_bearings = img_buf.shape[1];
+    const uint8_t* img_ptr = static_cast<const uint8_t*>(img_buf.ptr);
+
+    // Initialize with max_range (no hit by default)
+    std::vector<double> first_hit_map(num_bearings, config_.max_range);
+
+    // Process each bearing
+    for (int b_idx = 0; b_idx < num_bearings; ++b_idx) {
+        // Find first pixel above threshold
+        for (int r_idx = 0; r_idx < num_range_bins; ++r_idx) {
+            uint8_t intensity = img_ptr[r_idx * num_bearings + b_idx];
+
+            if (intensity > config_.intensity_threshold) {
+                // Calculate horizontal range (FLS: row 0 = far, row max = near)
+                first_hit_map[b_idx] = config_.max_range - r_idx * config_.range_resolution;
+                break;
+            }
+        }
+    }
+
+    return first_hit_map;
+}
+
+// Check if voxel is in shadow region
+bool RayProcessor::is_voxel_in_shadow(
+    const Eigen::Vector3d& voxel_world,
+    const Eigen::Matrix4d& T_world_to_sonar,
+    const std::vector<double>& first_hit_map,
+    int num_bearings
+) const {
+    // Transform voxel to sonar frame
+    Eigen::Vector4d voxel_world_homo(voxel_world.x(), voxel_world.y(), voxel_world.z(), 1.0);
+    Eigen::Vector4d voxel_sonar = T_world_to_sonar * voxel_world_homo;
+
+    double x_s = voxel_sonar.x();
+    double y_s = voxel_sonar.y();
+    // double z_s = voxel_sonar.z();  // Not needed for horizontal range
+
+    // Calculate HORIZONTAL range only (ignore Z, matching Python)
+    double range_m = std::sqrt(x_s * x_s + y_s * y_s);
+
+    // Calculate bearing angle (horizontal angle)
+    double bearing_rad = std::atan2(y_s, x_s);
+
+    // Convert bearing to index
+    // bearing_angles range: [-fov/2, +fov/2]
+    // Normalize: bearing_rad to [0, 1] relative to FOV
+    double fov_rad = config_.horizontal_fov * M_PI / 180.0;
+    double bearing_normalized = (bearing_rad + fov_rad / 2.0) / fov_rad;
+
+    // Clamp to valid range [0, 0.9999] to prevent out-of-bounds
+    bearing_normalized = std::clamp(bearing_normalized, 0.0, 0.9999);
+
+    int bearing_idx = static_cast<int>(bearing_normalized * num_bearings);
+
+    // Boundary check
+    if (bearing_idx < 0 || bearing_idx >= num_bearings) {
+        return true;  // Out of FOV, treat as shadow
+    }
+
+    // Get first hit range for this bearing
+    double first_hit_range = first_hit_map[bearing_idx];
+
+    // Shadow condition: voxel range >= first hit range
+    // Add small epsilon to avoid numerical issues (1cm tolerance)
+    constexpr double epsilon = 0.01;
+    return range_m >= (first_hit_range + epsilon);
+}
+
 // Internal DDA voxel traversal (simplified version)
 std::vector<Eigen::Vector3d> RayProcessor::traverse_ray_dda(
     const Eigen::Vector3d& start,
@@ -816,6 +918,28 @@ PYBIND11_MODULE(ray_processor, m) {
              "Args:\n"
              "    polar_image: 2D NumPy array (num_range_bins × num_bearings), uint8\n"
              "    T_sonar_to_world: 4×4 transformation matrix (sonar → world frame)")
+        .def("compute_first_hit_map",
+             &RayProcessor::compute_first_hit_map,
+             py::arg("polar_image"),
+             "Compute first hit range for each bearing\n\n"
+             "Args:\n"
+             "    polar_image: 2D NumPy array (num_range_bins × num_bearings), uint8\n"
+             "Returns:\n"
+             "    List of first hit ranges (meters) for each bearing")
+        .def("is_voxel_in_shadow",
+             &RayProcessor::is_voxel_in_shadow,
+             py::arg("voxel_world"),
+             py::arg("T_world_to_sonar"),
+             py::arg("first_hit_map"),
+             py::arg("num_bearings"),
+             "Check if voxel is in shadow region\n\n"
+             "Args:\n"
+             "    voxel_world: Voxel position in world frame (3D)\n"
+             "    T_world_to_sonar: Inverse transformation matrix (world → sonar)\n"
+             "    first_hit_map: List of first hit ranges for all bearings\n"
+             "    num_bearings: Total number of bearings\n"
+             "Returns:\n"
+             "    True if voxel is in shadow (should skip update)")
         .def("set_config",
              &RayProcessor::set_config,
              py::arg("config"),

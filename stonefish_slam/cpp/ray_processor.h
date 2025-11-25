@@ -155,6 +155,43 @@ public:
      */
     void reset_ray_stats();
 
+    /**
+     * @brief Compute first hit range map from polar image
+     *
+     * For each bearing, find the first range bin with intensity above threshold
+     * and compute its horizontal range in meters.
+     *
+     * Python equivalent: mapping_3d.py lines 372-396 (_compute_first_hit_map)
+     *
+     * @param polar_image 2D NumPy array (num_range_bins × num_bearings), uint8
+     * @return Vector of first hit ranges (one per bearing, in meters)
+     */
+    std::vector<double> compute_first_hit_map(
+        const py::array_t<uint8_t>& polar_image
+    ) const;
+
+    /**
+     * @brief Check if voxel is in shadow region
+     *
+     * A voxel is in shadow if its horizontal range exceeds the first hit range
+     * for its corresponding bearing angle. Shadow voxels should NOT receive
+     * free space updates as they are occluded by closer obstacles.
+     *
+     * Python equivalent: mapping_3d.py lines 427-458 (_is_voxel_in_shadow)
+     *
+     * @param voxel_world Voxel center in world frame
+     * @param T_world_to_sonar Inverse transformation (world → sonar)
+     * @param first_hit_map First hit ranges for all bearings (from compute_first_hit_map)
+     * @param num_bearings Total number of bearings (for index calculation)
+     * @return True if voxel is in shadow (should skip update)
+     */
+    bool is_voxel_in_shadow(
+        const Eigen::Vector3d& voxel_world,
+        const Eigen::Matrix4d& T_world_to_sonar,
+        const std::vector<double>& first_hit_map,
+        int num_bearings
+    ) const;
+
 private:
     /**
      * @brief Structure to hold voxel updates before octree insertion
@@ -177,7 +214,9 @@ private:
      * @param num_bearings Total number of bearings (for angle calculation)
      * @param intensity_profile Intensity values along range (1D array)
      * @param T_sonar_to_world Transformation matrix
+     * @param T_world_to_sonar Inverse transformation (for shadow validation)
      * @param sonar_origin_world Sonar origin in world frame (cached)
+     * @param first_hit_map First hit ranges for all bearings (for shadow validation)
      * @param voxel_updates Output buffer to collect voxel updates
      */
     void process_single_ray_internal(
@@ -185,7 +224,9 @@ private:
         int num_bearings,
         const std::vector<uint8_t>& intensity_profile,
         const Eigen::Matrix4d& T_sonar_to_world,
+        const Eigen::Matrix4d& T_world_to_sonar,
         const Eigen::Vector3d& sonar_origin_world,
+        const std::vector<double>& first_hit_map,
         std::vector<VoxelUpdate>& voxel_updates
     );
 
@@ -212,6 +253,9 @@ private:
      *
      * Collects occupied voxel updates in C++ buffer.
      * Used by process_single_ray_internal() in OpenMP parallel region.
+     *
+     * NOTE: Occupied voxels do NOT use shadow validation, as they represent
+     * actual detections and should always be updated.
      *
      * @param hit_indices Indices of range bins with high intensity
      * @param bearing_angle Horizontal bearing angle (radians)

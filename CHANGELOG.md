@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **C++ RayProcessor no-hit ray 처리 추가** (2025-11-26)
+  - **증상**:
+    - C++ RayProcessor에서 반사 없는 ray를 처리하지 않음
+    - Python은 이미 수정됨 (mapping_3d.py line 370-373)
+    - C++는 `if (first_hit_idx < 0) return;`로 스킵되어 free space 업데이트 안 됨
+    - 결과: 반사 없는 영역이 unknown으로 남음
+  - **근본 원인**:
+    - C++ path에서 no-hit case 처리 누락
+    - Python과 C++ 간 로직 불일치
+  - **수정 사항** (`ray_processor.cpp`):
+    - Line 271-274: `if (first_hit_idx < 0) return;` → `first_hit_idx = intensity_profile.size();`
+    - Python 구현과 동일하게 entire measured range를 free space로 처리
+    - DDA traversal이 max range까지 진행되어 no-hit 영역 마킹
+  - **효과**:
+    - C++ RayProcessor 사용 시에도 반사 없는 영역이 free space로 올바르게 업데이트
+    - Python/C++ 경로 간 일관성 확보
+    - 소나 맹점 영역의 unknown 마킹 제거
+  - **파일**: `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 - **Shadow validation horizontal range 수정** (2025-11-26)
   - **증상**:
     - Shadow validation이 3D range 사용하여 occupied voxel 오판

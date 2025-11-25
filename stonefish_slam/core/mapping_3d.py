@@ -413,7 +413,8 @@ class SonarMapping3D:
         x_s, y_s, z_s = voxel_sonar[:3]
 
         # Convert to spherical coordinates
-        range_m = np.sqrt(x_s**2 + y_s**2 + z_s**2)
+        # Use HORIZONTAL range only (matching first_hit_map calculation)
+        range_m = np.sqrt(x_s**2 + y_s**2)  # Horizontal range (ignore Z)
 
         # Bearing: horizontal angle (atan2(y, x))
         bearing_rad = np.arctan2(y_s, x_s)
