@@ -344,9 +344,22 @@ void RayProcessor::process_single_ray_internal(
             }
 
             // Add to voxel updates with range weighting
+            // Shadow validation counters
+            static std::atomic<int> shadow_skip{0};
+            static std::atomic<int> shadow_total{0};
+
             for (const auto& voxel : voxels) {
                 // SHADOW VALIDATION: Skip voxels in shadow region
-                if (is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_bearings)) {
+                bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_bearings);
+                shadow_total++;
+                if (is_shadow) {
+                    shadow_skip++;
+                    // Print every 1000 checks
+                    if (shadow_total % 1000 == 0) {
+                        std::cout << "[C++ FREE SHADOW] Checked: " << shadow_total.load()
+                                  << ", Skipped: " << shadow_skip.load()
+                                  << " (" << (100.0 * shadow_skip.load() / shadow_total.load()) << "%)" << std::endl;
+                    }
                     continue;  // Voxel is beyond first hit, skip free space update
                 }
 
@@ -754,7 +767,7 @@ bool RayProcessor::is_voxel_in_shadow(
     // Pre-compute constants
     double fov_rad = config_.horizontal_fov * M_PI / 180.0;
     double actual_bearing_resolution = fov_rad / (num_bearings - 1);
-    double bearing_half_width = actual_bearing_resolution * 0.5;  // ±0.5 bearing width
+    double bearing_half_width = actual_bearing_resolution * 3.0;  // ±3 bearings (was 0.5)
 
     // Calculate exclude index if specified
     int exclude_idx = -1;
@@ -766,6 +779,9 @@ bool RayProcessor::is_voxel_in_shadow(
             exclude_idx = -1;
         }
     }
+
+    // Debug counter
+    static std::atomic<int> debug_count{0};
 
     // Check each bearing in first_hit_map
     for (int b_idx = 0; b_idx < num_bearings; ++b_idx) {
@@ -795,6 +811,15 @@ bool RayProcessor::is_voxel_in_shadow(
 
         // Check if voxel is within this bearing's cone
         if (angle_diff <= bearing_half_width) {
+            // Debug: Print first 5 shadow hits
+            int count = debug_count.fetch_add(1);
+            if (count < 5) {
+                std::cout << "[C++ SHADOW HIT] Voxel range=" << voxel_range
+                          << "m, bearing=" << (voxel_bearing_rad * 180.0 / M_PI)
+                          << "°, hit by bearing_idx=" << b_idx
+                          << " (angle=" << (bearing_angle * 180.0 / M_PI)
+                          << "°, first_hit=" << first_hit_range << "m)" << std::endl;
+            }
             // Voxel is in this bearing's shadow cone
             return true;
         }
