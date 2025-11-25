@@ -460,7 +460,7 @@ class SonarMapping3D:
         # 2. Calculate angular width for each bearing's cone
         bearing_bins = len(first_hit_map)
         actual_bearing_resolution = self.horizontal_fov / (bearing_bins - 1)  # radians
-        bearing_half_width = actual_bearing_resolution * 3.0  # ±3 bearings (was 0.5)
+        bearing_half_width = actual_bearing_resolution * 20.0  # ±20 bearings for vertical aperture coverage
 
         # 3. Calculate exclude bearing index if specified (for occupied voxels)
         exclude_idx = -1

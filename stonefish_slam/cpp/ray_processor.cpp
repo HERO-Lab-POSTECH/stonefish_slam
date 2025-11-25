@@ -270,9 +270,8 @@ void RayProcessor::process_single_ray_internal(
     double range_to_first_hit;
     if (first_hit_idx < 0) {
         // No reflection within max_range → entire measured range is free space
-        first_hit_idx = static_cast<int>(intensity_profile.size());
-    }
-    {
+        range_to_first_hit = config_.max_range;
+    } else {
         // Normal case: free space up to first hit
         // Range to first hit (FLS convention: row 0 = far, row max = near)
         // CRITICAL FIX: Use (first_hit_idx + 1) to prevent free space from overlapping
@@ -767,7 +766,7 @@ bool RayProcessor::is_voxel_in_shadow(
     // Pre-compute constants
     double fov_rad = config_.horizontal_fov * M_PI / 180.0;
     double actual_bearing_resolution = fov_rad / (num_bearings - 1);
-    double bearing_half_width = actual_bearing_resolution * 3.0;  // ±3 bearings (was 0.5)
+    double bearing_half_width = actual_bearing_resolution * 20.0;  // ±20 bearings for vertical aperture coverage
 
     // Calculate exclude index if specified
     int exclude_idx = -1;
