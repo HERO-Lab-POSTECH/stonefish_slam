@@ -18,7 +18,7 @@ feature_extraction_sim_node:
     # Point cloud filtering params
     filter:
       threshold: 80  # the min intensity to be added (0-255, higher = fewer points)
-      resolution: 0.5  # voxel downsampling resolution
+      point_downsample_resolution: 0.5  # Point cloud downsampling leaf size (meters)
       radius: 1.0  # outlier rejection radius
       min_points: 5  # outlier rejection min points
       skip: 5  # process every Nth frame
@@ -35,5 +35,5 @@ feature_extraction_sim_node:
       vertical_fov: 20.0  # degrees
       num_beams: 512  # number of beams (image width)
       num_bins: 500  # number of range bins (image height)
-      range_min: 0.5  # minimum range in meters
-      range_max: 40.0  # maximum range in meters
+      min_range: 0.5  # minimum range in meters
+      max_range: 40.0  # maximum range in meters

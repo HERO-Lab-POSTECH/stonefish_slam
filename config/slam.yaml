@@ -13,14 +13,14 @@ slam_node:
 
     # ==================== 2D Mapping Configuration ====================
     mapping_2d:
-      map_resolution: 0.1       # meters per pixel
+      map_2d_resolution: 0.1    # 2D occupancy grid resolution (meters/pixel)
       map_size: [4000, 4000]    # [width, height] in pixels
       map_update_interval: 1    # update every N keyframes
       intensity_threshold: 50   # minimum intensity (0-255) for pixels
 
     # ==================== 3D Mapping Configuration ====================
     mapping_3d:
-      voxel_resolution: 0.5     # meters
+      map_3d_voxel_size: 0.5    # 3D octree voxel size (meters)
       min_probability: 0.6      # minimum probability for occupied voxel
       log_odds_occupied: 1.5    # log-odds increment for occupied
       log_odds_free: -2.0       # log-odds decrement for free space
@@ -29,13 +29,8 @@ slam_node:
       adaptive_update: true     # enable adaptive Bayesian update
       adaptive_threshold: 0.5   # probability threshold for protection
       adaptive_max_ratio: 0.5   # max update ratio for protected voxels
-      use_cpp_backend: true     # use C++ ray processor
-      enable_propagation: false # enable probability propagation
       use_range_weighting: true # use exponential range weighting
       lambda_decay: 0.1         # decay factor for range weighting
-      enable_gaussian_weighting: false  # use Gaussian intensity weighting
-      use_dda_traversal: true   # use DDA for ray traversal
-      bearing_step: 2           # bearing sampling step
 
     # ==================== SLAM Parameters ====================
     # how often to add keyframes, this can be varied but between 1 and 4 meters is best
@@ -46,18 +41,17 @@ slam_node:
     # SLAM enable flag
     enable_slam: true
 
-    # define the noise models
-    # x, y, theta in m, m, rad
-    prior_sigmas: [0.1, 0.1, 0.01]
-    odom_sigmas: [0.2, 0.2, 0.02]
-    icp_odom_sigmas: [0.1, 0.1, 0.01]
+    # SLAM noise models [x_sigma_m, y_sigma_m, theta_sigma_rad]
+    slam_prior_noise: [0.1, 0.1, 0.01]  # Initial pose uncertainty
+    slam_odom_noise: [0.2, 0.2, 0.02]   # Dead reckoning uncertainty
+    slam_icp_noise: [0.1, 0.1, 0.01]    # ICP measurement uncertainty
 
     # pull in the ICP config (ROS2 - will be set from launch file)
     # Leave empty here, will be provided as parameter from launch file
     icp_config: ''
 
-    # Downsample points for ICP/publishing
-    point_resolution: 0.5
+    # Point cloud downsampling for ICP/publishing
+    point_downsample_resolution: 0.5  # Point cloud voxel leaf size (meters)
 
     # Sequential scan matching (SSM)
     ssm.enable: false  # is this module enabled?
