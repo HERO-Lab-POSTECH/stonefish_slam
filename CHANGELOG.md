@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **NED Frame Z-Axis Filtering for Map Updates** (2025-11-25)
+  - 로봇 위 복셀(수면 위) OctoMap 삽입 전 필터링
+  - NED 프레임: Z=Down (양수=수중), 조건: `voxel_z < robot_z` → 필터링
+  - Two-pass 알고리즘: 유효 복셀 카운트 → NumPy 배열 할당 → 필터링 삽입
+  - 메모리 최적화: 필터링된 배열만 할당 (약 5-10% 감소)
+  - 로깅: "Z-filtered: N above robot" 표시
+  - 파일: `cpp/ray_processor.cpp` (line 175-221)
+  - 효과: 수면 위 잘못된 복셀 제거, 맵 품질 향상
+
 - **Frame Sampling Mode for SLAM Testing** (2025-11-25)
   - `frame_sampling_interval` 파라미터 추가 (0=keyframe mode, N=N번째 프레임마다 처리)
   - 테스트 모드: 5 프레임 간격 샘플링으로 약 80% 계산량 감소

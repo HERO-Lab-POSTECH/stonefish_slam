@@ -173,12 +173,25 @@ void RayProcessor::process_sonar_image(
         }
 
         size_t unique_count = unique_updates.size();
-        // Deduplication: {total_updates} → {unique_count} voxels (sorted vector)
 
-        // Convert to NumPy arrays and insert
-        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(unique_count), 3};
+        // NED frame Z filtering: exclude voxels above robot
+        // In NED: Z = Down (positive = underwater)
+        // Filter condition: voxel_z < robot_z → above robot → exclude
+        double robot_z = sonar_origin_world[2];  // Robot Z position in NED frame
+
+        // First pass: count valid voxels (at or below robot)
+        size_t filtered_count = 0;
+        for (size_t i = 0; i < unique_count; ++i) {
+            double voxel_z = unique_updates[i].key.z * config_.voxel_resolution;
+            if (voxel_z >= robot_z) {  // Keep voxels at or below robot (NED)
+                filtered_count++;
+            }
+        }
+
+        // Allocate NumPy arrays for filtered voxels only
+        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(filtered_count), 3};
         py::array_t<double> points_np(points_shape);
-        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(unique_count));
+        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(filtered_count));
         py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
 
         auto points_buf = points_np.request();
@@ -189,14 +202,23 @@ void RayProcessor::process_sonar_image(
         double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
         double* origin_ptr = static_cast<double*>(origin_buf.ptr);
 
-        // Fill data from unique updates
+        // Second pass: fill only valid voxels
+        size_t write_idx = 0;
         for (size_t i = 0; i < unique_count; ++i) {
-            const auto& update = unique_updates[i];
-            points_ptr[i * 3 + 0] = update.key.x * config_.voxel_resolution;
-            points_ptr[i * 3 + 1] = update.key.y * config_.voxel_resolution;
-            points_ptr[i * 3 + 2] = update.key.z * config_.voxel_resolution;
-            log_odds_ptr[i] = update.log_odds;
+            double voxel_z = unique_updates[i].key.z * config_.voxel_resolution;
+            if (voxel_z >= robot_z) {  // Keep voxels at or below robot
+                const auto& update = unique_updates[i];
+                points_ptr[write_idx * 3 + 0] = update.key.x * config_.voxel_resolution;
+                points_ptr[write_idx * 3 + 1] = update.key.y * config_.voxel_resolution;
+                points_ptr[write_idx * 3 + 2] = voxel_z;
+                log_odds_ptr[write_idx] = update.log_odds;
+                write_idx++;
+            }
         }
+
+        std::cout << "Deduplication: " << total_updates << " → " << unique_count
+                  << " → " << filtered_count << " voxels (Z-filtered: "
+                  << (unique_count - filtered_count) << " above robot)" << std::endl;
 
         origin_ptr[0] = sonar_origin_world[0];
         origin_ptr[1] = sonar_origin_world[1];
