@@ -744,88 +744,64 @@ bool RayProcessor::is_voxel_in_shadow(
 
     double x_s = voxel_sonar.x();
     double y_s = voxel_sonar.y();
-    // double z_s = voxel_sonar.z();  // Not needed for horizontal range
 
-    // Calculate HORIZONTAL range only (ignore Z, matching Python)
-    double range_m = std::sqrt(x_s * x_s + y_s * y_s);
+    // Calculate HORIZONTAL range only (ignore Z)
+    double voxel_range = std::sqrt(x_s * x_s + y_s * y_s);
 
-    // Calculate bearing angle (horizontal angle)
-    double bearing_rad = std::atan2(y_s, x_s);
+    // Calculate voxel's bearing angle
+    double voxel_bearing_rad = std::atan2(y_s, x_s);
 
-    // Convert bearing to index
-    // bearing_angles range: [-fov/2, +fov/2]
-    // Normalize: bearing_rad to [0, 1] relative to FOV
+    // Pre-compute constants
     double fov_rad = config_.horizontal_fov * M_PI / 180.0;
-    double bearing_normalized = (bearing_rad + fov_rad / 2.0) / fov_rad;
-
-    // Angular cone based bearing range calculation
     double actual_bearing_resolution = fov_rad / (num_bearings - 1);
-    double bearing_step = 1.0;  // Same as Python
-    double bearing_half_width_rad = actual_bearing_resolution * bearing_step * 0.5;
+    double bearing_half_width = actual_bearing_resolution * 0.5;  // ±0.5 bearing width
 
-    // Bearing index range (cone coverage)
-    double bearing_idx_float = bearing_normalized * num_bearings;
-    double half_width_idx = bearing_half_width_rad / actual_bearing_resolution;
-    int idx_min = static_cast<int>(std::floor(bearing_idx_float - half_width_idx));
-    int idx_max = static_cast<int>(std::ceil(bearing_idx_float + half_width_idx));
-
-    // Clamp to valid range
-    idx_min = std::max(0, idx_min);
-    idx_max = std::min(num_bearings - 1, idx_max);
-
-    // Boundary check - if entire cone is out of FOV
-    if (idx_min >= num_bearings || idx_max < 0) {
-        return true;  // Out of FOV, treat as shadow
-    }
-
-    // Calculate exclude bearing index if specified (for occupied voxels)
+    // Calculate exclude index if specified
     int exclude_idx = -1;
-    if (exclude_bearing_rad > -900.0) {  // Valid bearing specified
+    if (exclude_bearing_rad > -900.0) {
         double exclude_normalized = (exclude_bearing_rad + fov_rad / 2.0) / fov_rad;
         exclude_idx = static_cast<int>(exclude_normalized * num_bearings);
+        // Clamp to valid range
+        if (exclude_idx < 0 || exclude_idx >= num_bearings) {
+            exclude_idx = -1;
+        }
     }
 
-    // Find MINIMUM first hit in angular cone (excluding self bearing if specified)
-    double min_first_hit = std::numeric_limits<double>::infinity();
-    for (int idx = idx_min; idx <= idx_max; ++idx) {
-        // Skip current bearing for occupied voxels
-        if (idx == exclude_idx) {
+    // Check each bearing in first_hit_map
+    for (int b_idx = 0; b_idx < num_bearings; ++b_idx) {
+        // Skip excluded bearing (for occupied voxels)
+        if (b_idx == exclude_idx) {
             continue;
         }
-        min_first_hit = std::min(min_first_hit, first_hit_map[idx]);
-    }
 
-    // Get minimum first hit range for this bearing cone
-    double first_hit_range = min_first_hit;
+        // Calculate this bearing's angle
+        double bearing_angle = -fov_rad / 2.0 + b_idx * actual_bearing_resolution;
 
-    // Shadow condition: voxel range >= first hit range
-    // Add small epsilon to avoid numerical issues (1cm tolerance)
-    constexpr double epsilon = 0.01;
-    bool is_shadow = range_m >= (first_hit_range + epsilon);
+        // Get first hit range for this bearing
+        double first_hit_range = first_hit_map[b_idx];
 
-    // DEBUG: Shadow validation statistics (thread-safe)
-    static std::atomic<int64_t> total_checks{0};
-    static std::atomic<int64_t> skipped_count{0};
-    static std::atomic<int64_t> last_print{0};
+        // Check if voxel is before this bearing's first hit
+        if (voxel_range < first_hit_range) {
+            continue;  // Voxel is before first hit, not shadow
+        }
 
-    total_checks.fetch_add(1, std::memory_order_relaxed);
-    if (is_shadow) {
-        skipped_count.fetch_add(1, std::memory_order_relaxed);
-    }
+        // Voxel is beyond first hit, check if it's in this bearing's angular cone
+        double angle_diff = std::abs(voxel_bearing_rad - bearing_angle);
 
-    // Print every 10000 checks (thread-safe)
-    int64_t current = total_checks.load(std::memory_order_relaxed);
-    int64_t last = last_print.load(std::memory_order_relaxed);
-    if (current - last >= 10000) {
-        if (last_print.compare_exchange_strong(last, current, std::memory_order_relaxed)) {
-            int64_t skipped = skipped_count.load(std::memory_order_relaxed);
-            double skip_rate = 100.0 * skipped / current;
-            std::cout << "[C++ SHADOW DEBUG] Total checks: " << current
-                      << ", Skipped: " << skipped << " (" << skip_rate << "%)" << std::endl;
+        // Handle wraparound (e.g., -179° vs +179°)
+        if (angle_diff > M_PI) {
+            angle_diff = 2.0 * M_PI - angle_diff;
+        }
+
+        // Check if voxel is within this bearing's cone
+        if (angle_diff <= bearing_half_width) {
+            // Voxel is in this bearing's shadow cone
+            return true;
         }
     }
 
-    return is_shadow;
+    // Not in any bearing's shadow
+    return false;
 }
 
 // Internal DDA voxel traversal (simplified version)

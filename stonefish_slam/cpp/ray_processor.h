@@ -173,11 +173,23 @@ public:
     /**
      * @brief Check if voxel is in shadow region
      *
-     * A voxel is in shadow if its horizontal range exceeds the first hit range
-     * for its corresponding bearing angle. Shadow voxels should NOT receive
-     * free space updates as they are occluded by closer obstacles.
+     * Algorithm: For each bearing in first_hit_map:
+     * 1. Calculate bearing's angle
+     * 2. Check if voxel is beyond this bearing's first hit
+     * 3. Check if voxel is within this bearing's angular cone (±0.5 bearing width)
+     * 4. If both conditions are met, voxel is in shadow
      *
-     * Python equivalent: mapping_3d.py lines 427-458 (_is_voxel_in_shadow)
+     * This ensures ALL bearings' shadows are detected, not just nearby bearings.
+     *
+     * Example:
+     *   Bearing 0°: first_hit = 5m (wall)
+     *   Voxel at (10m, bearing=30°):
+     *     - For bearing 0°: voxel_range (10m) > first_hit (5m) ✓
+     *       angle_diff = |30° - 0°| = 30° > 0.088° (512 bearings)
+     *       → Not in bearing 0°'s cone → Not shadow ✓
+     *     - For bearing 30°: first_hit = 20m
+     *       voxel_range (10m) < first_hit (20m) → Skip
+     *     → Result: Not shadow → Free space update ✓
      *
      * @param voxel_world Voxel center in world frame
      * @param T_world_to_sonar Inverse transformation (world → sonar)
@@ -185,7 +197,7 @@ public:
      * @param num_bearings Total number of bearings (for index calculation)
      * @param exclude_bearing_rad Bearing angle to exclude from shadow check (for occupied voxels)
      *                            Default -999.0 means no exclusion (for free space)
-     * @return True if voxel is in shadow (should skip update)
+     * @return True if voxel is in ANY bearing's shadow (should skip update)
      */
     bool is_voxel_in_shadow(
         const Eigen::Vector3d& voxel_world,

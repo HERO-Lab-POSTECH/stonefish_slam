@@ -439,7 +439,10 @@ class SonarMapping3D:
 
     def _is_voxel_in_shadow(self, voxel_world, T_world_to_sonar, first_hit_map, exclude_bearing_rad=None):
         """
-        Check if voxel is in shadow region (beyond first hit for its bearing)
+        Check if voxel is in ANY bearing's shadow cone
+
+        Redesigned to match C++ logic: iterate all bearings and check if voxel falls
+        within each bearing's angular cone and is beyond its first hit.
 
         Args:
             voxel_world: np.ndarray [x, y, z] in world frame
@@ -451,72 +454,46 @@ class SonarMapping3D:
         Returns:
             bool: True if voxel is in shadow (should skip update)
         """
-        # Convert voxel to sonar coordinates
+        # 1. Convert voxel to sonar coordinates
         bearing_rad, range_m, elevation_rad = self._voxel_to_sonar_coords(voxel_world, T_world_to_sonar)
 
-        # Convert bearing to index
-        # bearing_angles range: [-fov/2, +fov/2]
-        # Normalize: bearing_rad to [0, 1] relative to FOV
-        bearing_normalized = (bearing_rad + self.horizontal_fov / 2) / self.horizontal_fov
-
-        # Angular cone based bearing range calculation
+        # 2. Calculate angular width for each bearing's cone
         bearing_bins = len(first_hit_map)
         actual_bearing_resolution = self.horizontal_fov / (bearing_bins - 1)  # radians
-        bearing_step = 1.0  # Default value (matching C++)
-        bearing_half_width_rad = actual_bearing_resolution * bearing_step * 0.5
+        bearing_half_width = actual_bearing_resolution * 0.5
 
-        # Bearing index range (cone coverage)
-        bearing_idx_float = bearing_normalized * bearing_bins
-        half_width_idx = bearing_half_width_rad / actual_bearing_resolution
-        idx_min = int(np.floor(bearing_idx_float - half_width_idx))
-        idx_max = int(np.ceil(bearing_idx_float + half_width_idx))
-
-        # Clamp to valid range
-        idx_min = max(0, idx_min)
-        idx_max = min(bearing_bins - 1, idx_max)
-
-        # Boundary check - if entire cone is out of FOV
-        if idx_min >= bearing_bins or idx_max < 0:
-            return True  # Out of FOV, treat as shadow
-
-        # Calculate exclude bearing index if specified (for occupied voxels)
+        # 3. Calculate exclude bearing index if specified (for occupied voxels)
         exclude_idx = -1
         if exclude_bearing_rad is not None:
             exclude_normalized = (exclude_bearing_rad + self.horizontal_fov / 2) / self.horizontal_fov
             exclude_idx = int(exclude_normalized * bearing_bins)
 
-        # Find MINIMUM first hit in angular cone (excluding self bearing if specified)
-        min_first_hit = np.inf
-        for idx in range(idx_min, idx_max + 1):
-            # Skip current bearing for occupied voxels
-            if idx == exclude_idx:
+        # 4. Check EACH bearing's shadow cone
+        for b_idx in range(bearing_bins):
+            # Skip excluded bearing (for occupied voxels)
+            if b_idx == exclude_idx:
                 continue
-            min_first_hit = min(min_first_hit, first_hit_map[idx])
 
-        # Check if voxel range >= minimum first hit range in cone
-        first_hit_range = min_first_hit
+            # Calculate this bearing's angle
+            bearing_angle = -self.horizontal_fov / 2 + b_idx * actual_bearing_resolution
 
-        # Shadow condition: voxel is beyond first reflection
-        # Add small epsilon to avoid numerical issues
-        epsilon = 0.01  # 1cm tolerance
-        is_shadow = range_m >= (first_hit_range + epsilon)
+            # Check if voxel is beyond this bearing's first hit
+            first_hit_range = first_hit_map[b_idx]
+            epsilon = 0.01  # 1cm tolerance
+            if range_m < first_hit_range + epsilon:
+                continue  # Before first hit, not shadow
 
-        # DEBUG: Shadow validation statistics
-        if not hasattr(self, '_shadow_stats'):
-            self._shadow_stats = {'total': 0, 'skipped': 0, 'last_print': 0}
+            # Check if voxel is in this bearing's angular cone
+            angle_diff = abs(bearing_rad - bearing_angle)
 
-        self._shadow_stats['total'] += 1
-        if is_shadow:
-            self._shadow_stats['skipped'] += 1
+            # Handle wraparound (angle difference should be within [-π, π])
+            if angle_diff > np.pi:
+                angle_diff = 2 * np.pi - angle_diff
 
-        # Print every 10000 checks
-        if self._shadow_stats['total'] - self._shadow_stats['last_print'] >= 10000:
-            skip_rate = 100.0 * self._shadow_stats['skipped'] / self._shadow_stats['total']
-            print(f"[SHADOW DEBUG] Total checks: {self._shadow_stats['total']}, "
-                  f"Skipped: {self._shadow_stats['skipped']} ({skip_rate:.1f}%)", flush=True)
-            self._shadow_stats['last_print'] = self._shadow_stats['total']
+            if angle_diff <= bearing_half_width:
+                return True  # In shadow
 
-        return is_shadow
+        return False  # Not in any bearing's shadow
 
     def propagate_bearing_updates_optimized(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
         """
