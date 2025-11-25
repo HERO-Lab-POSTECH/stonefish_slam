@@ -260,8 +260,9 @@ void RayProcessor::process_single_ray_internal(
     // 2. Free space processing (DDA traversal to first hit or max range)
     double range_to_first_hit;
     if (first_hit_idx < 0) {
-        // No reflection: free space up to max range
-        range_to_first_hit = config_.max_range;
+        // No hit: Unknown 영역으로 유지 (업데이트 안 함)
+        // Simulator가 아닌 실제 환경 대응: no-hit는 장애물 없음이 아니라 감지 불가
+        return;
     } else {
         // Normal case: free space up to first hit
         // Range to first hit (FLS convention: row 0 = far, row max = near)
@@ -300,9 +301,9 @@ void RayProcessor::process_single_ray_internal(
         // Pre-compute constants (outside vertical loop for efficiency)
         const double cos_bear = std::cos(bearing_angle);
         const double sin_bear = std::sin(bearing_angle);
-        const double bearing_resolution_effective = config_.bearing_resolution * config_.bearing_step;
-        // Use 0.75x multiplier for 50% overlap between adjacent ray cones (improves free space coverage)
-        const double bearing_half_width = bearing_resolution_effective * 0.75;
+        // 실제 bearing 해상도 기반 cone width 계산 (0.5 = 각 bearing 책임 영역만)
+        double actual_bearing_resolution = (config_.horizontal_fov * M_PI / 180.0) / (num_bearings - 1);
+        const double bearing_half_width = actual_bearing_resolution * config_.bearing_step * 0.5;
         const double cos_half_width = std::cos(bearing_half_width);
         const Eigen::Matrix3d R_world_to_sonar = T_sonar_to_world.block<3, 3>(0, 0).transpose();
 
@@ -327,6 +328,11 @@ void RayProcessor::process_single_ray_internal(
 
             // DDA traversal (pure C++)
             std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, 500);
+
+            // End voxel 제외로 occupied 영역 보호
+            if (!voxels.empty()) {
+                voxels.pop_back();
+            }
 
             // Add to voxel updates with range weighting
             for (const auto& voxel : voxels) {

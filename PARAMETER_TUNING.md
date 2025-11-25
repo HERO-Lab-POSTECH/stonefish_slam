@@ -558,3 +558,239 @@ for r_idx, intensity in enumerate(intensity_profile):
 | **3:1** (현재) | 3.0 | -1.0 | Occupied 우선 | ✅ **강추** |
 | **5:1** | 5.0 | -1.0 | Occupied 매우 강함 | ⚠️ 동적 변화 느림 |
 
+---
+
+## Test 8: Occupied 침식 방지 (Log-odds 균형 조정)
+
+**날짜**: 2025-11-26
+**목표**: 명확한 occupied 영역이 free space로 침식되는 문제 해결
+
+### 문제 상황
+- threshold_debug 이미지: Occupied (Red)로 제대로 표시됨
+- 실제 맵: 이전에 occupied였던 땅이 나중에 free space로 바뀜
+- 원인: log_odds 비율이 1:2.5 (free가 2.5배 강함)
+  - Occupied 5회 관찰 → +10.0
+  - Free 2회 관찰 → -10.0 → **침식 발생**
+
+### 알고리즘 수정 (Test 8 이전)
+1. **DDA end voxel 제거**: Free space의 마지막 voxel 제거로 occupied 침범 방지
+2. **Angular cone width**: 1.0 (100% 중첩, robust 커버리지)
+
+### 파라미터 변경
+
+| Parameter | Before | After | Ratio Change |
+|-----------|--------|-------|--------------|
+| `log_odds_occupied` | 2.0 | **3.5** | +75% (강화) |
+| `log_odds_free` | -5.0 | **-3.0** | -40% (약화) |
+| `log_odds_min` | -15.0 | **-12.0** | 비대칭 완화 |
+| `log_odds_max` | 20.0 | 20.0 | 유지 |
+| `adaptive_threshold` | 0.5 | **5.0** | 보호 강화 |
+| `adaptive_max_ratio` | 0.3 | **0.2** | 제한 강화 |
+
+**Log-odds 비율**: 1:2.5 → **1:0.86** (Occupied dominant)
+
+### 예상 효과
+- Occupied 관찰 3회 (+10.5) vs Free 관찰 3회 (-9.0) → Occupied 우세
+- 침식 저항력 약 3배 증가
+- 기존 occupied 영역의 안정성 대폭 향상
+
+### 검증 항목
+- [ ] 땅(바닥)이 free space로 침식되지 않는가?
+- [ ] Occupied 영역이 안정적으로 유지되는가?
+- [ ] False positive (허공이 occupied) 증가 여부
+- [ ] Carving (free space 생성) 적절한가?
+
+### 결과
+
+**✅ 개선**: Occupied 침식 문제 대폭 완화
+- 땅(바닥)이 free space로 쉽게 바뀌는 문제 해결
+- Log-odds 비율 균형으로 occupied 안정성 향상
+
+**❌ 새로운 문제 발견**:
+1. **Free → Occupied 업데이트 차단**
+   - `adaptive_threshold: 5.0`이 너무 강함
+   - Free space를 occupied로 바꾸려면 약 30회 관찰 필요
+   - 거의 불가능한 수준
+
+2. **Shadow 영역 오염 (더 심각)**
+   - No-hit ray (물체 안 보이는 bearing)가 max_range까지 free space 업데이트
+   - Angular cone 100% 중첩으로 인접 bearing의 shadow 영역 침범
+   - 물체 뒤편 이전 occupied가 free space로 덮어씌워짐
+
+**원인 분석**:
+```
+Bearing A (물체 중앙): first_hit = 물체
+  → Free space: 물체 앞까지만 ✅
+  → 물체 뒤: Shadow (업데이트 안 함) ✅
+
+Bearing B (물체 옆, 빈 공간): first_hit = -1
+  → Free space: max_range까지 전체 업데이트 ❌
+  → Bearing A의 shadow 영역 침범 → free로 덮어씀 ❌
+```
+
+**다음 단계**: Test 9에서 adaptive protection 완화
+
+---
+
+## Test 9: Adaptive Protection 완화 (양방향 균형)
+
+**날짜**: 2025-11-26
+**목표**: Free ↔ Occupied 양방향 업데이트가 모두 원활하게 작동하도록 균형 조정
+
+### 문제 상황
+- Test 8에서 Occupied 침식은 해결했으나 역효과 발생
+- `adaptive_threshold: 5.0`이 너무 강해서 Free → Occupied 업데이트 차단
+- No-hit ray의 free space가 shadow 영역을 침범
+
+### 파라미터 변경
+
+| Parameter | Test 8 | Test 9 | Change |
+|-----------|--------|--------|--------|
+| `log_odds_occupied` | 3.5 | **3.5** | 유지 (침식 방지) |
+| `log_odds_free` | -3.0 | **-3.0** | 유지 (균형) |
+| `log_odds_min` | -12.0 | **-12.0** | 유지 |
+| `log_odds_max` | 20.0 | 20.0 | 유지 |
+| `adaptive_threshold` | 5.0 | **0.5** | 원복 (업데이트 가능하게) |
+| `adaptive_max_ratio` | 0.2 | **0.3** | 원복 (완화) |
+
+**Log-odds 비율**: 1:0.86 유지 (Occupied dominant)
+
+### 전략
+- **Log-odds 비율**로 Occupied 침식 방지 (3.5 vs -3.0)
+- **Adaptive protection**은 완화하여 동적 업데이트 허용
+- Free → Occupied: 약 7회 관찰 필요 (30회 → 7회로 감소)
+- Occupied → Free: 여전히 저항력 유지 (log-odds 비율)
+
+### 예상 효과
+- Free space 오관측 → 다시 occupied로 수정 가능
+- Occupied 영역: log-odds 비율로 여전히 안정적
+- Shadow 오염: 여전히 발생 가능 (알고리즘 수정 필요 시 추후 대응)
+
+### 검증 항목
+- [ ] Free space 오관측이 다시 occupied로 바뀌는가?
+- [ ] Occupied 침식이 재발하지 않는가?
+- [ ] Shadow 오염 문제는 얼마나 심각한가?
+
+### 알고리즘 수정 (Test 9 중간)
+
+**Shadow 오염 문제 해결**:
+- Angular cone width: 1.0 → **0.5** (100% 중첩 → 0% 중첩)
+- 각 bearing이 자신의 책임 영역만 업데이트
+- No-hit ray의 free space가 인접 bearing shadow 침범 방지
+
+**파일**: `ray_processor.cpp` line 305
+
+### 결과
+
+**✅ 개선**: Shadow 오염 문제 해결
+- Angular cone width 0.5로 바닥 free space 구멍 제거
+- 각 bearing의 책임 영역 분리로 간섭 최소화
+
+**❌ 새로운 문제**: Carving 약화
+- Angular cone width 감소로 free space 업데이트 범위 축소
+- Free space 생성이 약해짐
+
+**다음 단계**: Test 10에서 log_odds_free 강화
+
+---
+
+## Test 10: Carving 강화 (Free Space 업데이트 강도 증가)
+
+**날짜**: 2025-11-26
+**목표**: Angular cone width 감소로 약해진 carving을 free space 업데이트 강도로 보완
+
+### 문제 상황
+- Test 9에서 angular cone width 0.5로 shadow 오염 해결
+- 하지만 free space 업데이트 범위 축소로 carving 약화
+- Free space가 충분히 생성되지 않음
+
+### 파라미터 변경
+
+| Parameter | Test 9 | Test 10 | Change |
+|-----------|--------|---------|--------|
+| `log_odds_occupied` | 3.5 | **3.5** | 유지 |
+| `log_odds_free` | -3.0 | **-4.0** | 33% 강화 |
+| `log_odds_min` | -12.0 | **-12.0** | 유지 |
+| `log_odds_max` | 20.0 | 20.0 | 유지 |
+| `adaptive_threshold` | 0.5 | 0.5 | 유지 |
+| `adaptive_max_ratio` | 0.3 | 0.3 | 유지 |
+
+**Log-odds 비율**: 1:0.86 → **1:1.14** (약간 free 우세, carving 향상)
+
+### 전략
+- Free space 업데이트 강도 증가로 carving 보완
+- Angular cone width 0.5 유지 (shadow 오염 방지)
+- Occupied 3.5 유지로 여전히 침식 저항력 유지
+
+### 예상 효과
+- Carving 개선: Free space 생성 강화
+- Shadow 오염: 여전히 방지 (angular cone 0.5)
+- Occupied 침식: 약간 증가 가능 (모니터링 필요)
+
+### 검증 항목
+- [ ] Carving이 적절하게 작동하는가?
+- [ ] Shadow 오염이 재발하지 않는가?
+- [ ] Occupied 침식이 허용 범위 내인가?
+
+### 알고리즘 수정 (Test 10 중간)
+
+**1차 수정 - Angular cone width 미세 증가**:
+- Angular cone width: 0.5 → **0.6** (0% 중첩 → 20% 중첩)
+- Shadow 보호 유지하면서 커버리지 향상
+- Free space 업데이트 범위 확대로 carving 개선
+
+**2차 수정 - ⚠️ 심각한 버그 발견 및 수정**:
+
+**버그**: Angular cone width 계산이 완전히 잘못됨
+- 기존: `config_.bearing_resolution = 1.0°` (어디서 온 값?)
+- 실제 bearing 해상도: **130° / 918 = 0.142°**
+- **73배 차이!**
+
+**기존 계산** (잘못됨):
+```cpp
+bearing_half_width = 1.0° × 2 × 0.6 = 1.2°
+```
+- 실제 해상도의 8.5배
+- 과도한 중첩 → shadow 오염 + carving 문제의 근본 원인
+
+**수정된 계산**:
+```cpp
+actual_bearing_resolution = (130° / 918) = 0.142°
+bearing_half_width = 0.142° × bearing_step × 0.5 = 0.142°
+```
+- 각 bearing이 정확히 자신의 책임 영역만 업데이트
+- 중첩 없음 (0.5 factor)
+
+**파일**: `ray_processor.cpp` line 303-305
+
+**3차 수정 - ⚠️ 가장 심각한 버그: No-hit ray의 max_range free space 업데이트**:
+
+**문제** (사용자 지적):
+- No-hit ray (첫 반사 없음)가 max_range(30m)까지 free space로 업데이트
+- 물체 뒤편 unknown 영역을 잘못 free로 마킹
+- 뒤로 돌아서 물체 뒷면 관측해도 **채워지지 않음** (이미 강한 free로 마킹됨)
+
+**근본 원인**:
+```cpp
+if (first_hit_idx < 0) {
+    range_to_first_hit = config_.max_range;  // Simulator 환경 가정 (잘못됨)
+}
+```
+
+**수정** (line 262-265):
+```cpp
+if (first_hit_idx < 0) {
+    return;  // No hit = unknown (업데이트 안 함)
+}
+```
+
+**효과**:
+- No-hit ray는 unknown으로 유지 (보수적 접근)
+- 물체 뒷면 관측 시 제대로 occupied로 채워짐
+- False free space 대폭 감소
+
+**파일**: `ray_processor.cpp` line 262-265
+
+### 결과
+*(테스트 후 기록)*
+

@@ -16,8 +16,9 @@ import message_filters
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import PointCloud2
 from nav_msgs.msg import Odometry
-from cv_bridge import CvBridge
+from cv_bridge import CvBridge, CvBridgeError
 import numpy as np
+import cv2
 
 from stonefish_slam.core.mapping_3d import SonarMapping3D
 
@@ -146,8 +147,13 @@ class Mapping3DStandaloneNode(Node):
         )
         self.ts.registerCallback(self.sync_callback)
 
-        # Publisher
+        # Publishers
         self.pc_pub = self.create_publisher(PointCloud2, '/mapping_3d_standalone/pointcloud', 10)
+        self.threshold_debug_pub = self.create_publisher(
+            Image,
+            '/mapping_3d_standalone/threshold_debug',
+            10
+        )
 
         self.get_logger().info(
             f'3D Mapping Test Node ready: '
@@ -173,8 +179,51 @@ class Mapping3DStandaloneNode(Node):
             # Convert sonar image
             sonar_image = self.bridge.imgmsg_to_cv2(sonar_msg, desired_encoding='mono8')
 
-            # Process with mapper
+            # Process with mapper (맵 업데이트 먼저)
             self.mapper_3d.process_sonar_image(sonar_image, odom_msg.pose.pose)
+
+            # --- Threshold debugging image generation (맵 업데이트 후) ---
+            threshold_value = self.mapper_3d.intensity_threshold
+
+            # Black background (B, G, R)
+            threshold_debug = np.zeros((sonar_image.shape[0], sonar_image.shape[1], 3), dtype=np.uint8)
+
+            # Color code each bearing column
+            for bearing_idx in range(sonar_image.shape[1]):
+                intensity_column = sonar_image[:, bearing_idx]
+
+                # Bottom→Top scan (near→far, row max → row 0)
+                # Find first hit where intensity > threshold
+                first_hit_idx = -1
+                for row_idx in range(len(intensity_column) - 1, -1, -1):
+                    if intensity_column[row_idx] > threshold_value:
+                        first_hit_idx = row_idx
+                        break
+
+                if first_hit_idx >= 0:
+                    # Green: Free space (bottom to first_hit)
+                    # 실제 업데이트와 일치: first_hit보다 1 row 아래까지만 free로 마킹
+                    free_end = min(first_hit_idx + 1, len(intensity_column) - 1)
+                    for row_idx in range(len(intensity_column) - 1, free_end, -1):
+                        threshold_debug[row_idx, bearing_idx] = [0, 255, 0]  # Green (BGR)
+
+                    # Red: Occupied (first_hit and beyond where intensity > threshold)
+                    for row_idx in range(first_hit_idx, -1, -1):
+                        if intensity_column[row_idx] > threshold_value:
+                            threshold_debug[row_idx, bearing_idx] = [0, 0, 255]  # Red (BGR)
+                        # else: Black (shadow) - already initialized
+                else:
+                    # No hit: entire range is free space (simulator environment)
+                    # ray_processor.cpp line 264-266: range_to_first_hit = max_range
+                    threshold_debug[:, bearing_idx] = [0, 255, 0]  # Full column Green
+
+            # ROS2 Image 메시지로 변환 및 publish (맵 업데이트와 동기화)
+            try:
+                threshold_msg = self.bridge.cv2_to_imgmsg(threshold_debug, encoding='bgr8')
+                threshold_msg.header = sonar_msg.header
+                self.threshold_debug_pub.publish(threshold_msg)
+            except CvBridgeError as e:
+                self.get_logger().error(f'CV Bridge Error (threshold debug): {e}')
 
             # Publish point cloud
             pc_msg = self.mapper_3d.get_pointcloud2_msg(
