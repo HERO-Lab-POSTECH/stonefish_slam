@@ -10,7 +10,7 @@ from collections import defaultdict
 from sklearn.covariance import MinCovDet
 import time as time_pkg
 
-from stonefish_slam.sensors.sonar import OculusProperty
+from stonefish_slam.utils.sonar import OculusProperty
 from stonefish_slam.utils.conversions import *
 from stonefish_slam.utils.visualization import *
 from stonefish_slam.utils.io import *

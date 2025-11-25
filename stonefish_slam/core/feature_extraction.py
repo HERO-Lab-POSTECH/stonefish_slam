@@ -15,7 +15,7 @@ from stonefish_slam.utils.visualization import apply_custom_colormap
 # from stonefish_slam import pcl  # TODO: Re-enable when pybind11 is fixed
 import matplotlib.pyplot as plt
 
-from stonefish_slam.sensors.CFAR import CFAR
+from stonefish_slam.core.cfar import CFAR
 
 
 class FeatureExtractionNode(Node):

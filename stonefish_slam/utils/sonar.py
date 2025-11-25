@@ -7,64 +7,6 @@ from stonefish_slam.utils.topics import *
 from stonefish_slam.utils.conversions import r2n
 
 
-class OculusFireMsg(object):
-    """Oculus Fire Message
-
-    uint8_t masterMode;           // mode 0 is flexi mode, needs full fire message (not available for third party developers)
-                                  // mode 1 - Low Frequency Mode (wide aperture, navigation)
-                                  // mode 2 - High Frequency Mode (narrow aperture, target identification)
-    PingRateType pingRate;        // Sets the maximum ping rate.
-    uint8_t networkSpeed;         // Used to reduce the network comms speed (useful for high latency shared links)
-    uint8_t gammaCorrection;      // 0 and 0xff = gamma correction = 1.0
-                                  // Set to 127 for gamma correction = 0.5
-    uint8_t flags;                // bit 0: 0 = interpret range as percent, 1 = interpret range as meters
-                                  // bit 1: 0 = 8 bit data, 1 = 16 bit data
-                                  // bit 2: 0 = wont send gain, 1 = send gain
-                                  // bit 3: 0 = send full return message, 1 = send simple return message
-                                  // bit 4: 0 = gain assistance off, 1 = gain assistance on
-                                  // bit 5: 0 = low power mode off, 1 = low power mode on
-    double range;                 // The range demand in percent or meters depending on flags
-    double gainPercent;           // The gain demand if gain assistance is off or intensity demand if gain assistance is on
-    double speedOfSound;          // meters/second, if set to zero then internal calc will apply using salinity
-    double salinity;              // ppt, set to zero if we are in fresh water and 35.0 if we are in salt water
-
-    """
-
-    def __init__(self):
-        self.mode = None
-
-        self.gamma = None
-        self.flags = None
-        self.range = None
-        self.gain = None
-        self.speed_of_sound = None
-        self.salinity = None
-
-    def configure(self, ping):
-        self.mode = ping.fire_msg.mode
-        self.gamma = ping.fire_msg.gamma / 255.0
-        self.flags = ping.fire_msg.flags
-        self.range = ping.fire_msg.range
-        self.gain = ping.fire_msg.gain
-        self.speed_of_sound = ping.fire_msg.speed_of_sound
-        self.salinity = ping.fire_msg.salinity
-
-    def __str__(self):
-        return (
-            "\n=========================\n"
-            "   Oculus Fire Message\n"
-            "=========================\n"
-            "Mode: {mode:>19d}\n"
-            "Gamma: {gamma:>18.1f}\n"
-            "Flags: {flags:>18b}\n"
-            "Range: {range:17.1f}m\n"
-            "Gain: {gain:>19.1f}\n"
-            "Speed of sound: {speed_of_sound:5.1f}m/s\n"
-            "Salinity: {salinity:>12.1f}ppt\n"
-            "=========================\n".format(**self.__dict__)
-        )
-
-
 class OculusProperty(object):
     OCULUS_VERTICAL_APERTURE = {1: np.deg2rad(20), 2: np.deg2rad(12)}
     OCULUS_PART_NUMBER = {1042: "M1200d", 1032: "M750d"}
@@ -140,7 +82,6 @@ class OculusProperty(object):
     def __init__(self):
         # model
         self.model = ""
-        self.fire_msg = OculusFireMsg()
 
         # range bins: [r1, ..., rn]
         self.num_ranges = None
@@ -179,8 +120,6 @@ class OculusProperty(object):
         self.remap_y = None
 
     def configure(self, ping):
-        self.fire_msg.configure(ping)
-
         if "part_number" not in ping.__slots__:
             # backward compatibility
             self.model = "M750d"
@@ -206,9 +145,8 @@ class OculusProperty(object):
             self.bearings = np.deg2rad(np.array(ping.bearings, np.float32) / 100)
             self.horizontal_aperture = abs(self.bearings[-1] - self.bearings[0])
             self.angular_resolution = self.horizontal_aperture / self.num_bearings
-            self.vertical_aperture = OculusProperty.OCULUS_VERTICAL_APERTURE[
-                self.fire_msg.mode
-            ]
+            # Use default vertical aperture (mode 1 = 20 degrees)
+            self.vertical_aperture = OculusProperty.OCULUS_VERTICAL_APERTURE.get(1, np.deg2rad(20))
 
             self.b2c = interp1d(
                 self.bearings,
@@ -329,7 +267,6 @@ class OculusProperty(object):
         ax.add_artist(fov)
 
     def __str__(self):
-        fire_msg = str(self.fire_msg)
         d = dict(self.__dict__)
         d["angular_resolution"] = np.degrees(d["angular_resolution"])
         d["horizontal_aperture"] = np.degrees(d["horizontal_aperture"])
@@ -341,9 +278,9 @@ class OculusProperty(object):
             "Model: {model:>24}\n"
             "#Ranges: {num_ranges:>22.0f}\n"
             "Range resolution: {range_resolution:>12.2f}m\n"
-            "#Bemas: {num_bearings:>23}\n"
+            "#Bearings: {num_bearings:>21}\n"
             "Angular resolution: {angular_resolution:>8.1f}deg\n"
             "Horizontal aperture: {horizontal_aperture:>7.1f}deg\n"
             "Vertical aperture: {vertical_aperture:>9.1f}deg\n"
-            "===============================\n".format(**d) + fire_msg
+            "===============================\n".format(**d)
         )
