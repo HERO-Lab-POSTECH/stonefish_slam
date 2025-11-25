@@ -1,0 +1,10 @@
+slam_node:
+  ros__parameters:
+    # Frame sampling test mode (process every 5th frame)
+    frame_sampling_interval: 5
+
+    # Coarser resolution for speed
+    voxel_resolution: 0.3  # Default: 0.2
+
+    # Other parameters remain default
+    # For production keyframe mode: frame_sampling_interval: 0

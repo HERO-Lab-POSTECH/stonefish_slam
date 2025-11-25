@@ -208,6 +208,7 @@ class SLAMNode(SLAM, Node):
         self.declare_parameter('adaptive_update', True)
         self.declare_parameter('adaptive_threshold', 0.5)
         self.declare_parameter('adaptive_max_ratio', 0.5)
+        self.declare_parameter('frame_sampling_interval', 0)  # 0=keyframe mode
 
         self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
         self.map_update_interval = self.get_parameter('map_update_interval').value
@@ -272,6 +273,7 @@ class SLAMNode(SLAM, Node):
                 'log_odds_free': self.get_parameter('log_odds_free').value,
                 'log_odds_min': self.get_parameter('log_odds_min').value,
                 'log_odds_max': self.get_parameter('log_odds_max').value,
+                'frame_sampling_interval': self.get_parameter('frame_sampling_interval').value,
             }
 
             # Create mapper

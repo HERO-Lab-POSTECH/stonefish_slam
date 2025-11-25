@@ -555,8 +555,9 @@ class SonarMapping3D:
             self.octree.log_odds_min = self.log_odds_min
             self.octree.log_odds_max = self.log_odds_max
 
-        # Frame counter
-        self.frame_count = 0
+        # Frame sampling configuration (0 = keyframe mode, N = every N frames)
+        self.frame_sampling_interval = config.get('frame_sampling_interval', 0)
+        self.frame_count = 0  # Frame counter for sampling
 
         # Bearing propagation settings
         self.enable_propagation = default_config.get('enable_propagation', False)
@@ -1081,6 +1082,18 @@ class SonarMapping3D:
             polar_image: 2D numpy array (height x width) with intensity values
             robot_pose: Robot pose (dict with 'position'/'orientation' or ROS Pose message)
         """
+        # Frame sampling mode:
+        #   - frame_sampling_interval=0: Use keyframe-based updates (production)
+        #   - frame_sampling_interval=N: Process every N-th frame (testing)
+        # Test mode (5-frame sampling) reduces computation by ~80% but may miss
+        # fast-moving features. Suitable for coarser resolution (0.3m) testing.
+
+        # Frame sampling: skip frames if enabled
+        self.frame_count += 1
+        if self.frame_sampling_interval > 0:
+            if self.frame_count % self.frame_sampling_interval != 0:
+                return  # Skip this frame
+
         # [A] Frame start timing
         if self.profiling_enabled:
             t_frame_start = time.perf_counter()

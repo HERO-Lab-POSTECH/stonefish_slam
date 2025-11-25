@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Frame Sampling Mode for SLAM Testing** (2025-11-25)
+  - `frame_sampling_interval` 파라미터 추가 (0=keyframe mode, N=N번째 프레임마다 처리)
+  - 테스트 모드: 5 프레임 간격 샘플링으로 약 80% 계산량 감소
+  - 테스트 설정: 0.3m 복셀 해상도 (기본값: 0.2m)
+  - 새 설정: `config/test_mapping.yaml`
+  - 새 런치 파일: `launch/slam_sim_test.launch.py`
+  - 용도: 빠른 알고리즘 검증 및 성능 테스트
+  - 파일: `stonefish_slam/core/mapping_3d.py`, `stonefish_slam/nodes/slam_ros.py`
+
 ### Changed
 
 - **3D Sonar Mapping 최적화 (Log-odds 밸런스 + Deduplication 성능)** (2025-11-25)
