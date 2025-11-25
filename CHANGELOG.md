@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **OctoMap 자동 Pruning 활성화** (2025-11-25)
+  - `updateNode()` lazy_eval 인자: true → false 변경
+  - 매 프레임마다 자동 pruning 수행 (OctoMap 기본 동작)
+  - 예상 효과: 메모리 40-60% 절감 (문헌 기준 최대 83%)
+  - Frame-by-frame SLAM 권장 설정 적용
+  - 파일: `cpp/octree_mapping.cpp` (Line 138, 157)
+  - 근거: Hornung et al. (2013) OctoMap 논문, lazy_eval은 대량 배치용
+
 - **Mapping 3D Test Node: Parameter Management 통합** (2025-11-25)
   - 하드코딩된 config 딕셔너리 제거
   - slam.yaml의 sonar/mapping_3d 파라미터 사용

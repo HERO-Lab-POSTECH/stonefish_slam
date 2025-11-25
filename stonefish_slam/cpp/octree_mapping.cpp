@@ -134,8 +134,8 @@ void OctreeMapping::insert_point_cloud(
             double log_odds_update = batch.log_odds_updates[i];
 
             // Use updateNode() API for incremental update
-            // This ensures pruning is performed automatically
-            tree_->updateNode(key, static_cast<float>(log_odds_update), true);
+            // This ensures pruning is performed automatically (lazy_eval=false)
+            tree_->updateNode(key, static_cast<float>(log_odds_update), false);
         }
     }
 
@@ -151,10 +151,10 @@ void OctreeMapping::insert_point_cloud(
         // Get log-odds update for this point
         double log_odds_update = log_odds_ptr[i];
 
-        // Use updateNode() API for incremental update (enables pruning)
+        // Use updateNode() API for incremental update (enables pruning, lazy_eval=false)
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
-            tree_->updateNode(key, static_cast<float>(log_odds_update), true);
+            tree_->updateNode(key, static_cast<float>(log_odds_update), false);
         }
     }
 #endif
