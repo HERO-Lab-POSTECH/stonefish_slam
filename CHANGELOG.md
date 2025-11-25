@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Core 모듈 네이밍 통일 및 sim 접미사 제거** (2025-11-25)
+  - **Phase 1: 파일명 변경**
+    - `core/feature_extraction_sim.py` → `core/feature_extraction.py`
+    - `nodes/feature_extraction_node.py`: import 경로 업데이트
+    - `core/mapping_2d.py`: 주석 참조 업데이트
+  - **Phase 2: 토픽명 하드코딩 제거**
+    - `dead_reckoning.py`: `dvl_sim` → `dvl` (일반화)
+    - `kalman.py`: `bluerov2/dvl_sim` → `bluerov2/dvl`
+  - **Phase 3: 클래스명 통일** (Option A: 일관성 우선)
+    - `Mapping2D` → `SonarMapping2D`
+    - 이유: 향후 광학 영상 기반 매핑 추가 대비 (`OpticalMapping2D` 등)
+    - 영향 파일: mapping_2d.py, slam_ros.py, __init__.py, mapping_2d_standalone_node.py
+  - **효과**:
+    - 명명 일관성 완벽: `SonarMapping2D`, `SonarMapping3D`
+    - sim 접미사 완전 제거 (패키지 전반)
+    - 확장성 확보 (다양한 센서 매핑 클래스 추가 가능)
+    - Git history 보존 (`git mv` 사용)
+
 - **Launch 파일 정리 및 이름 표준화** (2025-11-25)
   - **삭제된 파일** (2개):
     - `slam_sim_test.launch.py` (테스트 전용, 불필요)
