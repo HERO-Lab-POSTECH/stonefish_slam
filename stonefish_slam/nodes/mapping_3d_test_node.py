@@ -39,17 +39,37 @@ class MappingTestNode(Node):
         odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
         sonar_topic = self.get_parameter('sonar_topic').get_parameter_value().string_value
 
-        # Initialize mapper
+        # Initialize mapper with complete config
         config = {
-            'voxel_resolution': resolution,
-            'use_cpp_backend': True,
+            # Sonar hardware
+            'max_range': 40.0,
+            'min_range': 0.5,
             'horizontal_fov': 130.0,
             'vertical_aperture': 20.0,
-            'min_range': 0.5,
-            'max_range': 40.0,
-            'image_height': 500,
-            'image_width': 512,
-            'intensity_threshold': 50,
+            'image_width': 918,
+            'image_height': 512,
+            'sonar_position': [0.25, 0.0, 0.08],
+            'sonar_tilt_deg': 10.0,
+
+            # 3D mapping
+            'voxel_resolution': resolution,
+            'min_probability': 0.6,
+            'log_odds_occupied': 1.5,
+            'log_odds_free': -2.0,
+            'log_odds_min': -10.0,
+            'log_odds_max': 10.0,
+            'adaptive_update': True,
+            'adaptive_threshold': 0.5,
+            'adaptive_max_ratio': 0.5,
+            'use_cpp_backend': True,
+            'enable_propagation': False,
+            'use_range_weighting': True,
+            'lambda_decay': 0.1,
+            'enable_gaussian_weighting': False,
+            'use_dda_traversal': True,
+            'bearing_step': 2,
+            'free_vertical_factor': 8.0,
+            'occupied_vertical_factor': 3.0,
         }
 
         self.mapper_3d = SonarMapping3D(config)

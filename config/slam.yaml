@@ -82,5 +82,5 @@ slam_node:
     min_pcm: 3  # the min number of pairwise consistent loop closures (increased from 2 - stronger outlier rejection)
 
     # Mapping enable flags
-    enable_2d_mapping: true
-    enable_3d_mapping: false
+    enable_2d_mapping: false
+    enable_3d_mapping: true
