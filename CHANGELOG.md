@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **3D Mapping Bearing-Aware Shadow Validation 구현** (2025-11-26)
+  - **증상**:
+    - Vertical aperture 확산으로 인한 bearing 간섭 문제
+    - 각 bearing의 free space voxel이 다른 bearing의 unknown(shadow) 영역 침범
+    - 예: Bearing A (first_hit=10m)의 vertical 확산이 Bearing B (first_hit=5m)의 unknown 영역(5~10m)을 free로 마킹
+  - **근본 원인**:
+    - Free space 업데이트 시 다른 bearing의 shadow 영역 미검증
+    - Vertical aperture로 인한 voxel 확산이 인접 bearing의 측정 정보 무시
+  - **수정 사항** (`ray_processor.cpp`):
+    - `_compute_first_hit_map()`: 각 bearing의 첫 반사 거리 사전 계산 (O(1) 검증용)
+    - `_voxel_to_sonar_coords()`: Voxel world frame → sonar frame 역변환
+    - `_is_voxel_in_shadow()`: Shadow 영역 검증 (1cm epsilon 포함)
+    - `process_sonar_ray()`: Free space 루프에 shadow 검증 추가
+    - `process_sonar_image()`: Inverse transform 캐싱 및 first-hit map 사전 계산
+  - **효과**:
+    - Unknown 영역이 free space로 잘못 분류되는 문제 완전 해결
+    - 각 bearing의 shadow 영역 올바르게 보호
+    - 성능 영향 최소화 (inverse transform 캐싱, O(1) 검증)
+    - 3D 맵 신뢰도 향상
+  - **파일**: `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 - **No-hit ray의 free space 업데이트 추가** (2025-11-26)
   - **증상**:
     - 반사가 없는 ray (first_hit_idx < 0)는 맵 업데이트를 하지 않음

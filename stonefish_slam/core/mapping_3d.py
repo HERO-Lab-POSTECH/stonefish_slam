@@ -369,6 +369,93 @@ class SonarMapping3D:
         # At r=max_range: w=exp(-λ) (e.g., λ=0.1 → w≈0.90)
         return np.exp(-lambda_decay * range_m / self.max_range)
 
+    def _compute_first_hit_map(self, polar_image):
+        """
+        Compute first hit range for each bearing
+
+        Args:
+            polar_image: 2D numpy array (height x width) with intensity values
+
+        Returns:
+            np.ndarray: shape (n_bearings,), first hit range in meters for each bearing
+                       Returns max_range if no hit found
+        """
+        range_bins, bearing_bins = polar_image.shape
+        first_hit_map = np.full(bearing_bins, self.max_range, dtype=np.float32)
+
+        for b_idx in range(bearing_bins):
+            intensity_profile = polar_image[:, b_idx]
+
+            # Find first pixel above threshold
+            for r_idx, intensity in enumerate(intensity_profile):
+                if intensity > self.intensity_threshold:
+                    # Calculate actual range (FLS image: row 0 = far, row max = near)
+                    first_hit_map[b_idx] = self.max_range - r_idx * self.range_resolution
+                    break
+
+        return first_hit_map
+
+    def _voxel_to_sonar_coords(self, voxel_world, T_world_to_sonar):
+        """
+        Transform voxel world coordinates to sonar frame coordinates
+
+        Args:
+            voxel_world: np.ndarray [x, y, z] in world frame
+            T_world_to_sonar: 4x4 inverse transform matrix (world → sonar)
+
+        Returns:
+            tuple: (bearing_rad, range_m, elevation_rad)
+        """
+        # Transform to sonar frame
+        voxel_world_homo = np.array([voxel_world[0], voxel_world[1], voxel_world[2], 1.0])
+        voxel_sonar = T_world_to_sonar @ voxel_world_homo
+
+        x_s, y_s, z_s = voxel_sonar[:3]
+
+        # Convert to spherical coordinates
+        range_m = np.sqrt(x_s**2 + y_s**2 + z_s**2)
+
+        # Bearing: horizontal angle (atan2(y, x))
+        bearing_rad = np.arctan2(y_s, x_s)
+
+        # Elevation: vertical angle (asin(z / range))
+        elevation_rad = np.arcsin(z_s / range_m) if range_m > 1e-6 else 0.0
+
+        return bearing_rad, range_m, elevation_rad
+
+    def _is_voxel_in_shadow(self, voxel_world, T_world_to_sonar, first_hit_map):
+        """
+        Check if voxel is in shadow region (beyond first hit for its bearing)
+
+        Args:
+            voxel_world: np.ndarray [x, y, z] in world frame
+            T_world_to_sonar: 4x4 inverse transform (world → sonar)
+            first_hit_map: np.ndarray (n_bearings,) first hit ranges
+
+        Returns:
+            bool: True if voxel is in shadow (should skip update)
+        """
+        # Convert voxel to sonar coordinates
+        bearing_rad, range_m, elevation_rad = self._voxel_to_sonar_coords(voxel_world, T_world_to_sonar)
+
+        # Convert bearing to index
+        # bearing_angles range: [-fov/2, +fov/2]
+        # Normalize: bearing_rad to [0, 1] relative to FOV
+        bearing_normalized = (bearing_rad + self.horizontal_fov / 2) / self.horizontal_fov
+        bearing_idx = int(bearing_normalized * len(first_hit_map))
+
+        # Boundary check
+        if bearing_idx < 0 or bearing_idx >= len(first_hit_map):
+            return True  # Out of FOV, treat as shadow
+
+        # Check if voxel range >= first hit range for this bearing
+        first_hit_range = first_hit_map[bearing_idx]
+
+        # Shadow condition: voxel is beyond first reflection
+        # Add small epsilon to avoid numerical issues
+        epsilon = 0.01  # 1cm tolerance
+        return range_m >= (first_hit_range + epsilon)
+
     def propagate_bearing_updates_optimized(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
         """
         Optimized bearing propagation with minimal computation
@@ -473,7 +560,7 @@ class SonarMapping3D:
             voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world
         )
 
-    def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators=None):
+    def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators=None, T_world_to_sonar=None, first_hit_map=None):
         """
         Process a single sonar ray (bearing) and accumulate voxel updates
 
@@ -483,6 +570,8 @@ class SonarMapping3D:
             T_sonar_to_world: 4x4 transform matrix from sonar to world
             voxel_updates: Dictionary to accumulate updates per voxel
             timing_accumulators: Optional dict with 'dda', 'merge', 'occupied' keys for profiling
+            T_world_to_sonar: Optional 4x4 inverse transform (for shadow validation)
+            first_hit_map: Optional np.ndarray (n_bearings,) for shadow validation
         """
         # Find first hit and all high intensity regions after first hit
         first_hit_idx = -1
@@ -615,6 +704,11 @@ class SonarMapping3D:
                     actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
                     if actual_range <= self.min_range:
                         continue  # Skip points at or below min_range
+
+                    # Shadow validation: check if voxel is in another bearing's shadow
+                    if T_world_to_sonar is not None and first_hit_map is not None:
+                        if self._is_voxel_in_shadow(pt_world[:3], T_world_to_sonar, first_hit_map):
+                            continue  # Skip voxel in shadow region
 
                     # DEBUG: Sample first few rays
                     if self.debug_ray_count < 5:
@@ -760,6 +854,12 @@ class SonarMapping3D:
         T_base_to_world = self.pose_msg_to_transform(robot_pose)
         T_sonar_to_world = T_base_to_world @ self.T_sonar_to_base
 
+        # Compute inverse transform for shadow validation (cache for efficiency)
+        T_world_to_sonar = np.linalg.inv(T_sonar_to_world)
+
+        # Compute first-hit map for shadow validation
+        first_hit_map = self._compute_first_hit_map(polar_image)
+
         # Initialize voxel update accumulator for this frame
         # Dictionary to accumulate updates: key -> (sum_updates, count)
         voxel_updates = {}  # Will store accumulated updates per voxel
@@ -826,8 +926,8 @@ class SonarMapping3D:
                 # Clear voxel_updates for this bearing
                 voxel_updates.clear()
 
-                # Process this ray and accumulate updates
-                self.process_sonar_ray(bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators)
+                # Process this ray and accumulate updates (with shadow validation)
+                self.process_sonar_ray(bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators, T_world_to_sonar, first_hit_map)
 
                 # Add to all updates
                 for voxel_key, update_info in voxel_updates.items():
