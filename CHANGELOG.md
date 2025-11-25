@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Code Refactoring: Modularization & Cleanup** (2025-11-25)
+  - **Phase 1: Dead Code 제거**
+    - `mapping_3d.py` reset_map() 메서드에서 초기화되지 않은 csv 속성 참조 제거
+  - **Phase 2: Profiling 통합**
+    - CSV profiling 로직 분리 → `stonefish_slam/utils/profiler.py`
+    - Class: `MappingProfiler` (71 lines)
+    - `mapping_3d.py` 소멸자에서 profiler cleanup 추가
+    - 재사용 가능한 독립 모듈로 전환
+  - **Phase 3: 모듈 분리**
+    - `HierarchicalOctree` → `stonefish_slam/core/octree.py` (359 lines)
+    - `ema_fusion()` → `stonefish_slam/utils/fusion.py` (44 lines)
+    - `mapping_2d.py` EMA 로직 22줄 → 9줄 함수 호출로 단순화 (59% 감소)
+  - **Phase 4-5: Standalone 노드 추가**
+    - `mapping_2d_standalone_node.py` 생성 (SLAM 의존성 없이 독립 실행)
+    - `mapping_3d_test_node.py` → `mapping_3d_standalone_node.py` 네이밍 변경
+    - Launch 파일: `mapping_2d_standalone.launch.py`, `mapping_3d_standalone.launch.py`
+    - ROS2 entry point 등록: `ros2 run stonefish_slam mapping_{2d,3d}_standalone`
+  - **Phase 0: TODO 문서화**
+    - `/workspace/TODO_REVIEW.md` 생성 (14개 TODO 항목 정리)
+    - 향후 개선 사항 트래킹 (pitch 보정, covariance 처리 등)
+  - **빌드 검증**
+    - 모든 Phase 빌드 성공 (4.76초)
+    - C++ 모듈 5개 정상 빌드 (cfar, dda_traversal, octree_mapping, ray_processor, pcl)
+    - Standalone 노드 2개 등록 완료
+  - **효과**:
+    - 코드 재사용성 향상 (profiler, fusion 모듈화)
+    - mapping_2d.py 간결화 (22줄 → 9줄, 59% 감소)
+    - SLAM-독립 노드 제공 (테스트 및 단독 사용 가능)
+    - Git 히스토리 보존 (git mv 사용)
+
 ### Added
 
 - **P3.1/P3.2 Profiling Infrastructure** (2025-11-25)

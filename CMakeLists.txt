@@ -93,9 +93,15 @@ install(PROGRAMS
 )
 
 install(PROGRAMS
-  stonefish_slam/nodes/mapping_3d_test_node.py
+  stonefish_slam/nodes/mapping_3d_standalone_node.py
   DESTINATION lib/${PROJECT_NAME}
-  RENAME mapping_3d_test
+  RENAME mapping_3d_standalone
+)
+
+install(PROGRAMS
+  stonefish_slam/nodes/mapping_2d_standalone_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME mapping_2d_standalone
 )
 
 # Build pybind11 modules

@@ -28,6 +28,7 @@ import cv2
 import logging
 from typing import Optional, Tuple, List, Dict, Any, Union
 import gtsam
+from stonefish_slam.utils.fusion import ema_fusion
 from scipy.interpolate import interp1d
 from rclpy.duration import Duration
 
@@ -639,18 +640,14 @@ class Mapping2D:
                 map_flat = self.global_map_accum.ravel()
                 count_flat = self.global_map_count.ravel()
 
-                # Exponential Moving Average (alpha=0.3)
-                # Balances noise reduction (past data) with new information
-                alpha = 0.3  # Fusion weight (0.1-0.3 range, 0.3 = ~3-4 frames effective)
+                # Apply Exponential Moving Average fusion (alpha=0.3, ~3-4 frames effective)
                 old_intensities = map_flat[linear_indices]
-
-                # First observation: use new value directly (avoid dark initialization)
-                # Subsequent observations: blend with EMA
-                first_observation_mask = (old_intensities == 0)
-                new_intensities = np.where(
-                    first_observation_mask,
-                    intensities_valid,  # First time: use new value as-is
-                    alpha * intensities_valid + (1.0 - alpha) * old_intensities  # EMA fusion
+                new_intensities = ema_fusion(
+                    old_map=old_intensities,
+                    new_data=intensities_valid,
+                    observation_count=count_flat[linear_indices],
+                    alpha=0.3,
+                    threshold=0.0
                 )
 
                 map_flat[linear_indices] = new_intensities
