@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Sensors 폴더 재구성 - core/utils로 이동** (2025-11-25)
+  - **파일 이동** (논리적 구조 개선):
+    - `sensors/CFAR.py` → `core/cfar.py` (feature extraction 핵심 알고리즘)
+    - `sensors/sonar.py` → `utils/sonar.py` (하드웨어 속성 유틸리티)
+  - **미사용 코드 제거** (56줄):
+    - `OculusFireMsg` 클래스 완전 제거 (실제 사용처 없음)
+    - `OculusProperty.fire_msg` 속성 제거
+    - `OculusProperty.configure()`: fire_msg 관련 코드 제거
+    - `OculusProperty.__str__()`: fire_msg 출력 제거
+  - **Import 경로 업데이트** (6개 파일):
+    - core/cfar.py, core/slam.py, core/slam_objects.py
+    - core/feature_extraction.py, core/__init__.py, utils/__init__.py
+  - **효과**:
+    - 폴더 구조 논리화 (알고리즘→core, 유틸리티→utils)
+    - sensors 폴더 완전 제거 (역할 불명확 해소)
+    - 미사용 코드 56줄 제거
+    - Git history 보존 (`git mv`)
+
 - **Nodes 디렉토리 정리 및 토픽명 일관성 개선** (2025-11-25)
   - **삭제된 파일** (1개):
     - `nodes/mapping_3d_test_node.py` (중복, CMakeLists.txt 설치 항목 없음)
