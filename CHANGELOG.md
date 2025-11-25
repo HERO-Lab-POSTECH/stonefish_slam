@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **No-hit ray의 free space 업데이트 추가** (2025-11-26)
+  - **증상**:
+    - 반사가 없는 ray (first_hit_idx < 0)는 맵 업데이트를 하지 않음
+    - 빈 공간에 대한 정보가 누락되어 carving 성능 저하
+  - **수정 사항** (`ray_processor.cpp`):
+    - Line 260-275: No hit일 때 `range_to_first_hit = config_.max_range` 설정
+    - Free space 처리 if문 제거 (항상 실행되도록 변경)
+    - Occupied 처리는 `first_hit_idx >= 0`일 때만 실행
+  - **효과**:
+    - No-hit ray도 전체 range를 free space로 업데이트
+    - 시뮬레이터 환경에서 확실한 free space carving 수행
+    - 맵 품질 향상 (빈 영역 명확히 표시)
+  - **파일**: `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 - **Vertical FOV 내부에 free space가 생기는 문제 해결** (2025-11-26)
   - **증상**:
     - 3D mapping 시 vertical FOV 안쪽에 free space voxel이 생성됨

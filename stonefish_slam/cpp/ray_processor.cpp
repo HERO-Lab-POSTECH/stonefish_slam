@@ -257,13 +257,25 @@ void RayProcessor::process_single_ray_internal(
     // 1. Find first hit only (ignore anything after first reflection)
     int first_hit_idx = find_first_hit(intensity_profile);
 
-    // No hit found: skip this ray (no map update)
+    // 2. Free space processing (DDA traversal to first hit or max range)
+    double range_to_first_hit;
     if (first_hit_idx < 0) {
-        return;
+        // No reflection: free space up to max range
+        range_to_first_hit = config_.max_range;
+    } else {
+        // Normal case: free space up to first hit
+        // Range to first hit (FLS convention: row 0 = far, row max = near)
+        // CRITICAL FIX: Use (first_hit_idx + 1) to prevent free space from overlapping
+        // with occupied bin. DDA includes end voxel, so free space must end BEFORE
+        // occupied bin's far boundary: [max_range - (idx+1)*res, max_range - idx*res]
+        range_to_first_hit = config_.max_range - (first_hit_idx + 1) * config_.range_resolution;
+        if (range_to_first_hit < config_.min_range) {
+            range_to_first_hit = config_.min_range;
+        }
     }
 
-    // 2. Free space processing (DDA traversal to first hit)
-    if (first_hit_idx > 0) {
+    // Always perform free space processing (even if no hit found)
+    {
         // Compute bearing angle (use num_bearings, not intensity_profile.size())
         double bearing_angle = compute_bearing_angle(bearing_idx, num_bearings);
 
@@ -273,15 +285,6 @@ void RayProcessor::process_single_ray_internal(
         // Transform to world frame
         Eigen::Vector3d ray_direction_world = T_sonar_to_world.block<3, 3>(0, 0) * ray_direction_sonar;
         ray_direction_world.normalize();
-
-        // Range to first hit (FLS convention: row 0 = far, row max = near)
-        // CRITICAL FIX: Use (first_hit_idx + 1) to prevent free space from overlapping
-        // with occupied bin. DDA includes end voxel, so free space must end BEFORE
-        // occupied bin's far boundary: [max_range - (idx+1)*res, max_range - idx*res]
-        double range_to_first_hit = config_.max_range - (first_hit_idx + 1) * config_.range_resolution;
-        if (range_to_first_hit < config_.min_range) {
-            range_to_first_hit = config_.min_range;
-        }
 
         // Compute vertical steps for free space (full coverage)
         // CRITICAL FIX: Use range_to_first_hit (not mid_range) to match occupied vertical sampling
@@ -298,7 +301,8 @@ void RayProcessor::process_single_ray_internal(
         const double cos_bear = std::cos(bearing_angle);
         const double sin_bear = std::sin(bearing_angle);
         const double bearing_resolution_effective = config_.bearing_resolution * config_.bearing_step;
-        const double bearing_half_width = bearing_resolution_effective / 2.0;
+        // Use 0.75x multiplier for 50% overlap between adjacent ray cones (improves free space coverage)
+        const double bearing_half_width = bearing_resolution_effective * 0.75;
         const double cos_half_width = std::cos(bearing_half_width);
         const Eigen::Matrix3d R_world_to_sonar = T_sonar_to_world.block<3, 3>(0, 0).transpose();
 
@@ -369,18 +373,20 @@ void RayProcessor::process_single_ray_internal(
     // 3. Occupied space processing: all high intensity after first hit
     // After first reflection: only update high intensity (> threshold) as occupied
     // Low intensity regions after first hit = shadow/unknown (NO UPDATE)
-    std::vector<int> hit_indices;
-    for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
-        if (intensity_profile[i] > config_.intensity_threshold) {
-            hit_indices.push_back(static_cast<int>(i));
+    if (first_hit_idx >= 0) {
+        std::vector<int> hit_indices;
+        for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
+            if (intensity_profile[i] > config_.intensity_threshold) {
+                hit_indices.push_back(static_cast<int>(i));
+            }
+            // Low intensity (≤ threshold) after first hit: NO UPDATE (shadow region)
         }
-        // Low intensity (≤ threshold) after first hit: NO UPDATE (shadow region)
-    }
 
-    if (!hit_indices.empty()) {
-        double bearing_angle = compute_bearing_angle(bearing_idx, num_bearings);
-        process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,
-                                        sonar_origin_world, voxel_updates);
+        if (!hit_indices.empty()) {
+            double bearing_angle = compute_bearing_angle(bearing_idx, num_bearings);
+            process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,
+                                            sonar_origin_world, voxel_updates);
+        }
     }
 }
 
