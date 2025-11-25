@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Config Restructuring: 체계적 구조 개선** (2025-11-25)
+  - **Phase 2: 미사용 파일 삭제**
+    - kalman.yaml 제거 (미사용, 149줄)
+    - mapping.yaml 제거 (deprecated, 33줄)
+    - test_mapping.yaml 제거 (임시 파일, 10줄)
+    - slam.yaml test_node 섹션 제거 (중복)
+    - **효과**: 7개 → 4개 파일, slam.yaml 27% 감소
+  - **Phase 3: 파라미터 통합 및 네이밍 개선**
+    - 하드코딩 파라미터 제거 (5개): bearing_step, use_cpp_backend, use_dda_traversal, enable_propagation, enable_gaussian_weighting
+    - SLAM 노이즈 파라미터 명명 개선:
+      - `prior_sigmas` → `slam_prior_noise`
+      - `odom_sigmas` → `slam_odom_noise`
+      - `icp_odom_sigmas` → `slam_icp_noise`
+    - 해상도 파라미터 명확화 (3가지 타입):
+      - `map_resolution` → `map_2d_resolution` (2D 그리드)
+      - `voxel_resolution` → `map_3d_voxel_size` (3D 복셀)
+      - `point_resolution` → `point_downsample_resolution` (포인트클라우드)
+    - Sonar 파라미터 통일: `range_min/max` → `min_range/max_range`
+  - **Phase 4: Launch 및 노드 업데이트**
+    - Core 모듈: slam_ros.py, feature_extraction_sim.py
+    - 노드: mapping_2d_standalone, mapping_3d_standalone
+    - Launch: slam_sim_test.launch.py 파라미터 오버라이드 수정
+  - **Phase 5: 검증**
+    - 빌드 성공 (4.57초)
+    - Config 파일 4개 정상 설치
+    - YAML 문법 검증 통과
+  - **최종 효과**:
+    - Config 파일: 7 → 4개 (43% 감소)
+    - slam.yaml: 117 → 78줄 (33% 감소)
+    - 파라미터 명명 직관적 개선 (9개)
+    - 불필요 파라미터 제거 (5개)
+    - 코드 유지보수성 향상
+
 - **Code Refactoring: Modularization & Cleanup** (2025-11-25)
   - **Phase 1: Dead Code 제거**
     - `mapping_3d.py` reset_map() 메서드에서 초기화되지 않은 csv 속성 참조 제거
