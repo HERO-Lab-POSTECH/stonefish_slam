@@ -26,7 +26,7 @@ class Mapping2DStandaloneNode(Node):
     """2D Mapping Standalone Node - Time-synchronized sonar + odometry"""
 
     def __init__(self):
-        super().__init__('mapping_2d_standalone_node')
+        super().__init__('slam_node')
 
         # Declare parameters
         self.declare_parameter('frame_interval', 1)

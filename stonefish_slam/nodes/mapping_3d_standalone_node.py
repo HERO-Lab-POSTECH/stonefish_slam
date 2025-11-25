@@ -26,10 +26,10 @@ class Mapping3DStandaloneNode(Node):
     """3D Mapping Standalone Node - Time-synchronized sonar + odometry processing"""
 
     def __init__(self):
-        super().__init__('mapping_3d_standalone_node')
+        super().__init__('slam_node')  # Use same namespace as slam.yaml
 
         # Declare parameters
-        self.declare_parameter('resolution', 0.3)
+        self.declare_parameter('resolution', 0.2)  # Test 3: 0.3 → 0.2
         self.declare_parameter('frame_interval', 10)
         self.declare_parameter('odom_topic', '/bluerov2/odometry')
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
@@ -54,7 +54,7 @@ class Mapping3DStandaloneNode(Node):
         self.declare_parameter('mapping_3d.adaptive_update', True)
         self.declare_parameter('mapping_3d.adaptive_threshold', 0.5)
         self.declare_parameter('mapping_3d.adaptive_max_ratio', 0.5)
-        self.declare_parameter('mapping_3d.use_cpp_backend', True)
+        self.declare_parameter('mapping_3d.use_cpp_backend', False)  # Test 2: Python backend for adaptive test
         self.declare_parameter('mapping_3d.enable_propagation', False)
         self.declare_parameter('mapping_3d.use_range_weighting', True)
         self.declare_parameter('mapping_3d.lambda_decay', 0.1)
@@ -122,7 +122,9 @@ class Mapping3DStandaloneNode(Node):
         self.mapper_3d = SonarMapping3D(config)
         self.get_logger().info(
             f'Mapper initialized: resolution={resolution}m, '
-            f'max_range={config["max_range"]}m, tilt={config["sonar_tilt_deg"]}°'
+            f'sonar_tilt={config["sonar_tilt_deg"]}°, '
+            f'max_range={config["max_range"]}m, '
+            f'adaptive_max_ratio={config["adaptive_max_ratio"]}'
         )
 
         # Frame counter
@@ -182,10 +184,22 @@ class Mapping3DStandaloneNode(Node):
 
             if pc_msg.width > 0:
                 self.pc_pub.publish(pc_msg)
-                self.get_logger().info(
-                    f'Published {pc_msg.width} points, '
-                    f'{self.mapper_3d.get_voxel_count()} total voxels'
-                )
+
+                # DEBUG: Check voxel z range vs robot z
+                result = self.mapper_3d.get_point_cloud(include_free=False)
+                if len(result['points']) > 0:
+                    z_min = result['points'][:, 2].min()
+                    z_max = result['points'][:, 2].max()
+                    robot_z = odom_msg.pose.pose.position.z
+                    self.get_logger().info(
+                        f'Published {pc_msg.width} points, {self.mapper_3d.get_voxel_count()} total voxels | '
+                        f'Robot z={robot_z:.2f}m, Voxel z=[{z_min:.2f}, {z_max:.2f}]m'
+                    )
+                else:
+                    self.get_logger().info(
+                        f'Published {pc_msg.width} points, '
+                        f'{self.mapper_3d.get_voxel_count()} total voxels'
+                    )
             else:
                 self.get_logger().warn(
                     f'Empty point cloud (frame #{self.frame_count})'

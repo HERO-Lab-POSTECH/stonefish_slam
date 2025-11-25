@@ -9,7 +9,7 @@ slam_node:
       image_width: 918          # Number of bearings
       image_height: 512         # Number of range bins
       sonar_position: [0.25, 0.0, 0.08]  # Sonar position relative to base_link (FRD)
-      sonar_tilt_deg: 30.0      # Sonar tilt angle (degrees, downward) - UNIFIED
+      sonar_tilt_deg: 90.0      # Sonar tilt angle (degrees, downward) - UNIFIED
 
     # ==================== 2D Mapping Configuration ====================
     mapping_2d:
@@ -20,17 +20,18 @@ slam_node:
 
     # ==================== 3D Mapping Configuration ====================
     mapping_3d:
-      map_3d_voxel_size: 0.5    # 3D octree voxel size (meters)
+      map_3d_voxel_size: 0.2    # 3D octree voxel size (meters) - Test 3: 0.3 → 0.2
       min_probability: 0.6      # minimum probability for occupied voxel
-      log_odds_occupied: 1.5    # log-odds increment for occupied
-      log_odds_free: -2.0       # log-odds decrement for free space
-      log_odds_min: -10.0       # minimum log-odds (clamping)
-      log_odds_max: 10.0        # maximum log-odds (clamping)
+      log_odds_occupied: 3.0    # log-odds increment for occupied - Test 4: 1.0 → 3.0 (강화)
+      log_odds_free: -1.0       # log-odds decrement for free space - Test 4: -3.0 → -1.0 (약화)
+      log_odds_min: -15.0       # minimum log-odds (clamping) - Test 2: -10.0 → -15.0
+      log_odds_max: 20.0        # maximum log-odds (clamping) - Test 2: 10.0 → 20.0
       adaptive_update: true     # enable adaptive Bayesian update
       adaptive_threshold: 0.5   # probability threshold for protection
-      adaptive_max_ratio: 0.5   # max update ratio for protected voxels
+      adaptive_max_ratio: 0.3   # max update ratio for protected voxels - Test 2: 0.5 → 0.3
       use_range_weighting: true # use exponential range weighting
       lambda_decay: 0.1         # decay factor for range weighting
+      use_cpp_backend: false    # Test 2: C++ backend 비활성화 (adaptive test)
 
     # ==================== SLAM Parameters ====================
     # how often to add keyframes, this can be varied but between 1 and 4 meters is best

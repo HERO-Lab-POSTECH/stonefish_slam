@@ -16,14 +16,14 @@ def generate_launch_description():
         Node(
             package='stonefish_slam',
             executable='mapping_3d_standalone',
-            name='mapping_3d_standalone_node',
+            name='slam_node',  # Match namespace in slam.yaml
             output='screen',
             parameters=[
-                str(config_dir / 'slam.yaml'),  # Load slam.yaml for sonar/mapping_3d params
+                str(config_dir / 'slam.yaml'),  # Load slam.yaml for all params
                 {
-                    # Standalone-specific overrides
-                    'resolution': 0.1,
-                    'frame_interval': 15,
+                    # Standalone-specific settings only
+                    'resolution': 0.2,  # Test 3: 0.3 → 0.2
+                    'frame_interval': 10,
                     'odom_topic': '/bluerov2/odometry',
                     'sonar_topic': '/bluerov2/fls/image',
                 }

@@ -70,6 +70,16 @@ class SonarMapping3D:
             self.sonar_tilt
         )
 
+        # DEBUG: Print transform info (with flush)
+        import sys
+        print(f"[DEBUG] Sonar tilt: {np.degrees(self.sonar_tilt):.1f}° (rad: {self.sonar_tilt:.3f})", flush=True)
+        print(f"[DEBUG] Sonar position (base_link): {self.sonar_position}", flush=True)
+        print(f"[DEBUG] T_sonar_to_base rotation:\n{self.T_sonar_to_base[:3, :3]}", flush=True)
+        sys.stdout.flush()
+
+        # Debug flag for ray sampling
+        self.debug_ray_count = 0
+
         # Pre-compute angles for efficiency
         self.bearing_angles = np.linspace(
             -self.horizontal_fov/2,
@@ -591,6 +601,13 @@ class SonarMapping3D:
                     if actual_range <= self.min_range:
                         continue  # Skip points at or below min_range
 
+                    # DEBUG: Sample first few rays
+                    if self.debug_ray_count < 5:
+                        print(f"[RAY DEBUG] v_angle={np.degrees(vertical_angle):.1f}°, "
+                              f"sonar=[{x_sonar:.2f}, {y_sonar:.2f}, {z_sonar:.2f}], "
+                              f"world=[{pt_world[0]:.2f}, {pt_world[1]:.2f}, {pt_world[2]:.2f}]", flush=True)
+                        self.debug_ray_count += 1
+
                     # Get voxel key and accumulate update
                     if self.use_cpp_backend:
                         # Use resolution-based quantization for C++ backend
@@ -874,8 +891,9 @@ class SonarMapping3D:
                     # Calculate average update
                     avg_update = update_info['sum'] / update_info['count']
 
-                    # Apply update (adaptive only if positive log-odds = occupied)
-                    adaptive = (avg_update > 0)
+                    # Apply update (adaptive protection for both occupied AND free)
+                    # CRITICAL FIX: Free space should also be protected from rapid changes
+                    adaptive = True  # Always use adaptive protection
                     self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
                     num_voxels_updated += 1
 

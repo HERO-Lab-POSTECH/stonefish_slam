@@ -137,15 +137,20 @@ class HierarchicalOctree:
         """
         point = np.array(point[:3], dtype=np.float64)  # Ensure 3D
 
-        # Adaptive update logic (same as SimpleOctree)
-        if adaptive and log_odds_update > 0:
+        # Adaptive update logic (unidirectional protection: Free → Occupied only)
+        # Rationale: Strongly protect against false positives (free→occupied)
+        #            but allow occupied→free updates for genuine free space
+        if adaptive:
             current_log_odds = self.query_voxel(point)
             current_prob = 1.0 / (1.0 + np.exp(-current_log_odds))
 
-            if current_prob <= self.adaptive_threshold:
-                # Linear scaling: reduce update for free space voxels
-                update_scale = (current_prob / self.adaptive_threshold) * self.adaptive_max_ratio
-                log_odds_update *= update_scale
+            # Only protect Free → Occupied direction (prevent false positives)
+            if log_odds_update > 0:
+                # Occupied update: protect free voxels
+                if current_prob <= self.adaptive_threshold:
+                    update_scale = (current_prob / self.adaptive_threshold) * self.adaptive_max_ratio
+                    log_odds_update *= update_scale
+            # No protection for Occupied → Free (allow genuine free space updates)
 
         # Update recursively
         self._update_recursive(self.root, point, log_odds_update, depth=0)
