@@ -1583,9 +1583,9 @@ class SonarMapping3D:
                 except Exception:
                     pass
 
-            if self.use_cpp_octree and hasattr(self.octree, 'get_map_stats'):
+            if self.use_cpp_backend and hasattr(self.cpp_octree, 'get_map_stats'):
                 try:
-                    map_stats = self.octree.get_map_stats()
+                    map_stats = self.cpp_octree.get_map_stats()
                     map_voxels = map_stats.num_leaf_nodes
                     memory_mb = map_stats.memory_mb
                 except Exception:
