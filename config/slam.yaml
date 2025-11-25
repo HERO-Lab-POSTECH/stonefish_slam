@@ -82,3 +82,36 @@ slam_node:
     # Mapping enable flags
     enable_2d_mapping: false
     enable_3d_mapping: true
+
+# ==================== Test Node Configuration ====================
+mapping_3d_test_node:
+  ros__parameters:
+    # Sonar Hardware (same as slam_node)
+    sonar:
+      max_range: 20.0
+      min_range: 0.5
+      horizontal_fov: 130.0
+      vertical_aperture: 20.0
+      image_width: 918
+      image_height: 512
+      sonar_position: [0.25, 0.0, 0.08]
+      sonar_tilt_deg: 30.0
+
+    # 3D Mapping (same as slam_node)
+    mapping_3d:
+      voxel_resolution: 0.1
+      min_probability: 0.6
+      log_odds_occupied: 1.5
+      log_odds_free: -2.0
+      log_odds_min: -10.0
+      log_odds_max: 10.0
+      adaptive_update: true
+      adaptive_threshold: 0.5
+      adaptive_max_ratio: 0.5
+      use_cpp_backend: true
+      enable_propagation: false
+      use_range_weighting: true
+      lambda_decay: 0.1
+      enable_gaussian_weighting: false
+      use_dda_traversal: true
+      bearing_step: 2
