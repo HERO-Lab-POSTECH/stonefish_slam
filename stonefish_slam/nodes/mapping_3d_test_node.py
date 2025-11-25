@@ -80,6 +80,8 @@ class MappingTestNode(Node):
 
         # Build config from parameters (matching slam_ros.py structure)
         config = {
+            # Node-level parameters
+            'frame_interval': self.frame_interval,
             # Sonar hardware (from sonar.* parameters)
             'max_range': self.get_parameter('sonar.max_range').value,
             'min_range': self.get_parameter('sonar.min_range').value,

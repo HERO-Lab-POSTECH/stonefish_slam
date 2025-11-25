@@ -554,8 +554,7 @@ class SonarMapping3D:
         # CSV profiling infrastructure (P3.1/P3.2)
         self.csv_file = None
         self.csv_writer = None
-        self.profiling_interval = config.get('profiling_interval', 10)  # Configurable interval
-        self.csv_sample_interval = self.profiling_interval  # Use same interval for CSV
+        self.csv_sample_interval = config.get('frame_interval', 10)  # Use frame_interval
         self.csv_path = '/tmp/mapping_profiling.csv'
 
         # Gaussian weighting settings for vertical aperture
@@ -1272,13 +1271,13 @@ class SonarMapping3D:
         # Increment frame counter
         self.frame_count += 1
 
-        # Print detailed profiling statistics every profiling_interval frames
-        if self.profiling_enabled and self.frame_count % self.profiling_interval == 0:
-            if len(self.profiling_data['frame_total']) >= self.profiling_interval:
+        # Print detailed profiling statistics every csv_sample_interval frames
+        if self.profiling_enabled and self.frame_count % self.csv_sample_interval == 0:
+            if len(self.profiling_data['frame_total']) >= self.csv_sample_interval:
                 self._print_profiling_stats()
-                # Keep only last profiling_interval frames
+                # Keep only last csv_sample_interval frames
                 for key in self.profiling_data:
-                    self.profiling_data[key] = self.profiling_data[key][-self.profiling_interval:]
+                    self.profiling_data[key] = self.profiling_data[key][-self.csv_sample_interval:]
 
         # Performance profiling statistics (legacy - keep for compatibility)
         if self.enable_profiling:
