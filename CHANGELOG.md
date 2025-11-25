@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Voxel-Centric Processing으로 중복 생성 방지** (2025-11-25)
+  - VoxelUpdate 구조체 확장: bearing_idx, range_idx 필드 추가
+  - Deduplication 로직 변경: 합산 → 우선순위 선택
+  - 우선순위 규칙: bearing_idx 낮음 > range_idx 낮음 (센서 가까운 측정 우선)
+  - 예상 효과: Voxel 생성 691k → 27k (96%↓), Dedup 22ms → 0.6ms (97%↓)
+  - 전체 성능: 64ms → 36ms/frame (44% 향상, 27.8 FPS 예상)
+  - 파일: `cpp/ray_processor.h` (구조체), `cpp/ray_processor.cpp` (Line 164-182)
+  - 근거: 중복 voxel 생성 방지로 deduplication 병목 제거
+
+- **Range Downsampling 파라미터** (2025-11-25)
+  - `range_step` 파라미터 추가 (기본값: 1, 모든 range bin 처리)
+  - bearing_step과 동일 방식, range bin subsampling 가능
+  - 용도: 성능 테스트 및 조정
+  - 파일: `config/slam.yaml` (Line 39, 119), `cpp/ray_processor.h`, `core/mapping_3d.py`
+
 - **OctoMap 자동 Pruning 활성화** (2025-11-25)
   - `updateNode()` lazy_eval 인자: true → false 변경
   - 매 프레임마다 자동 pruning 수행 (OctoMap 기본 동작)

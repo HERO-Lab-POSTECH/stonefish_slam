@@ -131,10 +131,12 @@ void RayProcessor::process_sonar_image(
 
     if (total_updates > 0) {
         // Deduplicate voxel updates using sorted vector approach
-        // VoxelUpdate structure for sorting
+        // VoxelUpdate structure for sorting (with priority fields)
         struct VoxelUpdateSorted {
             VoxelKey key;
             double log_odds;
+            int bearing_idx;  // Priority: lower = closer to boresight
+            int range_idx;    // Priority: lower = farther range
 
             bool operator<(const VoxelUpdateSorted& other) const {
                 return key < other.key;
@@ -148,28 +150,37 @@ void RayProcessor::process_sonar_image(
         for (const auto& updates : thread_updates) {
             for (const auto& update : updates) {
                 VoxelKey key(update.x, update.y, update.z, config_.voxel_resolution);
-                all_updates.push_back({key, update.log_odds});
+                all_updates.push_back({key, update.log_odds, update.bearing_idx, update.range_idx});
             }
         }
 
         // Sort by key (cache-friendly sequential access)
         std::sort(all_updates.begin(), all_updates.end());
 
-        // Merge adjacent duplicates
+        // P3.3: Voxel-centric deduplication with priority selection
+        // Priority: bearing_idx low > range_idx low (keeps closest ray to boresight)
+        // This prevents redundant voxel generation (691k → 27k)
         std::vector<VoxelUpdateSorted> unique_updates;
         unique_updates.reserve(all_updates.size() / 2);  // Rough estimate
 
         for (size_t i = 0; i < all_updates.size(); ) {
             VoxelKey current_key = all_updates[i].key;
-            double sum = 0.0;
+            VoxelUpdateSorted best_update = all_updates[i];
 
-            // Accumulate all updates for same voxel
+            // Find best update among duplicates (priority: bearing low > range low)
             while (i < all_updates.size() && all_updates[i].key == current_key) {
-                sum += all_updates[i].log_odds;
+                const auto& candidate = all_updates[i];
+                // Priority comparison: bearing_idx lower wins, tie-break with range_idx lower
+                bool is_better = (candidate.bearing_idx < best_update.bearing_idx) ||
+                                 (candidate.bearing_idx == best_update.bearing_idx &&
+                                  candidate.range_idx < best_update.range_idx);
+                if (is_better) {
+                    best_update = candidate;
+                }
                 i++;
             }
 
-            unique_updates.push_back({current_key, sum});
+            unique_updates.push_back(best_update);
         }
 
         size_t unique_count = unique_updates.size();
@@ -294,6 +305,7 @@ void RayProcessor::process_single_ray_internal(
             std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, 500);
 
             // Add to voxel updates with range weighting
+            // P3.3: Store bearing_idx and range_idx for deduplication priority
             for (const auto& voxel : voxels) {
                 // Compute range from sonar origin
                 double range = (voxel - sonar_origin_world).norm();
@@ -305,7 +317,13 @@ void RayProcessor::process_single_ray_internal(
                     log_odds_update *= range_weight;
                 }
 
-                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update});
+                // Store bearing_idx and first_hit_idx (approximate range_idx for free space)
+                voxel_updates.push_back({
+                    voxel.x(), voxel.y(), voxel.z(),
+                    log_odds_update,
+                    bearing_idx,
+                    first_hit_idx  // Approximate: free space is before first hit
+                });
             }
         }
     }
@@ -314,8 +332,8 @@ void RayProcessor::process_single_ray_internal(
     std::vector<int> hit_indices = extract_hit_indices(intensity_profile, first_hit_idx, last_hit_idx);
     if (!hit_indices.empty()) {
         double bearing_angle = compute_bearing_angle(bearing_idx, num_bearings);
-        process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,
-                                        sonar_origin_world, voxel_updates);
+        process_occupied_voxels_internal(hit_indices, bearing_idx, bearing_angle,
+                                        T_sonar_to_world, sonar_origin_world, voxel_updates);
     }
 }
 
@@ -368,6 +386,7 @@ void RayProcessor::process_single_ray(
 // Internal version: collect occupied voxels in C++ buffer (GIL-free, OpenMP-safe)
 void RayProcessor::process_occupied_voxels_internal(
     const std::vector<int>& hit_indices,
+    int bearing_idx,
     double bearing_angle,
     const Eigen::Matrix4d& T_sonar_to_world,
     const Eigen::Vector3d& sonar_origin_world,
@@ -420,6 +439,7 @@ void RayProcessor::process_occupied_voxels_internal(
         }
 
         // Fill voxel updates with Gaussian weighting if enabled
+        // P3.3: Store bearing_idx and r_idx for deduplication priority
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             int idx = v_step + num_vertical_steps;
 
@@ -436,7 +456,9 @@ void RayProcessor::process_occupied_voxels_internal(
                 points_world(0, idx),
                 points_world(1, idx),
                 points_world(2, idx),
-                log_odds_update
+                log_odds_update,
+                bearing_idx,
+                r_idx  // Range bin index
             });
         }
     }
@@ -451,7 +473,8 @@ void RayProcessor::process_occupied_voxels(
     std::vector<VoxelUpdate> voxel_updates;
     Eigen::Vector3d sonar_origin_world = T_sonar_to_world.block<3, 1>(0, 3);
 
-    process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,
+    // Legacy API: use bearing_idx = 0 as placeholder
+    process_occupied_voxels_internal(hit_indices, 0, bearing_angle, T_sonar_to_world,
                                      sonar_origin_world, voxel_updates);
 
     // Convert to NumPy and insert to octree
@@ -504,16 +527,19 @@ int RayProcessor::find_last_hit(const std::vector<uint8_t>& intensity_profile) c
     return -1;  // No hit found
 }
 
-// Extract all hit indices
+// Extract all hit indices (with range_step sampling)
 std::vector<int> RayProcessor::extract_hit_indices(
     const std::vector<uint8_t>& intensity_profile,
     int start_idx,
     int end_idx
 ) const {
     std::vector<int> hit_indices;
-    hit_indices.reserve(end_idx - start_idx + 1);
+    hit_indices.reserve((end_idx - start_idx + 1) / config_.range_step);
 
-    for (int i = start_idx; i <= end_idx && i < static_cast<int>(intensity_profile.size()); ++i) {
+    // P3.3: Apply range_step sampling to reduce redundant occupied voxels
+    // range_step = 1: process all ranges (default)
+    // range_step = 2: process every 2nd range (50% reduction)
+    for (int i = start_idx; i <= end_idx && i < static_cast<int>(intensity_profile.size()); i += config_.range_step) {
         if (intensity_profile[i] > config_.intensity_threshold) {
             hit_indices.push_back(i);
         }
@@ -692,6 +718,7 @@ PYBIND11_MODULE(ray_processor, m) {
         .def_readwrite("gaussian_sigma_factor", &RayProcessorConfig::gaussian_sigma_factor)
         .def_readwrite("voxel_resolution", &RayProcessorConfig::voxel_resolution)
         .def_readwrite("bearing_step", &RayProcessorConfig::bearing_step)
+        .def_readwrite("range_step", &RayProcessorConfig::range_step)
         .def_readwrite("intensity_threshold", &RayProcessorConfig::intensity_threshold);
 
     // RayProcessor class

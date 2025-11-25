@@ -479,6 +479,7 @@ class SonarMapping3D:
                 ray_config.enable_gaussian_weighting = config['enable_gaussian_weighting']
                 ray_config.voxel_resolution = self.voxel_resolution
                 ray_config.bearing_step = config['bearing_step']
+                ray_config.range_step = config.get('range_step', 1)  # Default: 1 (all ranges)
                 ray_config.intensity_threshold = self.intensity_threshold
 
                 # Store bearing_step for profiling
@@ -486,7 +487,7 @@ class SonarMapping3D:
 
                 # Create RayProcessor with shared octree
                 self.cpp_ray_processor = RayProcessor(self.cpp_octree, ray_config)
-                print(f"[INFO] C++ RayProcessor initialized (OpenMP enabled, bearing_step={ray_config.bearing_step})")
+                print(f"[INFO] C++ RayProcessor initialized (OpenMP enabled, bearing_step={ray_config.bearing_step}, range_step={ray_config.range_step})")
             except Exception as e:
                 print(f"[WARNING] Failed to initialize C++ RayProcessor: {e}")
                 self.use_cpp_ray_processor = False

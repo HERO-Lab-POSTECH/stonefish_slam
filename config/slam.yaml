@@ -36,6 +36,7 @@ slam_node:
       enable_gaussian_weighting: false  # use Gaussian intensity weighting
       use_dda_traversal: true   # use DDA for ray traversal
       bearing_step: 2           # bearing sampling step
+      range_step: 1             # range sampling step (1 = all ranges)
 
     # ==================== SLAM Parameters ====================
     # how often to add keyframes, this can be varied but between 1 and 4 meters is best
@@ -115,3 +116,4 @@ mapping_3d_test_node:
       enable_gaussian_weighting: false
       use_dda_traversal: true
       bearing_step: 2
+      range_step: 1             # range sampling step (1 = all ranges)
