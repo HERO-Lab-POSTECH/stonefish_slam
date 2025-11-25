@@ -96,8 +96,8 @@ class Mapping2DStandaloneNode(Node):
         )
         self.ts.registerCallback(self.sync_callback)
 
-        # Publisher
-        self.map_pub = self.create_publisher(OccupancyGrid, '/map_2d', 10)
+        # Publisher (Image for now, OccupancyGrid conversion TODO)
+        self.map_pub = self.create_publisher(Image, '/map_2d', 10)
 
         self.get_logger().info('2D Mapping Standalone Node ready')
 
@@ -129,15 +129,16 @@ class Mapping2DStandaloneNode(Node):
             # Add keyframe with unique key
             self.mapper_2d.add_keyframe(self.frame_count, pose_2d, sonar_image)
 
-            # Generate and publish map
-            self.mapper_2d.generate_map()
-            grid_msg = self.mapper_2d.get_occupancy_grid_msg(
-                frame_id='world_ned',
-                stamp=self.get_clock().now().to_msg()
-            )
+            # Update global map (standalone mode - no SLAM integration)
+            self.mapper_2d.update_global_map()
 
-            if grid_msg:
-                self.map_pub.publish(grid_msg)
+            # Get map image and publish as Image message
+            map_image = self.mapper_2d.get_map_image()
+            if map_image is not None:
+                map_msg = self.bridge.cv2_to_imgmsg(map_image, encoding='mono8')
+                map_msg.header.stamp = self.get_clock().now().to_msg()
+                map_msg.header.frame_id = 'world_ned'
+                self.map_pub.publish(map_msg)
                 self.get_logger().info(f'Published 2D map (frame #{self.frame_count})')
 
         except Exception as e:
