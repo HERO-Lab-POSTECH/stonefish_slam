@@ -103,7 +103,7 @@ class KalmanNode(Node):
         )
         self.dvl_sub = self.create_subscription(
             DVL,
-            "bluerov2/dvl_sim",
+            "bluerov2/dvl",
             self.dvl_callback,
             10
         )

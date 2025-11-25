@@ -37,7 +37,7 @@ from rclpy.duration import Duration
 KeyframeType = Any
 
 
-class Mapping2D:
+class SonarMapping2D:
     """2D Sonar Image Mosaic Mapper (Simple Overlay).
 
     Creates a global 2D map by accumulating sonar images from multiple keyframes.
@@ -70,14 +70,14 @@ class Mapping2D:
     Example (SLAM integration):
         >>> from stonefish_slam.core.slam import SLAM
         >>> slam = SLAM(...)
-        >>> mapper = Mapping2D(map_resolution=0.1, sonar_range=20.0)
+        >>> mapper = SonarMapping2D(map_resolution=0.1, sonar_range=20.0)
         >>> # After SLAM processing
         >>> mapper.update_global_map_from_slam(slam.keyframes)
         >>> map_image = mapper.get_map_image()
         >>> mapper.save_map('/path/to/map.png')
 
     Example (Independent mode):
-        >>> mapper = Mapping2D()
+        >>> mapper = SonarMapping2D()
         >>> for pose, sonar_image in data:
         >>>     mapper.add_keyframe(key=i, pose=pose, sonar_image=sonar_image)
         >>> mapper.update_global_map()
@@ -125,7 +125,7 @@ class Mapping2D:
         if ros_logger is not None:
             self.logger = ros_logger
         else:
-            self.logger = logging.getLogger('Mapping2D')
+            self.logger = logging.getLogger('SonarMapping2D')
             self.logger.setLevel(logging.INFO)
 
         # tf2 lookup statistics
@@ -190,7 +190,7 @@ class Mapping2D:
     ) -> np.ndarray:
         """Convert polar sonar image to fan-shaped cartesian image.
 
-        Reference: feature_extraction_sim.py Line 172-277 (cv2.remap-based implementation)
+        Reference: feature_extraction.py Line 172-277 (cv2.remap-based implementation)
 
         Maps polar coordinates (range × bearing) to cartesian fan-shaped image.
         Uses cached transformation maps with cv2.remap() for high performance.
@@ -705,7 +705,7 @@ class Mapping2D:
         Example:
             >>> from stonefish_slam.core.slam import SLAM
             >>> slam = SLAM(...)
-            >>> mapper = Mapping2D(...)
+            >>> mapper = SonarMapping2D(...)
             >>> # After SLAM processes data
             >>> mapper.update_global_map_from_slam(
             >>>     new_keyframes,

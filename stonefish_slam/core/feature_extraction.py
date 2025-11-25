@@ -24,8 +24,8 @@ class FeatureExtractionNode(Node):
     '''
 
     def __init__(self):
-        super().__init__('feature_extraction_sim_node')
-        self.get_logger().info("Feature extraction sim node initializing...")
+        super().__init__('feature_extraction_node')
+        self.get_logger().info("Feature extraction node initializing...")
 
         # Default parameters for CFAR
         self.Ntc = 20

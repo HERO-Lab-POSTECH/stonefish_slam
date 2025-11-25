@@ -18,7 +18,7 @@ from stonefish_slam.utils.io import *
 from stonefish_slam.utils.conversions import *
 from stonefish_slam.utils.visualization import *
 from stonefish_slam.core.slam import SLAM, Keyframe
-from stonefish_slam.core.mapping_2d import Mapping2D
+from stonefish_slam.core.mapping_2d import SonarMapping2D
 from stonefish_slam.core.mapping_3d import SonarMapping3D
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import *
@@ -247,7 +247,7 @@ class SLAMNode(SLAM, Node):
             map_size = tuple(self.get_parameter('mapping_2d.map_size').value)
             intensity_threshold = self.get_parameter('mapping_2d.intensity_threshold').value
 
-            self.mapper = Mapping2D(
+            self.mapper = SonarMapping2D(
                 map_resolution=map_resolution,
                 map_size=map_size,
                 sonar_range=sonar_config['max_range'],

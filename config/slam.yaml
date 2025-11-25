@@ -48,7 +48,7 @@ slam_node:
 
     # pull in the ICP config (ROS2 - will be set from launch file)
     # Leave empty here, will be provided as parameter from launch file
-    icp_config: ''
+    icp_config: '/workspace/colcon_ws/src/stonefish_slam/config/icp.yaml'
 
     # Point cloud downsampling for ICP/publishing
     point_downsample_resolution: 0.5  # Point cloud voxel leaf size (meters)

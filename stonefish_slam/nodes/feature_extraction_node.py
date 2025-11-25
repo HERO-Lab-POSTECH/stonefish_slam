@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
-from stonefish_slam.core.feature_extraction_sim import main
+from stonefish_slam.core.feature_extraction import main
 
 def main_wrapper():
     sys.exit(main())

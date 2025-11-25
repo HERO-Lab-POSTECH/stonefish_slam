@@ -91,7 +91,7 @@ class DeadReckoningNode(Node):
 		)
 
 		# Build topic names with vehicle_name
-		dvl_topic = f'/{self.vehicle_name}/dvl_sim'
+		dvl_topic = f'/{self.vehicle_name}/dvl'
 		imu_topic = f'/{self.vehicle_name}/imu'
 		pressure_topic = f'/{self.vehicle_name}/pressure'
 		odometry_gt_topic = f'/{self.vehicle_name}/odometry'

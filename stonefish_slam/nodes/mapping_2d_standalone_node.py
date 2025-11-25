@@ -3,7 +3,7 @@
 Independent 2D mapping standalone node.
 
 Subscribes to odometry and sonar images (time-synchronized),
-generates 2D occupancy grid map using Mapping2D keyframe interface.
+generates 2D occupancy grid map using SonarMapping2D keyframe interface.
 
 Usage:
     ros2 run stonefish_slam mapping_2d_standalone
@@ -19,7 +19,7 @@ from cv_bridge import CvBridge
 import numpy as np
 import gtsam
 
-from stonefish_slam.core.mapping_2d import Mapping2D
+from stonefish_slam.core.mapping_2d import SonarMapping2D
 
 
 class Mapping2DStandaloneNode(Node):
@@ -60,8 +60,8 @@ class Mapping2DStandaloneNode(Node):
         sonar_tilt_deg = self.get_parameter('sonar.sonar_tilt_deg').value
         intensity_threshold = self.get_parameter('intensity_threshold').value
 
-        # Initialize mapper with Mapping2D signature
-        self.mapper_2d = Mapping2D(
+        # Initialize mapper with SonarMapping2D signature
+        self.mapper_2d = SonarMapping2D(
             map_resolution=map_resolution,
             map_size=tuple(map_size),
             sonar_range=sonar_range,
