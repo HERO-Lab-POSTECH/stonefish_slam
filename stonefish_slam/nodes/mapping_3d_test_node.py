@@ -28,72 +28,100 @@ class MappingTestNode(Node):
     def __init__(self):
         super().__init__('mapping_3d_test_node')
 
-        # Parameters
+        # Declare parameters
         self.declare_parameter('resolution', 0.3)
-        self.declare_parameter('frame_interval', 5)
+        self.declare_parameter('frame_interval', 10)
         self.declare_parameter('odom_topic', '/bluerov2/odometry')
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
 
+        # Sonar hardware parameters (from slam.yaml sonar section)
+        self.declare_parameter('sonar.max_range', 40.0)
+        self.declare_parameter('sonar.min_range', 0.5)
+        self.declare_parameter('sonar.horizontal_fov', 130.0)
+        self.declare_parameter('sonar.vertical_aperture', 20.0)
+        self.declare_parameter('sonar.image_width', 918)
+        self.declare_parameter('sonar.image_height', 512)
+        self.declare_parameter('sonar.sonar_position', [0.25, 0.0, 0.08])
+        self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
+
+        # 3D Mapping parameters (from slam.yaml mapping_3d section)
+        self.declare_parameter('mapping_3d.voxel_resolution', 0.2)
+        self.declare_parameter('mapping_3d.min_probability', 0.6)
+        self.declare_parameter('mapping_3d.log_odds_occupied', 1.5)
+        self.declare_parameter('mapping_3d.log_odds_free', -2.0)
+        self.declare_parameter('mapping_3d.log_odds_min', -10.0)
+        self.declare_parameter('mapping_3d.log_odds_max', 10.0)
+        self.declare_parameter('mapping_3d.adaptive_update', True)
+        self.declare_parameter('mapping_3d.adaptive_threshold', 0.5)
+        self.declare_parameter('mapping_3d.adaptive_max_ratio', 0.5)
+        self.declare_parameter('mapping_3d.use_cpp_backend', True)
+        self.declare_parameter('mapping_3d.enable_propagation', False)
+        self.declare_parameter('mapping_3d.use_range_weighting', True)
+        self.declare_parameter('mapping_3d.lambda_decay', 0.1)
+        self.declare_parameter('mapping_3d.enable_gaussian_weighting', False)
+        self.declare_parameter('mapping_3d.use_dda_traversal', True)
+        self.declare_parameter('mapping_3d.bearing_step', 2)
+
+        # Additional parameters
+        self.declare_parameter('intensity_threshold', 50)
+        self.declare_parameter('max_frames', 1000)
+        self.declare_parameter('dynamic_expansion', True)
+        self.declare_parameter('gaussian_sigma_factor', 2.5)
+        self.declare_parameter('propagation_radius', 2)
+        self.declare_parameter('propagation_sigma', 1.5)
+        self.declare_parameter('enable_profiling', True)
+        self.declare_parameter('use_cpp_ray_processor', True)
+
+        # Get parameters
         resolution = self.get_parameter('resolution').get_parameter_value().double_value
         self.frame_interval = self.get_parameter('frame_interval').get_parameter_value().integer_value
         odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
         sonar_topic = self.get_parameter('sonar_topic').get_parameter_value().string_value
 
-        # Initialize mapper with COMPLETE config (all required parameters)
+        # Build config from parameters (matching slam_ros.py structure)
         config = {
-            # Sonar hardware
-            'max_range': 40.0,
-            'min_range': 0.5,
-            'horizontal_fov': 130.0,
-            'vertical_aperture': 20.0,
-            'image_width': 918,
-            'image_height': 512,
-            'sonar_position': [0.25, 0.0, 0.08],
-            'sonar_tilt_deg': 10.0,
+            # Sonar hardware (from sonar.* parameters)
+            'max_range': self.get_parameter('sonar.max_range').value,
+            'min_range': self.get_parameter('sonar.min_range').value,
+            'horizontal_fov': self.get_parameter('sonar.horizontal_fov').value,
+            'vertical_aperture': self.get_parameter('sonar.vertical_aperture').value,
+            'image_width': self.get_parameter('sonar.image_width').value,
+            'image_height': self.get_parameter('sonar.image_height').value,
+            'sonar_position': self.get_parameter('sonar.sonar_position').value,
+            'sonar_tilt_deg': self.get_parameter('sonar.sonar_tilt_deg').value,
 
-            # 3D mapping core
-            'voxel_resolution': resolution,
-            'min_probability': 0.6,
-            'intensity_threshold': 50,
-            'max_frames': 1000,  # Maximum frames to store
-            'dynamic_expansion': True,  # Auto-expand octree bounds
-
-            # Log-odds Bayesian update
-            'log_odds_occupied': 1.5,
-            'log_odds_free': -2.0,
-            'log_odds_min': -10.0,
-            'log_odds_max': 10.0,
-
-            # Adaptive update
-            'adaptive_update': True,
-            'adaptive_threshold': 0.5,
-            'adaptive_max_ratio': 0.5,
-
-            # C++ backend
-            'use_cpp_backend': True,
-            'use_cpp_ray_processor': True,
-
-            # Ray processing
-            'use_range_weighting': True,
-            'lambda_decay': 0.1,
-            'enable_gaussian_weighting': False,
-            'gaussian_sigma_factor': 2.5,
-            'bearing_step': 2,
-
-            # DDA traversal
-            'use_dda_traversal': True,
-
-            # Bearing propagation
-            'enable_propagation': False,
-            'propagation_radius': 2,
-            'propagation_sigma': 1.5,
-
-            # Profiling
-            'enable_profiling': True,
+            # 3D mapping (from mapping_3d.* parameters)
+            'voxel_resolution': resolution,  # Use test-specific override
+            'min_probability': self.get_parameter('mapping_3d.min_probability').value,
+            'intensity_threshold': self.get_parameter('intensity_threshold').value,
+            'max_frames': self.get_parameter('max_frames').value,
+            'dynamic_expansion': self.get_parameter('dynamic_expansion').value,
+            'log_odds_occupied': self.get_parameter('mapping_3d.log_odds_occupied').value,
+            'log_odds_free': self.get_parameter('mapping_3d.log_odds_free').value,
+            'log_odds_min': self.get_parameter('mapping_3d.log_odds_min').value,
+            'log_odds_max': self.get_parameter('mapping_3d.log_odds_max').value,
+            'adaptive_update': self.get_parameter('mapping_3d.adaptive_update').value,
+            'adaptive_threshold': self.get_parameter('mapping_3d.adaptive_threshold').value,
+            'adaptive_max_ratio': self.get_parameter('mapping_3d.adaptive_max_ratio').value,
+            'use_cpp_backend': self.get_parameter('mapping_3d.use_cpp_backend').value,
+            'use_cpp_ray_processor': self.get_parameter('use_cpp_ray_processor').value,
+            'use_range_weighting': self.get_parameter('mapping_3d.use_range_weighting').value,
+            'lambda_decay': self.get_parameter('mapping_3d.lambda_decay').value,
+            'enable_gaussian_weighting': self.get_parameter('mapping_3d.enable_gaussian_weighting').value,
+            'gaussian_sigma_factor': self.get_parameter('gaussian_sigma_factor').value,
+            'bearing_step': self.get_parameter('mapping_3d.bearing_step').value,
+            'use_dda_traversal': self.get_parameter('mapping_3d.use_dda_traversal').value,
+            'enable_propagation': self.get_parameter('mapping_3d.enable_propagation').value,
+            'propagation_radius': self.get_parameter('propagation_radius').value,
+            'propagation_sigma': self.get_parameter('propagation_sigma').value,
+            'enable_profiling': self.get_parameter('enable_profiling').value,
         }
 
         self.mapper_3d = SonarMapping3D(config)
-        self.get_logger().info(f'Mapper initialized with resolution={resolution}m')
+        self.get_logger().info(
+            f'Mapper initialized: resolution={resolution}m, '
+            f'max_range={config["max_range"]}m, tilt={config["sonar_tilt_deg"]}°'
+        )
 
         # Frame counter
         self.frame_count = 0

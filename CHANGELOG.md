@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Mapping 3D Test Node: Parameter Management 통합** (2025-11-25)
+  - 하드코딩된 config 딕셔너리 제거
+  - slam.yaml의 sonar/mapping_3d 파라미터 사용
+  - ROS2 parameter 선언 추가 (slam_ros.py와 동일)
+  - Launch 파일에서 slam.yaml 자동 로드
+  - Test-specific override: resolution=0.3m, frame_interval=10
+  - 장점: slam.yaml 수정 → SLAM/test node 모두 반영
+  - 파일: `launch/mapping_3d_test.launch.py`, `nodes/mapping_3d_test_node.py`
+
 ### Added
 
 - **NED Frame Z-Axis Filtering for Map Updates** (2025-11-25)
