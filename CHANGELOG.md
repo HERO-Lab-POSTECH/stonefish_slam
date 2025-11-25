@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Launch 파일 정리 및 이름 표준화** (2025-11-25)
+  - **삭제된 파일** (2개):
+    - `slam_sim_test.launch.py` (테스트 전용, 불필요)
+    - `mapping_3d_test.launch.py` (executable 없음)
+  - **이름 변경** (sim/test 접미사 제거):
+    - Launch 파일:
+      - `slam_sim.launch.py` → `slam.launch.py`
+      - `feature_extraction_sim.launch.py` → `feature_extraction.launch.py`
+    - Executable: `feature_extraction_node_sim` → `feature_extraction_node`
+    - Node name: `feature_extraction_sim_node` → `feature_extraction_node`
+    - Source: `feature_extraction_node_sim.py` → `feature_extraction_node.py`
+  - **Config 업데이트**:
+    - `config/feature.yaml`: Node name 변경 반영
+    - `CMakeLists.txt`: Install target 업데이트
+  - **최종 효과**:
+    - Launch 파일: 7개 → 5개 (29% 감소)
+    - 이름 직관성 개선 (simulator 전용이므로 sim 접미사 불필요)
+    - Git history 보존 (`git mv` 사용)
+    - 코드 일관성 향상
+
 - **Config Restructuring: 체계적 구조 개선** (2025-11-25)
   - **Phase 2: 미사용 파일 삭제**
     - kalman.yaml 제거 (미사용, 149줄)
