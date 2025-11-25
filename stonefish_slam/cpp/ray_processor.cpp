@@ -405,7 +405,8 @@ void RayProcessor::process_single_ray_internal(
         if (!hit_indices.empty()) {
             double bearing_angle = compute_bearing_angle(bearing_idx, num_bearings);
             process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,
-                                            sonar_origin_world, voxel_updates);
+                                            sonar_origin_world, voxel_updates,
+                                            &T_world_to_sonar, &first_hit_map, num_bearings);
         }
     }
 }
@@ -470,7 +471,10 @@ void RayProcessor::process_occupied_voxels_internal(
     double bearing_angle,
     const Eigen::Matrix4d& T_sonar_to_world,
     const Eigen::Vector3d& sonar_origin_world,
-    std::vector<VoxelUpdate>& voxel_updates
+    std::vector<VoxelUpdate>& voxel_updates,
+    const Eigen::Matrix4d* T_world_to_sonar,
+    const std::vector<double>* first_hit_map,
+    int num_bearings
 ) {
     // Process each range bin with high intensity
     for (int r_idx : hit_indices) {
@@ -521,6 +525,14 @@ void RayProcessor::process_occupied_voxels_internal(
         // Fill voxel updates with Gaussian weighting if enabled
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             int idx = v_step + num_vertical_steps;
+
+            // Shadow validation: exclude current bearing (occupied voxels should not be blocked by their own bearing)
+            if (T_world_to_sonar != nullptr && first_hit_map != nullptr && num_bearings > 0) {
+                Eigen::Vector3d pt_world(points_world(0, idx), points_world(1, idx), points_world(2, idx));
+                if (is_voxel_in_shadow(pt_world, *T_world_to_sonar, *first_hit_map, num_bearings, bearing_angle)) {
+                    continue;  // Skip voxel in other bearings' shadow
+                }
+            }
 
             // Compute log-odds with optional Gaussian weighting
             double log_odds_update = base_log_odds;
@@ -723,7 +735,8 @@ bool RayProcessor::is_voxel_in_shadow(
     const Eigen::Vector3d& voxel_world,
     const Eigen::Matrix4d& T_world_to_sonar,
     const std::vector<double>& first_hit_map,
-    int num_bearings
+    int num_bearings,
+    double exclude_bearing_rad
 ) const {
     // Transform voxel to sonar frame
     Eigen::Vector4d voxel_world_homo(voxel_world.x(), voxel_world.y(), voxel_world.z(), 1.0);
@@ -765,9 +778,20 @@ bool RayProcessor::is_voxel_in_shadow(
         return true;  // Out of FOV, treat as shadow
     }
 
-    // Find MINIMUM first hit in angular cone
+    // Calculate exclude bearing index if specified (for occupied voxels)
+    int exclude_idx = -1;
+    if (exclude_bearing_rad > -900.0) {  // Valid bearing specified
+        double exclude_normalized = (exclude_bearing_rad + fov_rad / 2.0) / fov_rad;
+        exclude_idx = static_cast<int>(exclude_normalized * num_bearings);
+    }
+
+    // Find MINIMUM first hit in angular cone (excluding self bearing if specified)
     double min_first_hit = std::numeric_limits<double>::infinity();
     for (int idx = idx_min; idx <= idx_max; ++idx) {
+        // Skip current bearing for occupied voxels
+        if (idx == exclude_idx) {
+            continue;
+        }
         min_first_hit = std::min(min_first_hit, first_hit_map[idx]);
     }
 
@@ -972,12 +996,14 @@ PYBIND11_MODULE(ray_processor, m) {
              py::arg("T_world_to_sonar"),
              py::arg("first_hit_map"),
              py::arg("num_bearings"),
+             py::arg("exclude_bearing_rad") = -999.0,
              "Check if voxel is in shadow region\n\n"
              "Args:\n"
              "    voxel_world: Voxel position in world frame (3D)\n"
              "    T_world_to_sonar: Inverse transformation matrix (world → sonar)\n"
              "    first_hit_map: List of first hit ranges for all bearings\n"
              "    num_bearings: Total number of bearings\n"
+             "    exclude_bearing_rad: Bearing to exclude from shadow check (default: -999.0, no exclusion)\n"
              "Returns:\n"
              "    True if voxel is in shadow (should skip update)")
         .def("set_config",

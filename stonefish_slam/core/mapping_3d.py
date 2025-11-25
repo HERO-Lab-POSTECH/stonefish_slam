@@ -437,7 +437,7 @@ class SonarMapping3D:
 
         return bearing_rad, range_m, elevation_rad
 
-    def _is_voxel_in_shadow(self, voxel_world, T_world_to_sonar, first_hit_map):
+    def _is_voxel_in_shadow(self, voxel_world, T_world_to_sonar, first_hit_map, exclude_bearing_rad=None):
         """
         Check if voxel is in shadow region (beyond first hit for its bearing)
 
@@ -445,6 +445,8 @@ class SonarMapping3D:
             voxel_world: np.ndarray [x, y, z] in world frame
             T_world_to_sonar: 4x4 inverse transform (world → sonar)
             first_hit_map: np.ndarray (n_bearings,) first hit ranges
+            exclude_bearing_rad: Bearing angle to exclude from shadow check (for occupied voxels)
+                                If None, check all bearings (for free space)
 
         Returns:
             bool: True if voxel is in shadow (should skip update)
@@ -477,9 +479,18 @@ class SonarMapping3D:
         if idx_min >= bearing_bins or idx_max < 0:
             return True  # Out of FOV, treat as shadow
 
-        # Find MINIMUM first hit in angular cone
+        # Calculate exclude bearing index if specified (for occupied voxels)
+        exclude_idx = -1
+        if exclude_bearing_rad is not None:
+            exclude_normalized = (exclude_bearing_rad + self.horizontal_fov / 2) / self.horizontal_fov
+            exclude_idx = int(exclude_normalized * bearing_bins)
+
+        # Find MINIMUM first hit in angular cone (excluding self bearing if specified)
         min_first_hit = np.inf
         for idx in range(idx_min, idx_max + 1):
+            # Skip current bearing for occupied voxels
+            if idx == exclude_idx:
+                continue
             min_first_hit = min(min_first_hit, first_hit_map[idx])
 
         # Check if voxel range >= minimum first hit range in cone
@@ -850,6 +861,12 @@ class SonarMapping3D:
                 actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
                 if actual_range <= self.min_range:
                     continue  # Skip points at or below min_range
+
+                # Shadow validation: exclude current bearing (occupied voxels should not be blocked by their own bearing)
+                if T_world_to_sonar is not None and first_hit_map is not None:
+                    if self._is_voxel_in_shadow(pt_world[:3], T_world_to_sonar, first_hit_map,
+                                               exclude_bearing_rad=bearing_angle):
+                        continue  # Skip voxel in other bearings' shadow
 
                 # Get voxel key and accumulate update
                 if self.use_cpp_backend:

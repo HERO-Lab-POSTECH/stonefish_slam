@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Occupied Voxel Shadow Validation 추가** (2025-11-26)
+  - **증상**:
+    - Occupied voxel이 다른 bearing의 free space에 의해 덮어씌워짐
+    - Free space는 shadow validation으로 보호받지만 occupied는 보호 안 받음
+    - 물체 뒷면 관측 시 occupied voxel이 생성되었다가 free로 역전됨
+  - **근본 원인**:
+    - Free space에만 shadow validation 적용
+    - Occupied voxel에는 shadow validation 없음
+    - Log-odds 비율 (occupied=1.5, free=-2.0)로 인해 쉽게 역전
+  - **수정 사항**:
+    - **Python** (`mapping_3d.py` line 865-869):
+      - `_is_voxel_in_shadow()` 함수에 `exclude_bearing_rad` 파라미터 추가
+      - Occupied voxel 처리 루프에 shadow validation 추가
+      - 자기 bearing은 제외하여 자신은 occupied 업데이트 가능
+    - **C++** (`ray_processor.h`, `ray_processor.cpp` line 529-535):
+      - `is_voxel_in_shadow()` 함수에 `exclude_bearing_rad` 파라미터 추가
+      - `process_occupied_voxels_internal()`에 shadow validation 파라미터 추가
+      - Occupied voxel 처리 루프에 shadow validation 추가
+  - **효과**:
+    - Occupied voxel이 다른 bearing의 free space로부터 보호됨
+    - 자기 bearing에서는 정상 occupied 업데이트
+    - 물체 뒷면 관측 시 occupied voxel 유지
+    - Free vs Occupied 균형 확보
+  - **파일**:
+    - `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/core/mapping_3d.py`
+    - `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.h`
+    - `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 - **Angular Cone 기반 Multi-Bearing Shadow Validation** (2025-11-26)
   - **증상**:
     - Single bearing 체크로 노이즈 틈새에서 shadow 영역이 free로 업데이트됨

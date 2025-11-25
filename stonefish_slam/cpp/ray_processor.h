@@ -183,13 +183,16 @@ public:
      * @param T_world_to_sonar Inverse transformation (world → sonar)
      * @param first_hit_map First hit ranges for all bearings (from compute_first_hit_map)
      * @param num_bearings Total number of bearings (for index calculation)
+     * @param exclude_bearing_rad Bearing angle to exclude from shadow check (for occupied voxels)
+     *                            Default -999.0 means no exclusion (for free space)
      * @return True if voxel is in shadow (should skip update)
      */
     bool is_voxel_in_shadow(
         const Eigen::Vector3d& voxel_world,
         const Eigen::Matrix4d& T_world_to_sonar,
         const std::vector<double>& first_hit_map,
-        int num_bearings
+        int num_bearings,
+        double exclude_bearing_rad = -999.0
     ) const;
 
 private:
@@ -254,21 +257,27 @@ private:
      * Collects occupied voxel updates in C++ buffer.
      * Used by process_single_ray_internal() in OpenMP parallel region.
      *
-     * NOTE: Occupied voxels do NOT use shadow validation, as they represent
-     * actual detections and should always be updated.
+     * Shadow validation: Occupied voxels use shadow check but EXCLUDE their
+     * own bearing, allowing self-updates while being protected from other bearings.
      *
      * @param hit_indices Indices of range bins with high intensity
      * @param bearing_angle Horizontal bearing angle (radians)
      * @param T_sonar_to_world Transformation matrix
      * @param sonar_origin_world Sonar origin in world frame (cached)
      * @param voxel_updates Output buffer to collect voxel updates
+     * @param T_world_to_sonar Inverse transformation for shadow validation (optional)
+     * @param first_hit_map First hit ranges for shadow validation (optional)
+     * @param num_bearings Number of bearings for shadow validation (optional)
      */
     void process_occupied_voxels_internal(
         const std::vector<int>& hit_indices,
         double bearing_angle,
         const Eigen::Matrix4d& T_sonar_to_world,
         const Eigen::Vector3d& sonar_origin_world,
-        std::vector<VoxelUpdate>& voxel_updates
+        std::vector<VoxelUpdate>& voxel_updates,
+        const Eigen::Matrix4d* T_world_to_sonar = nullptr,
+        const std::vector<double>* first_hit_map = nullptr,
+        int num_bearings = 0
     );
 
     /**
