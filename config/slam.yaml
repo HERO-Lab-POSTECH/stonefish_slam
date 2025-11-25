@@ -20,7 +20,7 @@ slam_node:
 
     # ==================== 3D Mapping Configuration ====================
     mapping_3d:
-      voxel_resolution: 0.1     # meters
+      voxel_resolution: 0.5     # meters
       min_probability: 0.6      # minimum probability for occupied voxel
       log_odds_occupied: 1.5    # log-odds increment for occupied
       log_odds_free: -2.0       # log-odds decrement for free space

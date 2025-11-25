@@ -22,8 +22,8 @@ def generate_launch_description():
                 str(config_dir / 'slam.yaml'),  # Load slam.yaml for sonar/mapping_3d params
                 {
                     # Test-specific overrides
-                    'resolution': 0.3,
-                    'frame_interval': 10,
+                    'resolution': 0.5,
+                    'frame_interval': 20,
                     'odom_topic': '/bluerov2/odometry',
                     'sonar_topic': '/bluerov2/fls/image',
                 }

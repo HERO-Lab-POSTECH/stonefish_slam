@@ -64,7 +64,7 @@ class MappingTestNode(Node):
 
         # Additional parameters
         self.declare_parameter('intensity_threshold', 50)
-        self.declare_parameter('max_frames', 1000)
+        self.declare_parameter('max_frames', 0)  # 0 = unlimited (was 1000, caused hang at frame #1300)
         self.declare_parameter('dynamic_expansion', True)
         self.declare_parameter('gaussian_sigma_factor', 2.5)
         self.declare_parameter('propagation_radius', 2)
