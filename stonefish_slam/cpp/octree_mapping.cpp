@@ -11,8 +11,8 @@
 
 OctreeMapping::OctreeMapping(double resolution)
     : resolution_(resolution),
-      log_odds_occupied_(0.85),
-      log_odds_free_(-3.5)  // Extreme free space decrease for testing (clamping min)
+      log_odds_occupied_(0.5),
+      log_odds_free_(-5.0)  // Strong free space clearing (balanced with occupied)
 {
     if (resolution_ <= 0.0) {
         throw std::invalid_argument("Resolution must be positive");

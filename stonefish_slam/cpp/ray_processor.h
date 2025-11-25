@@ -37,8 +37,8 @@ struct RayProcessorConfig {
     double occupied_vertical_factor;    // Vertical sampling density for occupied (default: 3.0)
 
     // Log-odds parameters
-    double log_odds_occupied;           // Log-odds update for occupied voxels (e.g., 0.85)
-    double log_odds_free;               // Log-odds update for free space (e.g., -2.0, matched with Python)
+    double log_odds_occupied;           // Log-odds update for occupied voxels (default: 0.5)
+    double log_odds_free;               // Log-odds update for free space (default: -5.0)
 
     // Weighting parameters
     bool use_range_weighting;           // Enable range-based weighting
@@ -61,8 +61,8 @@ struct RayProcessorConfig {
           bearing_resolution(0.0175),
           free_vertical_factor(8.0),
           occupied_vertical_factor(3.0),
-          log_odds_occupied(0.85),
-          log_odds_free(-3.5),  // Extreme free space decrease for testing (clamping min)
+          log_odds_occupied(0.5),
+          log_odds_free(-5.0),  // Strong free space clearing (balanced with occupied)
           use_range_weighting(true),
           lambda_decay(2.0),
           enable_gaussian_weighting(false),

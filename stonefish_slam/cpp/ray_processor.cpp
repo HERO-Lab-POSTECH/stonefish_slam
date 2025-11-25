@@ -2,14 +2,13 @@
 #include "octree_mapping.h"
 #include <iostream>
 #include <algorithm>
-#include <unordered_map>
 #include <limits>
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-// VoxelKey for deduplication (hash-based)
+// VoxelKey for deduplication (sorted vector approach)
 struct VoxelKey {
     int x, y, z;  // Voxel grid coordinates (integer)
 
@@ -20,24 +19,17 @@ struct VoxelKey {
         z = static_cast<int>(std::floor(fz / resolution + 0.5));
     }
 
+    // Comparison for sorting (x → y → z order)
+    bool operator<(const VoxelKey& other) const {
+        if (x != other.x) return x < other.x;
+        if (y != other.y) return y < other.y;
+        return z < other.z;
+    }
+
     bool operator==(const VoxelKey& other) const {
         return x == other.x && y == other.y && z == other.z;
     }
 };
-
-// Hash function for VoxelKey
-namespace std {
-    template<>
-    struct hash<VoxelKey> {
-        size_t operator()(const VoxelKey& k) const {
-            // Simple hash: combine x, y, z
-            size_t h1 = std::hash<int>()(k.x);
-            size_t h2 = std::hash<int>()(k.y);
-            size_t h3 = std::hash<int>()(k.z);
-            return h1 ^ (h2 << 1) ^ (h3 << 2);
-        }
-    };
-}
 
 // Constructor
 RayProcessor::RayProcessor(
@@ -138,24 +130,55 @@ void RayProcessor::process_sonar_image(
     }
 
     if (total_updates > 0) {
-        // Deduplicate voxel updates using hash map
-        std::unordered_map<VoxelKey, double> voxel_map;
-        voxel_map.reserve(total_updates);  // Optimize allocation
+        // Deduplicate voxel updates using sorted vector approach
+        // VoxelUpdate structure for sorting
+        struct VoxelUpdateSorted {
+            VoxelKey key;
+            double log_odds;
+
+            bool operator<(const VoxelUpdateSorted& other) const {
+                return key < other.key;
+            }
+        };
+
+        // Collect all updates
+        std::vector<VoxelUpdateSorted> all_updates;
+        all_updates.reserve(total_updates);
 
         for (const auto& updates : thread_updates) {
             for (const auto& update : updates) {
                 VoxelKey key(update.x, update.y, update.z, config_.voxel_resolution);
-                voxel_map[key] += update.log_odds;  // Accumulate (free + occupied)
+                all_updates.push_back({key, update.log_odds});
             }
         }
 
-        // Convert hash map back to vector for NumPy conversion
-        size_t unique_updates = voxel_map.size();
+        // Sort by key (cache-friendly sequential access)
+        std::sort(all_updates.begin(), all_updates.end());
+
+        // Merge adjacent duplicates
+        std::vector<VoxelUpdateSorted> unique_updates;
+        unique_updates.reserve(all_updates.size() / 2);  // Rough estimate
+
+        for (size_t i = 0; i < all_updates.size(); ) {
+            VoxelKey current_key = all_updates[i].key;
+            double sum = 0.0;
+
+            // Accumulate all updates for same voxel
+            while (i < all_updates.size() && all_updates[i].key == current_key) {
+                sum += all_updates[i].log_odds;
+                i++;
+            }
+
+            unique_updates.push_back({current_key, sum});
+        }
+
+        size_t unique_count = unique_updates.size();
+        // Deduplication: {total_updates} → {unique_count} voxels (sorted vector)
 
         // Convert to NumPy arrays and insert
-        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(unique_updates), 3};
+        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(unique_count), 3};
         py::array_t<double> points_np(points_shape);
-        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(unique_updates));
+        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(unique_count));
         py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
 
         auto points_buf = points_np.request();
@@ -166,15 +189,13 @@ void RayProcessor::process_sonar_image(
         double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
         double* origin_ptr = static_cast<double*>(origin_buf.ptr);
 
-        // Fill data from hash map
-        size_t idx = 0;
-        for (const auto& [key, log_odds_sum] : voxel_map) {
-            // Convert integer key back to floating-point coordinates
-            points_ptr[idx * 3 + 0] = key.x * config_.voxel_resolution;
-            points_ptr[idx * 3 + 1] = key.y * config_.voxel_resolution;
-            points_ptr[idx * 3 + 2] = key.z * config_.voxel_resolution;
-            log_odds_ptr[idx] = log_odds_sum;
-            idx++;
+        // Fill data from unique updates
+        for (size_t i = 0; i < unique_count; ++i) {
+            const auto& update = unique_updates[i];
+            points_ptr[i * 3 + 0] = update.key.x * config_.voxel_resolution;
+            points_ptr[i * 3 + 1] = update.key.y * config_.voxel_resolution;
+            points_ptr[i * 3 + 2] = update.key.z * config_.voxel_resolution;
+            log_odds_ptr[i] = update.log_odds;
         }
 
         origin_ptr[0] = sonar_origin_world[0];
