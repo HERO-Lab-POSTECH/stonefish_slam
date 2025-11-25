@@ -393,6 +393,19 @@ class SonarMapping3D:
                     first_hit_map[b_idx] = self.max_range - r_idx * self.range_resolution
                     break
 
+        # DEBUG: First-hit map statistics
+        if not hasattr(self, '_first_hit_debug_count'):
+            self._first_hit_debug_count = 0
+
+        self._first_hit_debug_count += 1
+        if self._first_hit_debug_count <= 3:
+            num_hits = np.sum(first_hit_map < self.max_range)
+            min_hit = np.min(first_hit_map[first_hit_map < self.max_range]) if num_hits > 0 else self.max_range
+            max_hit = np.max(first_hit_map[first_hit_map < self.max_range]) if num_hits > 0 else self.max_range
+            print(f"[FIRST-HIT DEBUG] Frame {self._first_hit_debug_count}: "
+                  f"Bearings with hits: {num_hits}/{bearing_bins}, "
+                  f"Range: [{min_hit:.1f}m, {max_hit:.1f}m]", flush=True)
+
         return first_hit_map
 
     def _voxel_to_sonar_coords(self, voxel_world, T_world_to_sonar):
@@ -443,19 +456,56 @@ class SonarMapping3D:
         # bearing_angles range: [-fov/2, +fov/2]
         # Normalize: bearing_rad to [0, 1] relative to FOV
         bearing_normalized = (bearing_rad + self.horizontal_fov / 2) / self.horizontal_fov
-        bearing_idx = int(bearing_normalized * len(first_hit_map))
 
-        # Boundary check
-        if bearing_idx < 0 or bearing_idx >= len(first_hit_map):
+        # Angular cone based bearing range calculation
+        bearing_bins = len(first_hit_map)
+        actual_bearing_resolution = self.horizontal_fov / (bearing_bins - 1)  # radians
+        bearing_step = 1.0  # Default value (matching C++)
+        bearing_half_width_rad = actual_bearing_resolution * bearing_step * 0.5
+
+        # Bearing index range (cone coverage)
+        bearing_idx_float = bearing_normalized * bearing_bins
+        half_width_idx = bearing_half_width_rad / actual_bearing_resolution
+        idx_min = int(np.floor(bearing_idx_float - half_width_idx))
+        idx_max = int(np.ceil(bearing_idx_float + half_width_idx))
+
+        # Clamp to valid range
+        idx_min = max(0, idx_min)
+        idx_max = min(bearing_bins - 1, idx_max)
+
+        # Boundary check - if entire cone is out of FOV
+        if idx_min >= bearing_bins or idx_max < 0:
             return True  # Out of FOV, treat as shadow
 
-        # Check if voxel range >= first hit range for this bearing
-        first_hit_range = first_hit_map[bearing_idx]
+        # Find MINIMUM first hit in angular cone
+        min_first_hit = np.inf
+        for idx in range(idx_min, idx_max + 1):
+            min_first_hit = min(min_first_hit, first_hit_map[idx])
+
+        # Check if voxel range >= minimum first hit range in cone
+        first_hit_range = min_first_hit
 
         # Shadow condition: voxel is beyond first reflection
         # Add small epsilon to avoid numerical issues
         epsilon = 0.01  # 1cm tolerance
-        return range_m >= (first_hit_range + epsilon)
+        is_shadow = range_m >= (first_hit_range + epsilon)
+
+        # DEBUG: Shadow validation statistics
+        if not hasattr(self, '_shadow_stats'):
+            self._shadow_stats = {'total': 0, 'skipped': 0, 'last_print': 0}
+
+        self._shadow_stats['total'] += 1
+        if is_shadow:
+            self._shadow_stats['skipped'] += 1
+
+        # Print every 10000 checks
+        if self._shadow_stats['total'] - self._shadow_stats['last_print'] >= 10000:
+            skip_rate = 100.0 * self._shadow_stats['skipped'] / self._shadow_stats['total']
+            print(f"[SHADOW DEBUG] Total checks: {self._shadow_stats['total']}, "
+                  f"Skipped: {self._shadow_stats['skipped']} ({skip_rate:.1f}%)", flush=True)
+            self._shadow_stats['last_print'] = self._shadow_stats['total']
+
+        return is_shadow
 
     def propagate_bearing_updates_optimized(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
         """

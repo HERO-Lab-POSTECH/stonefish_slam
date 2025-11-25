@@ -745,23 +745,63 @@ bool RayProcessor::is_voxel_in_shadow(
     double fov_rad = config_.horizontal_fov * M_PI / 180.0;
     double bearing_normalized = (bearing_rad + fov_rad / 2.0) / fov_rad;
 
-    // Clamp to valid range [0, 0.9999] to prevent out-of-bounds
-    bearing_normalized = std::clamp(bearing_normalized, 0.0, 0.9999);
+    // Angular cone based bearing range calculation
+    double actual_bearing_resolution = fov_rad / (num_bearings - 1);
+    double bearing_step = 1.0;  // Same as Python
+    double bearing_half_width_rad = actual_bearing_resolution * bearing_step * 0.5;
 
-    int bearing_idx = static_cast<int>(bearing_normalized * num_bearings);
+    // Bearing index range (cone coverage)
+    double bearing_idx_float = bearing_normalized * num_bearings;
+    double half_width_idx = bearing_half_width_rad / actual_bearing_resolution;
+    int idx_min = static_cast<int>(std::floor(bearing_idx_float - half_width_idx));
+    int idx_max = static_cast<int>(std::ceil(bearing_idx_float + half_width_idx));
 
-    // Boundary check
-    if (bearing_idx < 0 || bearing_idx >= num_bearings) {
+    // Clamp to valid range
+    idx_min = std::max(0, idx_min);
+    idx_max = std::min(num_bearings - 1, idx_max);
+
+    // Boundary check - if entire cone is out of FOV
+    if (idx_min >= num_bearings || idx_max < 0) {
         return true;  // Out of FOV, treat as shadow
     }
 
-    // Get first hit range for this bearing
-    double first_hit_range = first_hit_map[bearing_idx];
+    // Find MINIMUM first hit in angular cone
+    double min_first_hit = std::numeric_limits<double>::infinity();
+    for (int idx = idx_min; idx <= idx_max; ++idx) {
+        min_first_hit = std::min(min_first_hit, first_hit_map[idx]);
+    }
+
+    // Get minimum first hit range for this bearing cone
+    double first_hit_range = min_first_hit;
 
     // Shadow condition: voxel range >= first hit range
     // Add small epsilon to avoid numerical issues (1cm tolerance)
     constexpr double epsilon = 0.01;
-    return range_m >= (first_hit_range + epsilon);
+    bool is_shadow = range_m >= (first_hit_range + epsilon);
+
+    // DEBUG: Shadow validation statistics (thread-safe)
+    static std::atomic<int64_t> total_checks{0};
+    static std::atomic<int64_t> skipped_count{0};
+    static std::atomic<int64_t> last_print{0};
+
+    total_checks.fetch_add(1, std::memory_order_relaxed);
+    if (is_shadow) {
+        skipped_count.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // Print every 10000 checks (thread-safe)
+    int64_t current = total_checks.load(std::memory_order_relaxed);
+    int64_t last = last_print.load(std::memory_order_relaxed);
+    if (current - last >= 10000) {
+        if (last_print.compare_exchange_strong(last, current, std::memory_order_relaxed)) {
+            int64_t skipped = skipped_count.load(std::memory_order_relaxed);
+            double skip_rate = 100.0 * skipped / current;
+            std::cout << "[C++ SHADOW DEBUG] Total checks: " << current
+                      << ", Skipped: " << skipped << " (" << skip_rate << "%)" << std::endl;
+        }
+    }
+
+    return is_shadow;
 }
 
 // Internal DDA voxel traversal (simplified version)

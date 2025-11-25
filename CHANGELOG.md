@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Angular Cone 기반 Multi-Bearing Shadow Validation** (2025-11-26)
+  - **증상**:
+    - Single bearing 체크로 노이즈 틈새에서 shadow 영역이 free로 업데이트됨
+    - 예: Bearing 256 (first_hit=20m, 노이즈) 사이에 Bearing 255/257 (first_hit=5m)
+    - Voxel at bearing=256°, range=10m → Shadow 검증 실패 → Free로 잘못 업데이트
+  - **근본 원인**:
+    - `_is_voxel_in_shadow()`: Single bearing index만 체크
+    - Sonar vertical aperture로 인한 bearing 간 확산 미고려
+    - 노이즈가 있는 bearing에서 shadow 보호 실패
+  - **수정 사항**:
+    - **Python** (`mapping_3d.py` line 460-486):
+      - Angular cone 범위 계산: `bearing_half_width_rad = actual_bearing_resolution * bearing_step * 0.5`
+      - Bearing index range: `[idx_min, idx_max]` (cone coverage)
+      - **Minimum first hit**: `min(first_hit_map[idx_min:idx_max+1])`
+      - Conservative shadow check로 노이즈 틈새 방어
+    - **C++** (`ray_processor.cpp` line 748-775):
+      - Python과 동일한 로직 구현
+      - `std::numeric_limits<double>::infinity()` 초기값
+      - Bearing cone 내 최소값 검색
+  - **효과**:
+    - 노이즈 bearing 주변에서도 shadow 영역 올바르게 보호
+    - Multi-bearing consensus로 false free space 제거
+    - 맵 신뢰도 향상 (물체 뒤쪽 그림자 영역 보존)
+  - **검증**:
+    - Bearing 255: first_hit=5m, Bearing 256: first_hit=20m, Bearing 257: first_hit=5m
+    - Voxel at bearing=256°, range=10m → min(5, 20, 5)=5m → 10m >= 5m → Shadow ✓
+  - **파일**:
+    - `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/core/mapping_3d.py`
+    - `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 - **C++ RayProcessor no-hit ray 처리 추가** (2025-11-26)
   - **증상**:
     - C++ RayProcessor에서 반사 없는 ray를 처리하지 않음
