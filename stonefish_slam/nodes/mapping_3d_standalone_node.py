@@ -145,7 +145,7 @@ class Mapping3DStandaloneNode(Node):
         self.ts.registerCallback(self.sync_callback)
 
         # Publisher
-        self.pc_pub = self.create_publisher(PointCloud2, '/mapping_test/pointcloud', 10)
+        self.pc_pub = self.create_publisher(PointCloud2, '/mapping_3d_standalone/pointcloud', 10)
 
         self.get_logger().info(
             f'3D Mapping Test Node ready: '
