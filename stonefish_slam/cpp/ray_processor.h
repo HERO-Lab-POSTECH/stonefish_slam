@@ -45,7 +45,6 @@ struct RayProcessorConfig {
     // Processing parameters
     double voxel_resolution;            // Voxel size (m)
     int bearing_step;                   // Bearing sampling step (e.g., 2 = every 2nd bearing)
-    int range_step;                     // Range sampling step (e.g., 1 = all ranges, 2 = every 2nd range)
     uint8_t intensity_threshold;        // Intensity threshold for detection (0-255)
 
     // Constructor with default values
@@ -64,7 +63,6 @@ struct RayProcessorConfig {
           gaussian_sigma_factor(3.0),
           voxel_resolution(0.2),
           bearing_step(2),
-          range_step(1),
           intensity_threshold(30)
     {}
 };
@@ -140,15 +138,10 @@ private:
      *
      * Used internally to collect voxel data in OpenMP parallel regions
      * without calling Python API (GIL-free).
-     *
-     * P3.3: Extended with bearing_idx and range_idx for voxel-centric deduplication.
-     * Priority: bearing_idx low > range_idx low (keeps closest ray to sonar boresight).
      */
     struct VoxelUpdate {
         double x, y, z;
         double log_odds;
-        int bearing_idx;  // Bearing index (priority: lower = closer to center)
-        int range_idx;    // Range bin index (priority: lower = farther range)
     };
 
     /**
@@ -198,7 +191,6 @@ private:
      * Used by process_single_ray_internal() in OpenMP parallel region.
      *
      * @param hit_indices Indices of range bins with high intensity
-     * @param bearing_idx Bearing index in polar image (for voxel priority)
      * @param bearing_angle Horizontal bearing angle (radians)
      * @param T_sonar_to_world Transformation matrix
      * @param sonar_origin_world Sonar origin in world frame (cached)
@@ -206,7 +198,6 @@ private:
      */
     void process_occupied_voxels_internal(
         const std::vector<int>& hit_indices,
-        int bearing_idx,
         double bearing_angle,
         const Eigen::Matrix4d& T_sonar_to_world,
         const Eigen::Vector3d& sonar_origin_world,

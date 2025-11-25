@@ -23,7 +23,7 @@ def generate_launch_description():
                 {
                     # Test-specific overrides
                     'resolution': 0.3,
-                    'frame_interval': 10,
+                    'frame_interval': 15,
                     'odom_topic': '/bluerov2/odometry',
                     'sonar_topic': '/bluerov2/fls/image',
                 }
