@@ -36,6 +36,7 @@ slam_node:
       enable_gaussian_weighting: false  # use Gaussian intensity weighting
       use_dda_traversal: true   # use DDA for ray traversal
       bearing_step: 2           # bearing sampling step
+      profiling_interval: 15    # profiling output and CSV sampling interval (frames)
 
     # ==================== SLAM Parameters ====================
     # how often to add keyframes, this can be varied but between 1 and 4 meters is best
