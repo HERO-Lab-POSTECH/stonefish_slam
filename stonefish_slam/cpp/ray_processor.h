@@ -53,7 +53,7 @@ struct RayProcessorConfig {
 
     // Constructor with default values
     RayProcessorConfig()
-        : max_range(30.0),
+        : max_range(40.0),
           min_range(0.5),
           range_resolution(0.06),
           vertical_aperture(20.0 * M_PI / 180.0),

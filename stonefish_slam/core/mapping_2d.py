@@ -90,7 +90,7 @@ class Mapping2D:
         sonar_range: float = 20.0,
         sonar_fov: float = 130.0,
         fan_pixel_resolution: float = 0.05,
-        sonar_tilt_deg: float = 30.0,
+        sonar_tilt_deg: float = 10.0,
         range_min: float = 0.5,
         keyframe_sample_threshold: int = 50,
         intensity_threshold: int = 50,

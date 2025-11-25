@@ -13,10 +13,10 @@ struct VoxelKey {
     int x, y, z;  // Voxel grid coordinates (integer)
 
     VoxelKey(double fx, double fy, double fz, double resolution) {
-        // Convert floating-point coordinates to integer grid
-        x = static_cast<int>(std::floor(fx / resolution + 0.5));
-        y = static_cast<int>(std::floor(fy / resolution + 0.5));
-        z = static_cast<int>(std::floor(fz / resolution + 0.5));
+        // Convert floating-point coordinates to integer grid (voxel center index)
+        x = static_cast<int>(std::floor(fx / resolution));
+        y = static_cast<int>(std::floor(fy / resolution));
+        z = static_cast<int>(std::floor(fz / resolution));
     }
 
     // Comparison for sorting (x → y → z order)
@@ -178,12 +178,13 @@ void RayProcessor::process_sonar_image(
         // In NED: Z = Down (positive = underwater)
         // Filter condition: voxel_z < robot_z → above robot → exclude
         double robot_z = sonar_origin_world[2];  // Robot Z position in NED frame
+        int robot_grid_z = static_cast<int>(std::floor(robot_z / config_.voxel_resolution));
 
         // First pass: count valid voxels (at or below robot)
         size_t filtered_count = 0;
         for (size_t i = 0; i < unique_count; ++i) {
-            double voxel_z = unique_updates[i].key.z * config_.voxel_resolution;
-            if (voxel_z >= robot_z) {  // Keep voxels at or below robot (NED)
+            // VoxelKey.z is already in grid units, compare directly
+            if (unique_updates[i].key.z >= robot_grid_z) {  // Keep voxels at or below robot (NED)
                 filtered_count++;
             }
         }
@@ -205,12 +206,13 @@ void RayProcessor::process_sonar_image(
         // Second pass: fill only valid voxels
         size_t write_idx = 0;
         for (size_t i = 0; i < unique_count; ++i) {
-            double voxel_z = unique_updates[i].key.z * config_.voxel_resolution;
-            if (voxel_z >= robot_z) {  // Keep voxels at or below robot
+            // VoxelKey is in grid units, compare directly
+            if (unique_updates[i].key.z >= robot_grid_z) {  // Keep voxels at or below robot
                 const auto& update = unique_updates[i];
-                points_ptr[write_idx * 3 + 0] = update.key.x * config_.voxel_resolution;
-                points_ptr[write_idx * 3 + 1] = update.key.y * config_.voxel_resolution;
-                points_ptr[write_idx * 3 + 2] = voxel_z;
+                // Convert grid coordinates to world coordinates (voxel center)
+                points_ptr[write_idx * 3 + 0] = (update.key.x + 0.5) * config_.voxel_resolution;
+                points_ptr[write_idx * 3 + 1] = (update.key.y + 0.5) * config_.voxel_resolution;
+                points_ptr[write_idx * 3 + 2] = (update.key.z + 0.5) * config_.voxel_resolution;
                 log_odds_ptr[write_idx] = update.log_odds;
                 write_idx++;
             }
@@ -602,11 +604,11 @@ std::vector<Eigen::Vector3d> RayProcessor::traverse_ray_dda(
     std::array<int, 3> current_voxel = world_to_voxel_key(start);
     std::array<int, 3> end_voxel = world_to_voxel_key(end);
 
-    // Add starting voxel center
+    // Add starting voxel center (grid index → world center)
     Eigen::Vector3d voxel_center(
-        current_voxel[0] * config_.voxel_resolution,
-        current_voxel[1] * config_.voxel_resolution,
-        current_voxel[2] * config_.voxel_resolution
+        (current_voxel[0] + 0.5) * config_.voxel_resolution,
+        (current_voxel[1] + 0.5) * config_.voxel_resolution,
+        (current_voxel[2] + 0.5) * config_.voxel_resolution
     );
     voxel_centers.push_back(voxel_center);
 
@@ -650,11 +652,11 @@ std::vector<Eigen::Vector3d> RayProcessor::traverse_ray_dda(
         current_voxel[min_axis] += step[min_axis];
         tMax[min_axis] += tDelta[min_axis];
 
-        // Add new voxel center
+        // Add new voxel center (grid index → world center)
         Eigen::Vector3d new_center(
-            current_voxel[0] * config_.voxel_resolution,
-            current_voxel[1] * config_.voxel_resolution,
-            current_voxel[2] * config_.voxel_resolution
+            (current_voxel[0] + 0.5) * config_.voxel_resolution,
+            (current_voxel[1] + 0.5) * config_.voxel_resolution,
+            (current_voxel[2] + 0.5) * config_.voxel_resolution
         );
         voxel_centers.push_back(new_center);
     }

@@ -387,68 +387,30 @@ class SonarMapping3D:
     Integrated with stonefish_slam SLAM system using keyframe-based updates.
     """
 
-    def __init__(self, config=None):
+    def __init__(self, config):
         """
-        Initialize with sonar parameters
+        Initialize with sonar parameters (config required)
 
         Args:
-            config: Optional dictionary with custom parameters
+            config: Dictionary with all required parameters
         """
-        # Default sonar parameters for BlueROV2 with FLS
-        default_config = {
-            'horizontal_fov': 130.0,      # degrees (-65 to +65)
-            'vertical_aperture': 20.0,     # degrees (vertical aperture)
-            'max_range': 40.0,             # meters (updated from 30.0)
-            'min_range': 0.5,              # meters
-            'intensity_threshold': 50,     # 0-255 scale (match 2D mapping)
-            'image_width': 512,            # Sonar image width (bearings)
-            'image_height': 500,          # Sonar image height (ranges)
-            # Sonar mounting (BlueROV2 actual mounting, FRD frame)
-            'sonar_position': [0.25, 0.0, 0.08],  # meters from base_link
-            'sonar_tilt': -0.174533,       # 10° downward (negative pitch in FRD)
-            # Octree parameters
-            'voxel_resolution': 0.1,       # 10cm voxels (hierarchical octree optimized)
-            'min_probability': 0.6,        # Minimum probability for occupied
-            'max_frames': 0,               # 0=unlimited
-            'dynamic_expansion': True,     # Enable dynamic map expansion
-            'adaptive_update': True,       # Enable adaptive updating (linear protection)
-            # C++ OctoMap backend
-            'use_cpp_backend': True,       # Use C++ OctoMap for 50-100x speedup
-            # Bearing propagation parameters (NEW)
-            'enable_propagation': False,   # DISABLED for performance (30-40% overhead)
-            'propagation_radius': 1,       # Number of adjacent bearings to propagate to (reduced from 2)
-            'propagation_sigma': 1.0,      # Gaussian decay sigma for propagation weight (reduced from 1.5)
-            'enable_profiling': True,      # Enable performance profiling
-            # Gaussian weighting for vertical aperture (NEW)
-            'enable_gaussian_weighting': False,  # Use Gaussian vs Uniform intensity distribution
-            'gaussian_sigma_factor': 2.5,        # Sigma = aperture / factor (smaller = wider spread)
-            # Range weighting parameters (distance-dependent decay)
-            'use_range_weighting': True,         # Enable range-dependent weight decay
-            'lambda_decay': 0.1,                 # Exponential decay rate (gentler for 30m range)
-            # DDA voxel traversal (Amanatides-Woo algorithm)
-            'use_dda_traversal': True,           # Enable C++ DDA for faster free space traversal
-        }
-
-        # Update with provided config if any
-        if config:
-            default_config.update(config)
 
         # Store parameters
-        self.horizontal_fov = np.radians(default_config['horizontal_fov'])
-        self.vertical_aperture = np.radians(default_config['vertical_aperture'])
-        self.max_range = default_config['max_range']
-        self.min_range = default_config['min_range']
-        self.intensity_threshold = default_config['intensity_threshold']
-        self.image_width = default_config['image_width']
-        self.image_height = default_config['image_height']
-        self.voxel_resolution = default_config['voxel_resolution']
-        self.min_probability = default_config['min_probability']
-        self.max_frames = default_config['max_frames']
-        self.dynamic_expansion = default_config['dynamic_expansion']
+        self.horizontal_fov = np.radians(config['horizontal_fov'])
+        self.vertical_aperture = np.radians(config['vertical_aperture'])
+        self.max_range = config['max_range']
+        self.min_range = config['min_range']
+        self.intensity_threshold = config['intensity_threshold']
+        self.image_width = config['image_width']
+        self.image_height = config['image_height']
+        self.voxel_resolution = config['voxel_resolution']
+        self.min_probability = config['min_probability']
+        self.max_frames = config['max_frames']
+        self.dynamic_expansion = config['dynamic_expansion']
 
-        # Sonar mounting transform (updated to use tilt instead of full RPY)
-        self.sonar_position = np.array(default_config['sonar_position'])
-        self.sonar_tilt = default_config['sonar_tilt']
+        # Sonar mounting transform (convert tilt from degrees to radians, negative for FRD)
+        self.sonar_position = np.array(config['sonar_position'])
+        self.sonar_tilt = -np.deg2rad(config['sonar_tilt_deg'])
 
         # Pre-compute sonar to base_link transform
         self.T_sonar_to_base = self.create_transform_matrix(
@@ -467,18 +429,18 @@ class SonarMapping3D:
         self.range_resolution = (self.max_range - self.min_range) / self.image_height
 
         # Get adaptive update settings from config
-        self.adaptive_update = default_config.get('adaptive_update', True)
-        self.adaptive_threshold = default_config.get('adaptive_threshold', 0.5)
-        self.adaptive_max_ratio = default_config.get('adaptive_max_ratio', 0.5)
+        self.adaptive_update = config['adaptive_update']
+        self.adaptive_threshold = config['adaptive_threshold']
+        self.adaptive_max_ratio = config['adaptive_max_ratio']
 
-        # Get log-odds parameters from config (use OctoMap default values)
-        self.log_odds_occupied = default_config.get('log_odds_occupied', 1.5)
-        self.log_odds_free = default_config.get('log_odds_free', -2.0)
-        self.log_odds_min = default_config.get('log_odds_min', -2.0)  # OctoMap default: -2.0 (not -10.0)
-        self.log_odds_max = default_config.get('log_odds_max', 3.5)   # OctoMap default: 3.5 (not 10.0)
+        # Get log-odds parameters from config
+        self.log_odds_occupied = config['log_odds_occupied']
+        self.log_odds_free = config['log_odds_free']
+        self.log_odds_min = config['log_odds_min']
+        self.log_odds_max = config['log_odds_max']
 
         # C++ backend initialization
-        self.use_cpp_backend = default_config['use_cpp_backend']
+        self.use_cpp_backend = config['use_cpp_backend']
 
         if self.use_cpp_backend:
             try:
@@ -495,7 +457,7 @@ class SonarMapping3D:
 
         # C++ Ray Processor initialization (depends on C++ octree)
         # C++ ray processor: Fixed OpenMP/GIL issue with scoped release pattern (2025-11-24)
-        self.use_cpp_ray_processor = default_config.get('use_cpp_ray_processor', True)
+        self.use_cpp_ray_processor = config.get('use_cpp_ray_processor', True)
         self.cpp_ray_processor = None
 
         if self.use_cpp_ray_processor and CPP_RAY_PROCESSOR_AVAILABLE and self.use_cpp_backend:
@@ -512,11 +474,11 @@ class SonarMapping3D:
                 ray_config.bearing_resolution = self.horizontal_fov / (self.image_width - 1)
                 ray_config.log_odds_occupied = self.log_odds_occupied
                 ray_config.log_odds_free = self.log_odds_free
-                ray_config.use_range_weighting = default_config.get('use_range_weighting', True)
-                ray_config.lambda_decay = default_config.get('lambda_decay', 0.1)
-                ray_config.enable_gaussian_weighting = default_config.get('enable_gaussian_weighting', False)
+                ray_config.use_range_weighting = config['use_range_weighting']
+                ray_config.lambda_decay = config['lambda_decay']
+                ray_config.enable_gaussian_weighting = config['enable_gaussian_weighting']
                 ray_config.voxel_resolution = self.voxel_resolution
-                ray_config.bearing_step = default_config.get('bearing_step', 2)  # Fixed: process every 2nd bearing (was 256!)
+                ray_config.bearing_step = config['bearing_step']
                 ray_config.intensity_threshold = self.intensity_threshold
 
                 # Store bearing_step for profiling
@@ -555,17 +517,16 @@ class SonarMapping3D:
             self.octree.log_odds_min = self.log_odds_min
             self.octree.log_odds_max = self.log_odds_max
 
-        # Frame sampling configuration (0 = keyframe mode, N = every N frames)
-        self.frame_sampling_interval = config.get('frame_sampling_interval', 0)
-        self.frame_count = 0  # Frame counter for sampling
+        # Frame counter
+        self.frame_count = 0
 
         # Bearing propagation settings
-        self.enable_propagation = default_config.get('enable_propagation', False)
-        self.propagation_radius = default_config.get('propagation_radius', 2)
-        self.propagation_sigma = default_config.get('propagation_sigma', 1.5)
+        self.enable_propagation = config['enable_propagation']
+        self.propagation_radius = config.get('propagation_radius', 2)
+        self.propagation_sigma = config.get('propagation_sigma', 1.5)
 
         # Performance profiling
-        self.enable_profiling = default_config.get('enable_profiling', True)
+        self.enable_profiling = config.get('enable_profiling', True)
         self.performance_stats = {
             'frame_times': [],           # Processing times per frame
             'voxel_updates': [],          # Number of voxel updates per frame
@@ -590,15 +551,15 @@ class SonarMapping3D:
         }
 
         # Gaussian weighting settings for vertical aperture
-        self.enable_gaussian_weighting = default_config.get('enable_gaussian_weighting', False)
-        self.gaussian_sigma_factor = default_config.get('gaussian_sigma_factor', 2.5)
+        self.enable_gaussian_weighting = config['enable_gaussian_weighting']
+        self.gaussian_sigma_factor = config.get('gaussian_sigma_factor', 2.5)
 
         # Range weighting parameters (distance-dependent decay)
-        self.use_range_weighting = default_config.get('use_range_weighting', True)
-        self.lambda_decay = default_config.get('lambda_decay', 0.1)
+        self.use_range_weighting = config['use_range_weighting']
+        self.lambda_decay = config['lambda_decay']
 
         # DDA voxel traversal initialization (after all parameters are set)
-        self.use_dda = default_config.get('use_dda_traversal', True)
+        self.use_dda = config['use_dda_traversal']
         if self.use_dda:
             try:
                 from stonefish_slam import dda_traversal
@@ -1094,18 +1055,6 @@ class SonarMapping3D:
             polar_image: 2D numpy array (height x width) with intensity values
             robot_pose: Robot pose (dict with 'position'/'orientation' or ROS Pose message)
         """
-        # Frame sampling mode:
-        #   - frame_sampling_interval=0: Use keyframe-based updates (production)
-        #   - frame_sampling_interval=N: Process every N-th frame (testing)
-        # Test mode (5-frame sampling) reduces computation by ~80% but may miss
-        # fast-moving features. Suitable for coarser resolution (0.3m) testing.
-
-        # Frame sampling: skip frames if enabled
-        self.frame_count += 1
-        if self.frame_sampling_interval > 0:
-            if self.frame_count % self.frame_sampling_interval != 0:
-                return  # Skip this frame
-
         # [A] Frame start timing
         if self.profiling_enabled:
             t_frame_start = time.perf_counter()

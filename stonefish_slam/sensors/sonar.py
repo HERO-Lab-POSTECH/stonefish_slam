@@ -147,8 +147,8 @@ class OculusProperty(object):
         self.ranges = None
         # r[i] - r[i - 1]
         self.range_resolution = None
-        # n * resolution
-        self.max_range = 30.
+        # n * resolution (set from sonar data during initialization)
+        self.max_range = None
 
         # bearings: [b1, ..., bm]
         self.num_bearings = None

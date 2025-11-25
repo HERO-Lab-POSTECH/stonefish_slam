@@ -92,6 +92,12 @@ install(PROGRAMS
   RENAME kalman_node
 )
 
+install(PROGRAMS
+  stonefish_slam/nodes/mapping_3d_test_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME mapping_3d_test
+)
+
 # Build pybind11 modules
 # CFAR module (only needs Eigen)
 if(pybind11_FOUND AND EIGEN3_FOUND)

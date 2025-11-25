@@ -1,5 +1,45 @@
 slam_node:
   ros__parameters:
+    # ==================== Sonar Hardware Configuration ====================
+    sonar:
+      max_range: 40.0           # Maximum sonar range (m) - UNIFIED
+      min_range: 0.5            # Minimum sonar range (m)
+      horizontal_fov: 130.0     # Horizontal field of view (degrees)
+      vertical_aperture: 20.0   # Vertical beam aperture (degrees)
+      image_width: 918          # Number of bearings
+      image_height: 512         # Number of range bins
+      sonar_position: [0.25, 0.0, 0.08]  # Sonar position relative to base_link (FRD)
+      sonar_tilt_deg: 10.0      # Sonar tilt angle (degrees, downward) - UNIFIED
+
+    # ==================== 2D Mapping Configuration ====================
+    mapping_2d:
+      map_resolution: 0.1       # meters per pixel
+      map_size: [4000, 4000]    # [width, height] in pixels
+      map_update_interval: 1    # update every N keyframes
+      intensity_threshold: 50   # minimum intensity (0-255) for pixels
+
+    # ==================== 3D Mapping Configuration ====================
+    mapping_3d:
+      voxel_resolution: 0.1     # meters
+      min_probability: 0.6      # minimum probability for occupied voxel
+      log_odds_occupied: 1.5    # log-odds increment for occupied
+      log_odds_free: -2.0       # log-odds decrement for free space
+      log_odds_min: -10.0       # minimum log-odds (clamping)
+      log_odds_max: 10.0        # maximum log-odds (clamping)
+      adaptive_update: true     # enable adaptive Bayesian update
+      adaptive_threshold: 0.5   # probability threshold for protection
+      adaptive_max_ratio: 0.5   # max update ratio for protected voxels
+      use_cpp_backend: true     # use C++ ray processor
+      enable_propagation: false # enable probability propagation
+      use_range_weighting: true # use exponential range weighting
+      lambda_decay: 0.1         # decay factor for range weighting
+      enable_gaussian_weighting: false  # use Gaussian intensity weighting
+      use_dda_traversal: true   # use DDA for ray traversal
+      bearing_step: 2           # bearing sampling step
+      free_vertical_factor: 8.0     # vertical sampling for free space
+      occupied_vertical_factor: 3.0  # vertical sampling for occupied
+
+    # ==================== SLAM Parameters ====================
     # how often to add keyframes, this can be varied but between 1 and 4 meters is best
     keyframe_duration: 1.0
     keyframe_translation: 3.0
@@ -41,26 +81,6 @@ slam_node:
     pcm_queue_size: 5  # the sliding window size for PCM
     min_pcm: 3  # the min number of pairwise consistent loop closures (increased from 2 - stronger outlier rejection)
 
-    # 2D Mapping parameters
-    enable_2d_mapping: false  # Disabled for 3D mapping performance
-    map_resolution: 0.1  # meters per pixel
-    map_size: [4000, 4000]  # width, height in pixels (max map size to prevent clipping)
-    sonar_range: 30.0  # meters
-    sonar_fov: 130.0  # degrees
-    map_update_interval: 1  # update map every N keyframes (1=every keyframe for real-time visualization)
-    intensity_threshold: 50  # minimum intensity (0-255) for pixels to affect map (filters noise)
-
-    # 3D Mapping parameters
-    enable_3d_mapping: true
-    voxel_resolution: 0.1  # meters (increased from 0.05 to reduce point count)
-    min_probability: 0.8  # minimum probability to consider voxel as occupied (increased from 0.6)
-    vertical_aperture: 20.0  # degrees (sonar vertical beam aperture)
-    # Log-odds Bayesian update parameters
-    log_odds_occupied: 1.5  # increment for occupied voxels
-    log_odds_free: -2.0  # decrement for free space (stronger negative for clearing)
-    log_odds_min: -10.0  # minimum log-odds (clamping lower bound)
-    log_odds_max: 10.0  # maximum log-odds (clamping upper bound)
-    # Adaptive update (protects free space from noise)
-    adaptive_update: true  # enable adaptive update for occupied signals
-    adaptive_threshold: 0.5  # probability threshold for protection (voxels <= 0.5 protected)
-    adaptive_max_ratio: 0.5  # maximum update ratio for protected voxels (50% max)
+    # Mapping enable flags
+    enable_2d_mapping: true
+    enable_3d_mapping: false
