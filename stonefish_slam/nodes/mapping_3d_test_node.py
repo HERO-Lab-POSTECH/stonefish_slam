@@ -134,11 +134,11 @@ class MappingTestNode(Node):
         odom_sub = message_filters.Subscriber(self, Odometry, odom_topic)
         sonar_sub = message_filters.Subscriber(self, Image, sonar_topic)
 
-        # Approximate time sync (100ms tolerance)
+        # Approximate time sync (1 second tolerance, larger queue)
         self.ts = message_filters.ApproximateTimeSynchronizer(
             [odom_sub, sonar_sub],
-            queue_size=10,
-            slop=0.1
+            queue_size=50,
+            slop=1.0
         )
         self.ts.registerCallback(self.sync_callback)
 
@@ -154,6 +154,10 @@ class MappingTestNode(Node):
         """Time-synchronized callback for odometry + sonar"""
 
         self.frame_count += 1
+
+        # Debug: First callback confirmation
+        if self.frame_count == 1:
+            self.get_logger().info('First synchronized message received!')
 
         # Frame sampling: only process every Nth frame
         if self.frame_count % self.frame_interval != 0:
