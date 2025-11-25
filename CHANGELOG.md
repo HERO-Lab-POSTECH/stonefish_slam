@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Shadow validation horizontal range 수정** (2025-11-26)
+  - **증상**:
+    - Shadow validation이 3D range 사용하여 occupied voxel 오판
+    - Vertical aperture 확산으로 인한 range 계산 불일치
+    - First_hit_map: horizontal range만 계산 vs Shadow validation: 3D range 포함
+    - 결과: Vertical 방향 떨어진 occupied voxel이 shadow로 오판되어 skip
+  - **근본 원인**:
+    - `_voxel_to_sonar_coords()`: `range_m = sqrt(x^2 + y^2 + z^2)` (3D range)
+    - `_compute_first_hit_map()`: `range = max_range - r_idx * resolution` (horizontal range)
+    - Range 계산 방식 불일치로 shadow 검증 기준 다름
+  - **수정 사항** (`ray_processor.cpp`):
+    - Line 416-417: 3D range → horizontal range로 변경
+    - `range_m = sqrt(x^2 + y^2)` (z 성분 제거)
+    - First_hit_map과 동일한 기준 사용
+  - **효과**:
+    - Shadow validation 일관성 확보
+    - Occupied voxel이 vertical 방향으로 떨어져 있어도 올바르게 업데이트
+    - 물체 뒷면 관측 시 occupied로 정상 업데이트
+    - Shadow 영역 검증 신뢰도 향상
+  - **파일**: `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 - **C++ DDA path에 shadow validation 추가** (2025-11-26)
   - **증상**:
     - C++ DDA 경로 (use_dda_traversal=True, 기본값)에서 shadow validation 없음
