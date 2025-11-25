@@ -133,17 +133,17 @@ class SLAMNode(SLAM, Node):
         self.get_logger().info(f"SLAM STATUS: {self.enable_slam}")
 
         # noise models
-        self.declare_parameter('prior_sigmas', [0.1, 0.1, 0.01])
-        self.declare_parameter('odom_sigmas', [0.2, 0.2, 0.02])
-        self.declare_parameter('icp_odom_sigmas', [0.1, 0.1, 0.01])
+        self.declare_parameter('slam_prior_noise', [0.1, 0.1, 0.01])
+        self.declare_parameter('slam_odom_noise', [0.2, 0.2, 0.02])
+        self.declare_parameter('slam_icp_noise', [0.1, 0.1, 0.01])
 
-        self.prior_sigmas = self.get_parameter('prior_sigmas').value
-        self.odom_sigmas = self.get_parameter('odom_sigmas').value
-        self.icp_odom_sigmas = self.get_parameter('icp_odom_sigmas').value
+        self.prior_sigmas = self.get_parameter('slam_prior_noise').value
+        self.odom_sigmas = self.get_parameter('slam_odom_noise').value
+        self.icp_odom_sigmas = self.get_parameter('slam_icp_noise').value
 
         # resultion for map downsampling
-        self.declare_parameter('point_resolution', 0.5)
-        self.point_resolution = self.get_parameter('point_resolution').value
+        self.declare_parameter('point_downsample_resolution', 0.5)
+        self.point_resolution = self.get_parameter('point_downsample_resolution').value
 
         # sequential scan matching parameters (SSM)
         self.declare_parameter('ssm.enable', True)
@@ -196,13 +196,13 @@ class SLAMNode(SLAM, Node):
         self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
 
         # ===== 2D Mapping Parameters =====
-        self.declare_parameter('mapping_2d.map_resolution', 0.1)
+        self.declare_parameter('mapping_2d.map_2d_resolution', 0.1)
         self.declare_parameter('mapping_2d.map_size', [4000, 4000])
         self.declare_parameter('mapping_2d.map_update_interval', 1)
         self.declare_parameter('mapping_2d.intensity_threshold', 50)
 
         # ===== 3D Mapping Parameters =====
-        self.declare_parameter('mapping_3d.voxel_resolution', 0.1)
+        self.declare_parameter('mapping_3d.map_3d_voxel_size', 0.1)
         self.declare_parameter('mapping_3d.min_probability', 0.6)
         self.declare_parameter('mapping_3d.log_odds_occupied', 1.5)
         self.declare_parameter('mapping_3d.log_odds_free', -2.0)
@@ -288,7 +288,7 @@ class SLAMNode(SLAM, Node):
                 'intensity_threshold': self.intensity_threshold,
 
                 # 3D mapping specific
-                'voxel_resolution': self.get_parameter('mapping_3d.voxel_resolution').value,
+                'voxel_resolution': self.get_parameter('mapping_3d.map_3d_voxel_size').value,
                 'min_probability': self.get_parameter('mapping_3d.min_probability').value,
                 'log_odds_occupied': self.get_parameter('mapping_3d.log_odds_occupied').value,
                 'log_odds_free': self.get_parameter('mapping_3d.log_odds_free').value,

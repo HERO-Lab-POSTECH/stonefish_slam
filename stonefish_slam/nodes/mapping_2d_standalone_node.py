@@ -34,7 +34,7 @@ class Mapping2DStandaloneNode(Node):
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
 
         # Mapping 2D parameters
-        self.declare_parameter('map_resolution', 0.1)
+        self.declare_parameter('map_2d_resolution', 0.1)
         self.declare_parameter('map_size', [4000, 4000])
         self.declare_parameter('intensity_threshold', 50)
 
@@ -52,7 +52,7 @@ class Mapping2DStandaloneNode(Node):
         odom_topic = self.get_parameter('odom_topic').value
         sonar_topic = self.get_parameter('sonar_topic').value
 
-        map_resolution = self.get_parameter('map_resolution').value
+        map_resolution = self.get_parameter('map_2d_resolution').value
         map_size = self.get_parameter('map_size').value
         sonar_range = self.get_parameter('sonar.max_range').value
         sonar_fov = self.get_parameter('sonar.horizontal_fov').value

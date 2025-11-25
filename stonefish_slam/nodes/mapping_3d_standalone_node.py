@@ -45,7 +45,7 @@ class Mapping3DStandaloneNode(Node):
         self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
 
         # 3D Mapping parameters (from slam.yaml mapping_3d section)
-        self.declare_parameter('mapping_3d.voxel_resolution', 0.2)
+        self.declare_parameter('mapping_3d.map_3d_voxel_size', 0.2)
         self.declare_parameter('mapping_3d.min_probability', 0.6)
         self.declare_parameter('mapping_3d.log_odds_occupied', 1.5)
         self.declare_parameter('mapping_3d.log_odds_free', -2.0)

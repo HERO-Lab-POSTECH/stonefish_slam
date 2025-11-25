@@ -19,7 +19,7 @@ def generate_launch_description():
 
     Test mode configuration:
     - frame_sampling_interval: 5 (process every 5th frame)
-    - voxel_resolution: 0.3m (reduced from 0.2m for faster processing)
+    - map_3d_voxel_size: 0.3m (reduced from 0.2m for faster processing)
     - Reduces computation by ~80% for testing purposes
     """
 
@@ -67,7 +67,7 @@ def generate_launch_description():
             {
                 # Test overrides
                 'frame_sampling_interval': 5,  # Process every 5th frame
-                'mapping_3d.voxel_resolution': 0.3,  # Reduced from 0.5m for testing
+                'mapping_3d.map_3d_voxel_size': 0.3,  # Reduced from 0.5m for testing
                 'enable_slam': LaunchConfiguration('enable_slam'),
                 'icp_config': icp_config,
             }

@@ -95,8 +95,8 @@ class FeatureExtractionNode(Node):
         self.declare_parameter('sonar.vertical_fov', 20.0)
         self.declare_parameter('sonar.num_beams', 512)
         self.declare_parameter('sonar.num_bins', 500)
-        self.declare_parameter('sonar.range_min', 0.5)
-        self.declare_parameter('sonar.range_max', 20.0)
+        self.declare_parameter('sonar.min_range', 0.5)
+        self.declare_parameter('sonar.max_range', 20.0)
 
         # Get parameters
         self.vehicle_name = self.get_parameter('vehicle_name').get_parameter_value().string_value
@@ -126,8 +126,8 @@ class FeatureExtractionNode(Node):
         self.vertical_fov = self.get_parameter('sonar.vertical_fov').get_parameter_value().double_value
         self.num_beams = self.get_parameter('sonar.num_beams').get_parameter_value().integer_value
         self.num_bins = self.get_parameter('sonar.num_bins').get_parameter_value().integer_value
-        self.range_min = self.get_parameter('sonar.range_min').get_parameter_value().double_value
-        self.range_max = self.get_parameter('sonar.range_max').get_parameter_value().double_value
+        self.range_min = self.get_parameter('sonar.min_range').get_parameter_value().double_value
+        self.range_max = self.get_parameter('sonar.max_range').get_parameter_value().double_value
 
         # CV bridge
         self.BridgeInstance = cv_bridge.CvBridge()
