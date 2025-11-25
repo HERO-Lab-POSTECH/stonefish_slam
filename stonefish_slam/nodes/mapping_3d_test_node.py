@@ -54,6 +54,7 @@ class MappingTestNode(Node):
             # 3D mapping
             'voxel_resolution': resolution,
             'min_probability': 0.6,
+            'intensity_threshold': 50,
             'log_odds_occupied': 1.5,
             'log_odds_free': -2.0,
             'log_odds_min': -10.0,
