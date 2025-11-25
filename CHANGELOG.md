@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **C++ DDA path에 shadow validation 추가** (2025-11-26)
+  - **증상**:
+    - C++ DDA 경로 (use_dda_traversal=True, 기본값)에서 shadow validation 없음
+    - Voxel merge 시 그림자 영역 검증 누락
+    - 물체 뒤쪽 그림자 영역이 free space로 잘못 업데이트됨
+  - **근본 원인**:
+    - C++ DDA voxel merge 루프에서 Python fallback과 동일한 검증 로직 부재
+    - Bearing-aware shadow 영역이 DDA 경로에서 무시됨
+  - **수정 사항** (`ray_processor.cpp`):
+    - Line 645-648: Free space 루프에 `_is_voxel_in_shadow()` 호출 추가
+    - Python fallback path와 동일한 검증 로직 적용
+    - 성능 영향 최소화 (O(1) 검증)
+  - **효과**:
+    - C++ DDA 사용 시에도 그림자 영역 올바르게 보호
+    - 물체 뒤쪽이 free space로 업데이트되는 문제 완전 해결
+    - DDA와 Python path 간 일관성 확보
+  - **파일**: `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 - **No-hit ray의 free space 업데이트 추가** (2025-11-26)
   - **증상**:
     - 반사가 없는 ray (first_hit_idx < 0)는 맵 업데이트하지 않음

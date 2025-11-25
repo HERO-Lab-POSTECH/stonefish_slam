@@ -640,8 +640,14 @@ class SonarMapping3D:
                 # Merge results into voxel_updates dict
                 for update in voxel_updates_list:
                     key = tuple(update.key)
+                    voxel_center = np.array(update.key, dtype=float) * self.voxel_resolution
+
+                    # Shadow validation (same as Python fallback path)
+                    if T_world_to_sonar is not None and first_hit_map is not None:
+                        if self._is_voxel_in_shadow(voxel_center, T_world_to_sonar, first_hit_map):
+                            continue  # Skip voxel in shadow region
+
                     if key not in voxel_updates:
-                        voxel_center = np.array(update.key, dtype=float) * self.voxel_resolution
                         voxel_updates[key] = {'point': voxel_center, 'sum': 0.0, 'count': 0}
                     voxel_updates[key]['sum'] += update.log_odds_sum
                     voxel_updates[key]['count'] += update.count
