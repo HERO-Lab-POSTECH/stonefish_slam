@@ -42,7 +42,6 @@ def generate_launch_description():
     # Config files
     feature_config = os.path.join(pkg_share, 'config', 'feature.yaml')
     slam_config = os.path.join(pkg_share, 'config', 'slam.yaml')
-    test_config = os.path.join(pkg_share, 'config', 'test_mapping.yaml')  # Test config
     icp_config = os.path.join(pkg_share, 'config', 'icp.yaml')
 
     # Feature extraction node
@@ -65,8 +64,10 @@ def generate_launch_description():
         output='screen',
         parameters=[
             slam_config,  # Base config
-            test_config,  # Test overrides (frame_sampling_interval, voxel_resolution)
             {
+                # Test overrides
+                'frame_sampling_interval': 5,  # Process every 5th frame
+                'mapping_3d.voxel_resolution': 0.3,  # Reduced from 0.5m for testing
                 'enable_slam': LaunchConfiguration('enable_slam'),
                 'icp_config': icp_config,
             }

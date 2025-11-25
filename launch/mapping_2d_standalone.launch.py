@@ -15,7 +15,7 @@ def generate_launch_description():
         parameters=[
             str(config_dir / 'slam.yaml'),
             {
-                'frame_interval': 1,
+                'frame_interval': 10,
                 'odom_topic': '/bluerov2/odometry',
                 'sonar_topic': '/bluerov2/fls/image',
             }
