@@ -32,10 +32,6 @@ struct RayProcessorConfig {
     double horizontal_fov;              // Horizontal field of view (degrees)
     double bearing_resolution;          // Horizontal angular resolution (radians)
 
-    // Vertical sampling parameters
-    double free_vertical_factor;        // Vertical sampling sparsity for free space (default: 8.0)
-    double occupied_vertical_factor;    // Vertical sampling density for occupied (default: 3.0)
-
     // Log-odds parameters
     double log_odds_occupied;           // Log-odds update for occupied voxels (default: 0.5)
     double log_odds_free;               // Log-odds update for free space (default: -5.0)
@@ -59,8 +55,6 @@ struct RayProcessorConfig {
           vertical_aperture(20.0 * M_PI / 180.0),
           horizontal_fov(130.0),
           bearing_resolution(0.0175),
-          free_vertical_factor(8.0),
-          occupied_vertical_factor(3.0),
           log_odds_occupied(0.5),
           log_odds_free(-5.0),  // Strong free space clearing (balanced with occupied)
           use_range_weighting(true),
@@ -303,16 +297,16 @@ private:
     Eigen::Vector3d compute_ray_direction(double bearing_angle) const;
 
     /**
-     * @brief Compute number of vertical steps based on range and vertical spread
+     * @brief Compute number of vertical steps for full voxel coverage
      *
-     * Adaptive sampling: denser near sonar, sparser far away
-     * num_steps = max(min_steps, vertical_spread / (voxel_size × factor))
+     * Full coverage: sample every voxel in vertical aperture
+     * vertical_spread = range × tan(half_aperture)
+     * num_steps = ceil(vertical_spread / voxel_resolution)
      *
      * @param range_m Range in meters
-     * @param vertical_factor Sampling factor (free: 8.0, occupied: 3.0)
      * @return Number of vertical steps (±N)
      */
-    int compute_num_vertical_steps(double range_m, double vertical_factor) const;
+    int compute_num_vertical_steps(double range_m) const;
 
 private:
     /**

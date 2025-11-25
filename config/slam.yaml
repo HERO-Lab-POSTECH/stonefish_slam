@@ -2,14 +2,14 @@ slam_node:
   ros__parameters:
     # ==================== Sonar Hardware Configuration ====================
     sonar:
-      max_range: 40.0           # Maximum sonar range (m) - UNIFIED
+      max_range: 20.0           # Maximum sonar range (m) - UNIFIED
       min_range: 0.5            # Minimum sonar range (m)
       horizontal_fov: 130.0     # Horizontal field of view (degrees)
       vertical_aperture: 20.0   # Vertical beam aperture (degrees)
       image_width: 918          # Number of bearings
       image_height: 512         # Number of range bins
       sonar_position: [0.25, 0.0, 0.08]  # Sonar position relative to base_link (FRD)
-      sonar_tilt_deg: 10.0      # Sonar tilt angle (degrees, downward) - UNIFIED
+      sonar_tilt_deg: 30.0      # Sonar tilt angle (degrees, downward) - UNIFIED
 
     # ==================== 2D Mapping Configuration ====================
     mapping_2d:
@@ -36,8 +36,6 @@ slam_node:
       enable_gaussian_weighting: false  # use Gaussian intensity weighting
       use_dda_traversal: true   # use DDA for ray traversal
       bearing_step: 2           # bearing sampling step
-      free_vertical_factor: 8.0     # vertical sampling for free space
-      occupied_vertical_factor: 3.0  # vertical sampling for occupied
 
     # ==================== SLAM Parameters ====================
     # how often to add keyframes, this can be varied but between 1 and 4 meters is best

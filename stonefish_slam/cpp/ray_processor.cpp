@@ -268,9 +268,9 @@ void RayProcessor::process_single_ray_internal(
             range_to_first_hit = config_.min_range;
         }
 
-        // Compute vertical steps for free space (adaptive based on mid-range)
+        // Compute vertical steps for free space (full coverage)
         double mid_range = config_.max_range - (first_hit_idx / 2.0) * config_.range_resolution;
-        int num_vertical_steps = compute_num_vertical_steps(mid_range, config_.free_vertical_factor);
+        int num_vertical_steps = compute_num_vertical_steps(mid_range);
 
         // Process free space with vertical fan (internal DDA traversal)
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
@@ -383,8 +383,8 @@ void RayProcessor::process_occupied_voxels_internal(
             continue;
         }
 
-        // Compute number of vertical steps (adaptive based on range)
-        int num_vertical_steps = compute_num_vertical_steps(range_m, config_.occupied_vertical_factor);
+        // Compute number of vertical steps (full coverage)
+        int num_vertical_steps = compute_num_vertical_steps(range_m);
 
         // Total number of vertical points
         int num_vertical_points = 2 * num_vertical_steps + 1;
@@ -561,19 +561,17 @@ Eigen::Vector3d RayProcessor::compute_ray_direction(double bearing_angle) const 
     );
 }
 
-// Compute number of vertical steps
-int RayProcessor::compute_num_vertical_steps(double range_m, double vertical_factor) const {
-    // Adaptive sampling based on vertical spread at this range
+// Compute number of vertical steps (full voxel coverage)
+int RayProcessor::compute_num_vertical_steps(double range_m) const {
+    // Full voxel coverage: sample every voxel in vertical aperture
     // vertical_spread = range × tan(half_aperture)
-    // num_steps = max(min_steps, vertical_spread / (voxel_size × factor))
+    // num_steps = ceil(vertical_spread / voxel_resolution)
 
     double vertical_spread = range_m * std::tan(half_aperture_);
-    int num_steps = static_cast<int>(vertical_spread / (config_.voxel_resolution * vertical_factor));
+    int num_steps = static_cast<int>(std::ceil(vertical_spread / config_.voxel_resolution));
 
-    // Minimum steps to ensure coverage
-    int min_steps = (vertical_factor < 5.0) ? 2 : 1;  // Occupied: min 2, Free: min 1
-
-    return std::max(min_steps, num_steps);
+    // At least 1 step to ensure coverage
+    return std::max(1, num_steps);
 }
 
 // Internal DDA voxel traversal (simplified version)
@@ -686,8 +684,6 @@ PYBIND11_MODULE(ray_processor, m) {
         .def_readwrite("vertical_aperture", &RayProcessorConfig::vertical_aperture)
         .def_readwrite("horizontal_fov", &RayProcessorConfig::horizontal_fov)
         .def_readwrite("bearing_resolution", &RayProcessorConfig::bearing_resolution)
-        .def_readwrite("free_vertical_factor", &RayProcessorConfig::free_vertical_factor)
-        .def_readwrite("occupied_vertical_factor", &RayProcessorConfig::occupied_vertical_factor)
         .def_readwrite("log_odds_occupied", &RayProcessorConfig::log_odds_occupied)
         .def_readwrite("log_odds_free", &RayProcessorConfig::log_odds_free)
         .def_readwrite("use_range_weighting", &RayProcessorConfig::use_range_weighting)

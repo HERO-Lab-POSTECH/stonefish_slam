@@ -218,8 +218,6 @@ class SLAMNode(SLAM, Node):
         self.declare_parameter('mapping_3d.enable_gaussian_weighting', False)
         self.declare_parameter('mapping_3d.use_dda_traversal', True)
         self.declare_parameter('mapping_3d.bearing_step', 2)
-        self.declare_parameter('mapping_3d.free_vertical_factor', 8.0)
-        self.declare_parameter('mapping_3d.occupied_vertical_factor', 3.0)
 
         # ===== Mapping Enable Flags =====
         self.declare_parameter('enable_2d_mapping', True)
@@ -306,8 +304,6 @@ class SLAMNode(SLAM, Node):
                 'enable_gaussian_weighting': self.get_parameter('mapping_3d.enable_gaussian_weighting').value,
                 'use_dda_traversal': self.get_parameter('mapping_3d.use_dda_traversal').value,
                 'bearing_step': self.get_parameter('mapping_3d.bearing_step').value,
-                'free_vertical_factor': self.get_parameter('mapping_3d.free_vertical_factor').value,
-                'occupied_vertical_factor': self.get_parameter('mapping_3d.occupied_vertical_factor').value,
 
                 # Fixed parameters
                 'max_frames': 0,

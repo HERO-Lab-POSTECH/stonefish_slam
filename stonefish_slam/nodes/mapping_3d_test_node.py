@@ -79,8 +79,6 @@ class MappingTestNode(Node):
             'enable_gaussian_weighting': False,
             'gaussian_sigma_factor': 2.5,
             'bearing_step': 2,
-            'free_vertical_factor': 8.0,
-            'occupied_vertical_factor': 3.0,
 
             # DDA traversal
             'use_dda_traversal': True,
