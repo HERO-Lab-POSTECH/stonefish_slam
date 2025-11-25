@@ -108,7 +108,23 @@ class SonarMapping3D:
             try:
                 from stonefish_slam import octree_mapping
                 self.cpp_octree = octree_mapping.OctreeMapping(resolution=self.voxel_resolution)
-                print(f"[INFO] Using C++ OctoMap backend (resolution: {self.voxel_resolution}m)")
+
+                # Configure adaptive protection (unidirectional: Free → Occupied only)
+                self.cpp_octree.set_adaptive_params(
+                    enable=self.adaptive_update,
+                    threshold=self.adaptive_threshold,
+                    max_ratio=self.adaptive_max_ratio
+                )
+
+                # Configure clamping thresholds (prevent fast saturation)
+                # Convert log-odds to probability: p = 1 / (1 + exp(-log_odds))
+                prob_min = 1.0 / (1.0 + np.exp(-self.log_odds_min))
+                prob_max = 1.0 / (1.0 + np.exp(-self.log_odds_max))
+                self.cpp_octree.set_clamping_thresholds(prob_min, prob_max)
+
+                print(f"[INFO] Using C++ OctoMap backend (resolution: {self.voxel_resolution}m, "
+                      f"adaptive={self.adaptive_update}, threshold={self.adaptive_threshold}, "
+                      f"max_ratio={self.adaptive_max_ratio}, clamp=[{self.log_odds_min}, {self.log_odds_max}])")
                 # No Python octree needed
                 self.octree = None
             except ImportError as e:

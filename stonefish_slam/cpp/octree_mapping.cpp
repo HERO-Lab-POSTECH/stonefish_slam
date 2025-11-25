@@ -12,7 +12,10 @@
 OctreeMapping::OctreeMapping(double resolution)
     : resolution_(resolution),
       log_odds_occupied_(0.5),
-      log_odds_free_(-5.0)  // Strong free space clearing (balanced with occupied)
+      log_odds_free_(-5.0),  // Strong free space clearing (balanced with occupied)
+      adaptive_update_(true),
+      adaptive_threshold_(0.5),
+      adaptive_max_ratio_(0.3)
 {
     if (resolution_ <= 0.0) {
         throw std::invalid_argument("Resolution must be positive");
@@ -133,6 +136,21 @@ void OctreeMapping::insert_point_cloud(
             const auto& key = batch.keys[i];
             double log_odds_update = batch.log_odds_updates[i];
 
+            // Adaptive protection (unidirectional: Free → Occupied only)
+            // Protects free space voxels from being easily converted to occupied
+            if (adaptive_update_ && log_odds_update > 0.0) {
+                octomap::OcTreeNode* node = tree_->search(key);
+                if (node) {
+                    double current_prob = node->getOccupancy();
+
+                    // Apply protection if current probability is below threshold
+                    if (current_prob <= adaptive_threshold_) {
+                        double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
+                        log_odds_update *= update_scale;
+                    }
+                }
+            }
+
             // Use updateNode() API for incremental update
             // This ensures pruning is performed automatically (lazy_eval=false)
             tree_->updateNode(key, static_cast<float>(log_odds_update), false);
@@ -154,6 +172,20 @@ void OctreeMapping::insert_point_cloud(
         // Use updateNode() API for incremental update (enables pruning, lazy_eval=false)
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
+            // Adaptive protection (unidirectional: Free → Occupied only)
+            if (adaptive_update_ && log_odds_update > 0.0) {
+                octomap::OcTreeNode* node = tree_->search(key);
+                if (node) {
+                    double current_prob = node->getOccupancy();
+
+                    // Apply protection if current probability is below threshold
+                    if (current_prob <= adaptive_threshold_) {
+                        double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
+                        log_odds_update *= update_scale;
+                    }
+                }
+            }
+
             tree_->updateNode(key, static_cast<float>(log_odds_update), false);
         }
     }
@@ -244,6 +276,12 @@ void OctreeMapping::set_clamping_thresholds(double min, double max) {
     tree_->setClampingThresMax(max);
 }
 
+void OctreeMapping::set_adaptive_params(bool enable, double threshold, double max_ratio) {
+    adaptive_update_ = enable;
+    adaptive_threshold_ = threshold;
+    adaptive_max_ratio_ = max_ratio;
+}
+
 // Get map statistics (P3.2 profiling)
 MapStats OctreeMapping::get_map_stats() const {
     size_t nodes = tree_->calcNumNodes();
@@ -310,6 +348,12 @@ PYBIND11_MODULE(octree_mapping, m) {
              py::arg("min"),
              py::arg("max"),
              "Set probability clamping limits (prevents extreme values)")
+        .def("set_adaptive_params",
+             &OctreeMapping::set_adaptive_params,
+             py::arg("enable"),
+             py::arg("threshold"),
+             py::arg("max_ratio"),
+             "Set adaptive update parameters (unidirectional Free -> Occupied protection)")
         .def("get_map_stats",
              &OctreeMapping::get_map_stats,
              "Get map statistics (P3.2 profiling)");

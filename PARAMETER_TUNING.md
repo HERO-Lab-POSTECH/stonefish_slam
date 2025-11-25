@@ -378,6 +378,83 @@ frame_interval: 10
 
 ---
 
+### Test 5: Clamping Threshold 확대 (Voxel 포화도 문제 해결)
+**날짜**: 2025-11-26
+
+**문제 보고**:
+- **증상**: Voxel이 양 극단(occupied/free)으로 너무 빠르게 포화
+- **영향**: 맵이 불안정하고 진동하는 현상 발생
+- **원인**: C++ octree의 기본 clamping threshold가 너무 좁음
+
+**기존 C++ 기본값**:
+```cpp
+tree_->setClampingThresMin(0.03);  // log-odds ≈ -3.5
+tree_->setClampingThresMax(0.97);  // log-odds ≈ +3.5
+```
+
+**분석**:
+- Clamping range: -3.5 ~ +3.5 (7.0)
+- 문제: Log-odds가 ±3.5에 도달하면 포화 (고정됨)
+- 결과: Voxel이 더 이상 업데이트 불가능 → 맵 경직
+
+**해결책** (mapping_3d.py lines 119-123):
+```python
+# Log-odds를 확률로 변환
+prob_min = 1.0 / (1.0 + np.exp(-log_odds_min))  # -15.0 → 3×10⁻⁷
+prob_max = 1.0 / (1.0 + np.exp(-log_odds_max))  # +20.0 → 0.999999
+
+# Python octomap에 적용
+cpp_octree.set_clamping_thresholds(prob_min, prob_max)
+```
+
+**파라미터 변경** (slam.yaml lines 24-25):
+```yaml
+# 확대된 clamping threshold
+log_odds_min: -15.0  # -10.0 → -15.0
+log_odds_max: 20.0   # 10.0 → 20.0 (Test 2에서 이미 적용됨)
+```
+
+**효과 분석**:
+| 파라미터 | C++ 기본값 | Test 2-4 값 | Test 5 값 | Range |
+|---------|-----------|-----------|---------|-------|
+| log_odds_min | -3.5 | -15.0 | -15.0 | 7.0 → 35.0 |
+| log_odds_max | +3.5 | +10.0 | +20.0 |  |
+| 확대율 | - | 2.9배 | **5배** | -15 ~ +20 |
+
+**물리적 의미**:
+```
+Probability ↔ Log-odds (sigmoid 변환)
+prob=0.001  ↔ log_odds ≈ -6.9
+prob=0.01   ↔ log_odds ≈ -4.6
+prob=0.05   ↔ log_odds ≈ -2.9
+prob=0.5    ↔ log_odds = 0.0    (균형점)
+prob=0.95   ↔ log_odds ≈ +2.9
+prob=0.99   ↔ log_odds ≈ +4.6
+prob=0.999  ↔ log_odds ≈ +6.9
+prob=0.99999↔ log_odds ≈ +11.5 ← Test 2 한계
+prob=0.999999 ↔ log_odds ≈ +13.8 ← Test 5 한계
+```
+
+**예상 효과**:
+1. ✅ **더 넓은 증거 축적**: Voxel이 -15 ~ +20 범위에서 연속 업데이트 가능
+2. ✅ **포화 지연**: 매우 확실한 상태까지도 추가 업데이트 수용
+3. ✅ **부드러운 수렴**: 급격한 진동 없이 안정적으로 수렴
+4. ✅ **재관측 적응성**: 환경 변화에 더 유연하게 대응
+5. ⚠️ **트레이드오프**: 매우 강한 증거도 천천히만 처리 (반응 속도 약간 둔화)
+
+**파일 수정**:
+- `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/mapping_3d.py` (lines 119-123)
+
+**검증 항목**:
+- [ ] `set_clamping_thresholds(3e-7, 0.999999)` 정상 작동 확인
+- [ ] Voxel log-odds 분포 확인 (극단값 도달 비율 감소)
+- [ ] 맵 안정성 및 진동 감소 확인
+- [ ] 재관측 시 수렴 속도 (경합 vs 안정성)
+
+**상태**: 준비됨 - 테스트 대기
+
+---
+
 ## 파라미터 튜닝 우선순위 (추천 순서)
 
 1. **log_odds_occupied / log_odds_free 비율** (맵 신뢰도 균형)

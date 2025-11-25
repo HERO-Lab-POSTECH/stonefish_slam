@@ -120,6 +120,18 @@ public:
     void set_clamping_thresholds(double min, double max);
 
     /**
+     * @brief Set adaptive update parameters (unidirectional protection)
+     *
+     * Protects free space voxels from being easily converted to occupied.
+     * Only applies protection for Free → Occupied updates, not Occupied → Free.
+     *
+     * @param enable Enable adaptive protection
+     * @param threshold Probability threshold for protection (default: 0.5)
+     * @param max_ratio Maximum update ratio for protected voxels (default: 0.3)
+     */
+    void set_adaptive_params(bool enable, double threshold, double max_ratio);
+
+    /**
      * @brief Get map statistics (P3.2 profiling)
      *
      * @return MapStats with node counts and memory usage
@@ -131,4 +143,9 @@ private:
     double resolution_;                       // Voxel size in meters
     double log_odds_occupied_;                // Default log-odds for occupied
     double log_odds_free_;                    // Default log-odds for free space
+
+    // Adaptive protection parameters (unidirectional: Free → Occupied only)
+    bool adaptive_update_;                    // Enable adaptive protection
+    double adaptive_threshold_;               // Probability threshold for protection
+    double adaptive_max_ratio_;               // Max update ratio for protected voxels
 };
