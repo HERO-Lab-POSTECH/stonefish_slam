@@ -526,7 +526,18 @@ std::vector<int> RayProcessor::extract_hit_indices(
 double RayProcessor::compute_range_weight(double range_m) const {
     // Exponential decay: w(r) = exp(-λ × r / r_max)
     // Python: mapping_3d.py lines 756-758
-    return std::exp(-config_.lambda_decay * range_m / config_.max_range);
+
+    // P3.1 profiling: measure exp() calls
+    exp_call_count_.fetch_add(1, std::memory_order_relaxed);
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    double weight = std::exp(-config_.lambda_decay * range_m / config_.max_range);
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    int64_t elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count();
+    exp_time_ns_.fetch_add(elapsed_ns, std::memory_order_relaxed);
+
+    return weight;
 }
 
 // Compute vertical angle
@@ -671,9 +682,29 @@ std::array<int, 3> RayProcessor::world_to_voxel_key(const Eigen::Vector3d& point
     };
 }
 
+// Get ray processing statistics (P3.1 profiling)
+RayStats RayProcessor::get_ray_stats() const {
+    return {
+        exp_call_count_.load(std::memory_order_relaxed),
+        exp_time_ns_.load(std::memory_order_relaxed) / 1e6  // ns → ms
+    };
+}
+
+// Reset ray processing statistics
+void RayProcessor::reset_ray_stats() {
+    exp_call_count_.store(0, std::memory_order_relaxed);
+    exp_time_ns_.store(0, std::memory_order_relaxed);
+}
+
 // Pybind11 module definition
 PYBIND11_MODULE(ray_processor, m) {
     m.doc() = "High-performance sonar ray processor for 3D mapping";
+
+    // RayStats struct (P3.1 profiling)
+    py::class_<RayStats>(m, "RayStats")
+        .def(py::init<>())
+        .def_readwrite("exp_calls", &RayStats::exp_calls, "Number of exp() calls")
+        .def_readwrite("exp_time_ms", &RayStats::exp_time_ms, "Total exp() time (ms)");
 
     // RayProcessorConfig struct
     py::class_<RayProcessorConfig>(m, "RayProcessorConfig")
@@ -714,5 +745,11 @@ PYBIND11_MODULE(ray_processor, m) {
              "Update configuration parameters")
         .def("get_config",
              &RayProcessor::get_config,
-             "Get current configuration");
+             "Get current configuration")
+        .def("get_ray_stats",
+             &RayProcessor::get_ray_stats,
+             "Get ray processing statistics (P3.1 profiling)")
+        .def("reset_ray_stats",
+             &RayProcessor::reset_ray_stats,
+             "Reset ray processing statistics");
 }

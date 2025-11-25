@@ -12,6 +12,15 @@
 namespace py = pybind11;
 
 /**
+ * @brief Map statistics for profiling P3.2 (map size)
+ */
+struct MapStats {
+    size_t num_nodes;       // Total number of nodes
+    size_t num_leaf_nodes;  // Number of leaf nodes (actual voxels)
+    double memory_mb;       // Memory usage in MB
+};
+
+/**
  * @brief High-performance Octree mapping using OctoMap library
  *
  * This class provides a Python-accessible C++ wrapper around OctoMap's OcTree
@@ -109,6 +118,13 @@ public:
      * @param max Maximum probability (e.g., 0.97)
      */
     void set_clamping_thresholds(double min, double max);
+
+    /**
+     * @brief Get map statistics (P3.2 profiling)
+     *
+     * @return MapStats with node counts and memory usage
+     */
+    MapStats get_map_stats() const;
 
 private:
     std::unique_ptr<octomap::OcTree> tree_;  // OctoMap tree instance

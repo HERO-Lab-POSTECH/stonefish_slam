@@ -244,9 +244,25 @@ void OctreeMapping::set_clamping_thresholds(double min, double max) {
     tree_->setClampingThresMax(max);
 }
 
+// Get map statistics (P3.2 profiling)
+MapStats OctreeMapping::get_map_stats() const {
+    size_t nodes = tree_->calcNumNodes();
+    size_t leaves = tree_->getNumLeafNodes();
+    double mem_mb = tree_->memoryUsage() / (1024.0 * 1024.0);
+
+    return {nodes, leaves, mem_mb};
+}
+
 // Pybind11 module definition
 PYBIND11_MODULE(octree_mapping, m) {
     m.doc() = "High-performance Octree mapping using OctoMap library";
+
+    // MapStats struct (P3.2 profiling)
+    py::class_<MapStats>(m, "MapStats")
+        .def(py::init<>())
+        .def_readwrite("num_nodes", &MapStats::num_nodes, "Total number of nodes")
+        .def_readwrite("num_leaf_nodes", &MapStats::num_leaf_nodes, "Number of leaf nodes")
+        .def_readwrite("memory_mb", &MapStats::memory_mb, "Memory usage (MB)");
 
     py::class_<OctreeMapping>(m, "OctreeMapping")
         .def(py::init<double>(),
@@ -293,5 +309,8 @@ PYBIND11_MODULE(octree_mapping, m) {
              &OctreeMapping::set_clamping_thresholds,
              py::arg("min"),
              py::arg("max"),
-             "Set probability clamping limits (prevents extreme values)");
+             "Set probability clamping limits (prevents extreme values)")
+        .def("get_map_stats",
+             &OctreeMapping::get_map_stats,
+             "Get map statistics (P3.2 profiling)");
 }

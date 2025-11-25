@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **P3.1/P3.2 Profiling Infrastructure** (2025-11-25)
+  - **P3.1**: exp() 호출 횟수 및 실행 시간 측정
+    - `RayProcessor::compute_range_weight()`에 atomic counter 추가
+    - Thread-safe profiling (OpenMP 환경)
+    - `get_ray_stats()`, `reset_ray_stats()` API
+    - Python 바인딩: `RayStats` 구조체
+  - **P3.2**: 맵 크기 (voxel 수, 메모리) 측정
+    - `OctreeMapping::get_map_stats()` 구현
+    - OctoMap API 활용: `calcNumNodes()`, `getNumLeafNodes()`, `memoryUsage()`
+    - Python 바인딩: `MapStats` 구조체
+  - **CSV 출력**: `/tmp/mapping_profiling.csv`
+    - 10프레임마다 샘플링 저장
+    - 컬럼: frame_id, timestamp, total_ms, ray_ms, octree_ms, exp_calls, exp_ms, map_voxels, memory_mb, dedup_count
+  - **콘솔 출력 간소화**: 1줄 요약 (기존 긴 출력 대체)
+    - 예: `Frame 10: 45.2ms (22.1 FPS) | 3542 voxels`
+  - 오버헤드: <5% (atomic relaxed ordering, 샘플링)
+  - 파일: `cpp/ray_processor.{h,cpp}`, `cpp/octree_mapping.{h,cpp}`, `core/mapping_3d.py`
+
 ### Changed
 
 - **OctoMap 자동 Pruning 활성화** (2025-11-25)

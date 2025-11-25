@@ -18,6 +18,7 @@ from scipy.spatial.transform import Rotation as R
 from collections import defaultdict
 import gtsam
 import time  # For performance profiling
+import csv
 
 # C++ Ray Processor import (with fallback)
 try:
@@ -549,6 +550,12 @@ class SonarMapping3D:
             'voxels_per_frame': [],
             'rays_per_frame': []
         }
+
+        # CSV profiling infrastructure (P3.1/P3.2)
+        self.csv_file = None
+        self.csv_writer = None
+        self.csv_sample_interval = 10  # Save every 10 frames
+        self.csv_path = '/tmp/mapping_profiling.csv'
 
         # Gaussian weighting settings for vertical aperture
         self.enable_gaussian_weighting = config['enable_gaussian_weighting']
@@ -1477,6 +1484,12 @@ class SonarMapping3D:
 
         self.frame_count = 0
 
+        # Close CSV file if open
+        if self.csv_file is not None:
+            self.csv_file.close()
+            self.csv_file = None
+            self.csv_writer = None
+
         # Reset performance stats
         if self.enable_profiling:
             self.performance_stats = {
@@ -1524,49 +1537,81 @@ class SonarMapping3D:
 
         return stats
 
+    def _init_csv(self):
+        """Initialize CSV file for profiling (P3.1/P3.2)"""
+        self.csv_file = open(self.csv_path, 'w', newline='')
+        self.csv_writer = csv.writer(self.csv_file)
+
+        # Header
+        self.csv_writer.writerow([
+            'frame_id', 'timestamp_sec', 'total_ms', 'ray_ms', 'octree_ms',
+            'exp_calls', 'exp_ms', 'map_voxels', 'memory_mb', 'dedup_count'
+        ])
+        self.csv_file.flush()
+
     def _print_profiling_stats(self):
-        """Print detailed profiling statistics (called every 10 frames)"""
+        """Print concise profiling statistics and save to CSV (called every 10 frames)"""
         import numpy as np
 
         # Calculate averages (convert to milliseconds)
         avg_frame = np.mean(self.profiling_data['frame_total']) * 1000  # ms
         avg_ray = np.mean(self.profiling_data['ray_processing']) * 1000
-        avg_dda = np.mean(self.profiling_data['dda_traversal']) * 1000
-        avg_merge = np.mean(self.profiling_data['dict_merge']) * 1000
-        avg_occupied = np.mean(self.profiling_data['occupied_processing']) * 1000
-        avg_prop = np.mean(self.profiling_data['bearing_propagation']) * 1000
         avg_octree = np.mean(self.profiling_data['octree_updates']) * 1000
         avg_voxels = np.mean(self.profiling_data['voxels_per_frame'])
-        avg_rays = np.mean(self.profiling_data['rays_per_frame'])
-
-        # Calculate percentages
-        total = avg_frame
-        pct_ray = (avg_ray / total * 100) if total > 0 else 0
-        pct_dda = (avg_dda / total * 100) if total > 0 else 0
-        pct_merge = (avg_merge / total * 100) if total > 0 else 0
-        pct_occupied = (avg_occupied / total * 100) if total > 0 else 0
-        pct_prop = (avg_prop / total * 100) if total > 0 else 0
-        pct_octree = (avg_octree / total * 100) if total > 0 else 0
 
         fps = 1000.0 / avg_frame if avg_frame > 0 else 0
 
-        # Print formatted output
-        frame_num = self.frame_count
-        mode_str = "C++ Ray Processor" if self.use_cpp_ray_processor and self.cpp_ray_processor is not None else "Python"
-        print("\n" + "="*55)
-        print(f"  3D MAPPING PROFILING (Frame #{frame_num})")
-        print(f"  Mode: {mode_str}")
-        print("="*55)
-        print("Frame Time Breakdown:")
-        print(f"  Ray Processing:       {avg_ray:6.1f}ms ({pct_ray:5.1f}%) [{int(avg_rays)} rays]")
-        if not self.use_cpp_ray_processor:
-            # Only show breakdown for Python mode
-            print(f"    ├─ DDA (C++):       {avg_dda:6.1f}ms ({pct_dda:5.1f}%)")
-            print(f"    ├─ Dict Merge:      {avg_merge:6.1f}ms ({pct_merge:5.1f}%)")
-            print(f"    └─ Occupied:        {avg_occupied:6.1f}ms ({pct_occupied:5.1f}%)")
-        print(f"  Bearing Propagation:   {avg_prop:6.1f}ms ({pct_prop:5.1f}%)")
-        print(f"  Octree Updates:        {avg_octree:6.1f}ms ({pct_octree:5.1f}%) [{int(avg_voxels)} voxels]")
-        print("  " + "─"*51)
-        print(f"  TOTAL:                {avg_frame:6.1f}ms → {fps:5.1f} FPS")
-        print(f"\n10-Frame Avg: {avg_frame:.1f}ms ({fps:.1f} FPS) | Voxels: {int(avg_voxels)}/frame")
-        print("="*55 + "\n")
+        # Concise console output (1 line)
+        print(f"Frame {self.frame_count}: {avg_frame:.1f}ms ({fps:.1f} FPS) | {int(avg_voxels)} voxels")
+
+        # CSV sampling (every 10 frames)
+        if self.frame_count % self.csv_sample_interval == 0:
+            if self.csv_file is None:
+                self._init_csv()
+
+            # Get C++ stats (P3.1/P3.2)
+            exp_calls = 0
+            exp_ms = 0.0
+            map_voxels = 0
+            memory_mb = 0.0
+
+            if self.use_cpp_ray_processor and self.cpp_ray_processor is not None:
+                try:
+                    ray_stats = self.cpp_ray_processor.get_ray_stats()
+                    exp_calls = ray_stats.exp_calls
+                    exp_ms = ray_stats.exp_time_ms
+                except Exception:
+                    pass
+
+            if self.use_cpp_octree and hasattr(self.octree, 'get_map_stats'):
+                try:
+                    map_stats = self.octree.get_map_stats()
+                    map_voxels = map_stats.num_leaf_nodes
+                    memory_mb = map_stats.memory_mb
+                except Exception:
+                    pass
+
+            # Dedup count (from Python octree or estimate)
+            dedup_count = avg_voxels if hasattr(self, 'octree') else 0
+
+            # Write CSV row
+            self.csv_writer.writerow([
+                self.frame_count,
+                time.time(),
+                avg_frame,
+                avg_ray,
+                avg_octree,
+                exp_calls,
+                exp_ms,
+                map_voxels,
+                memory_mb,
+                int(dedup_count)
+            ])
+            self.csv_file.flush()
+
+            # Reset C++ stats for next sampling window
+            if self.use_cpp_ray_processor and self.cpp_ray_processor is not None:
+                try:
+                    self.cpp_ray_processor.reset_ray_stats()
+                except Exception:
+                    pass

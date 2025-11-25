@@ -9,6 +9,8 @@
 #include <array>
 #include <cmath>
 #include <memory>
+#include <chrono>
+#include <atomic>
 
 namespace py = pybind11;
 
@@ -65,6 +67,14 @@ struct RayProcessorConfig {
           bearing_step(2),
           intensity_threshold(30)
     {}
+};
+
+/**
+ * @brief Ray processing statistics for profiling P3.1 (exp() calls)
+ */
+struct RayStats {
+    size_t exp_calls;      // Number of exp() calls
+    double exp_time_ms;    // Total time spent in exp() (milliseconds)
 };
 
 /**
@@ -131,6 +141,19 @@ public:
      * @return Current configuration
      */
     RayProcessorConfig get_config() const { return config_; }
+
+    /**
+     * @brief Get ray processing statistics (profiling P3.1)
+     * @return RayStats with exp() call count and timing
+     */
+    RayStats get_ray_stats() const;
+
+    /**
+     * @brief Reset ray processing statistics
+     *
+     * Called after CSV sampling to reset counters for next measurement window.
+     */
+    void reset_ray_stats();
 
 private:
     /**
@@ -335,4 +358,9 @@ private:
 
     // Cached values for performance
     double half_aperture_;      // Cached vertical_aperture / 2
+
+    // Profiling counters (P3.1: exp() measurement)
+    // Using mutable atomic for thread-safe updates in const methods
+    mutable std::atomic<size_t> exp_call_count_{0};
+    mutable std::atomic<int64_t> exp_time_ns_{0};  // Nanoseconds for precision
 };
