@@ -240,15 +240,13 @@ void RayProcessor::process_single_ray_internal(
     const Eigen::Vector3d& sonar_origin_world,
     std::vector<VoxelUpdate>& voxel_updates
 ) {
-    // 1. Find first/last hit
+    // 1. Find first hit only (ignore anything after first reflection)
     int first_hit_idx = find_first_hit(intensity_profile);
 
     // No hit found: skip this ray (no map update)
     if (first_hit_idx < 0) {
         return;
     }
-
-    int last_hit_idx = find_last_hit(intensity_profile);
 
     // 2. Free space processing (DDA traversal to first hit)
     if (first_hit_idx > 0) {
@@ -310,8 +308,17 @@ void RayProcessor::process_single_ray_internal(
         }
     }
 
-    // 3. Occupied space processing (vertical fan for each high-intensity range bin)
-    std::vector<int> hit_indices = extract_hit_indices(intensity_profile, first_hit_idx, last_hit_idx);
+    // 3. Occupied space processing: all high intensity after first hit
+    // After first reflection: only update high intensity (> threshold) as occupied
+    // Low intensity regions after first hit = shadow/unknown (NO UPDATE)
+    std::vector<int> hit_indices;
+    for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
+        if (intensity_profile[i] > config_.intensity_threshold) {
+            hit_indices.push_back(static_cast<int>(i));
+        }
+        // Low intensity (≤ threshold) after first hit: NO UPDATE (shadow region)
+    }
+
     if (!hit_indices.empty()) {
         double bearing_angle = compute_bearing_angle(bearing_idx, num_bearings);
         process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,

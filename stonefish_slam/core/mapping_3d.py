@@ -484,17 +484,16 @@ class SonarMapping3D:
             voxel_updates: Dictionary to accumulate updates per voxel
             timing_accumulators: Optional dict with 'dda', 'merge', 'occupied' keys for profiling
         """
-        # Find all high intensity (occupied) regions
+        # Find first hit and all high intensity regions after first hit
         first_hit_idx = -1
-        last_hit_idx = -1
         high_intensity_indices = []
 
         for r_idx, intensity in enumerate(intensity_profile):
             if intensity > self.intensity_threshold:
                 if first_hit_idx == -1:
-                    first_hit_idx = r_idx
-                last_hit_idx = r_idx
-                high_intensity_indices.append(r_idx)
+                    first_hit_idx = r_idx  # Mark first hit
+                high_intensity_indices.append(r_idx)  # Collect all high intensity after first
+            # Low intensity after first hit: shadow region, don't update
 
         # If no hit found, skip this ray entirely (no information)
         if first_hit_idx == -1:
@@ -645,8 +644,9 @@ class SonarMapping3D:
         if timing_accumulators is not None:
             t_occupied = time.perf_counter()
 
-        # Update occupied regions ONLY
-        # Process only the high intensity (occupied) regions we found
+        # Update occupied regions: all high intensity after first hit
+        # Process all high intensity regions after first reflection
+        # Low intensity regions after first hit are shadow/unknown (not updated)
         for r_idx in high_intensity_indices:
             # Calculate actual range (FLS image: row 0 = far, row max = near)
             range_m = self.max_range - r_idx * self.range_resolution

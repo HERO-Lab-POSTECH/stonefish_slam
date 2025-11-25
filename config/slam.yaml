@@ -16,7 +16,7 @@ slam_node:
       map_2d_resolution: 0.1    # 2D occupancy grid resolution (meters/pixel)
       map_size: [4000, 4000]    # [width, height] in pixels
       map_update_interval: 1    # update every N keyframes
-      intensity_threshold: 50   # minimum intensity (0-255) for pixels
+      intensity_threshold: 80   # minimum intensity (0-255) for pixels
 
     # ==================== 3D Mapping Configuration ====================
     mapping_3d:

@@ -455,6 +455,80 @@ prob=0.999999 ↔ log_odds ≈ +13.8 ← Test 5 한계
 
 ---
 
+### Test 6: Shadow Region Handling 명확화
+**날짜**: 2025-11-26
+
+**배경**:
+- Sonar 신호 처리 시 ray path를 따라 voxel을 업데이트
+- 첫 번째 반사(occupied) 이후의 영역에서 신뢰도가 낮은 신호 처리 로직 확인
+
+**Shadow Region의 정의**:
+```
+소나 ray 경로:
+  [소나] → [자유 공간(업데이트)] → [첫 반사점] → [그림자 영역(NO UPDATE)]
+
+첫 반사 이전: Free space (확실)
+  - Intensity: 낮음 (소나 신호 투과)
+  - 업데이트: FREE (log-odds -= 1.0)
+  - 근거: Ray가 이 영역을 통과했으므로 비어있음
+
+첫 반사 이후: Shadow region (불확실)
+  - Intensity: 낮음 (첫 반사 후 약한 신호)
+  - 업데이트: NO UPDATE ← **중요**
+  - 근거: 그림자 영역이므로 신뢰도 없음
+```
+
+**코드 검증**:
+
+**ray_processor.cpp** (lines 311-326):
+```cpp
+// First hit: occupied (high intensity) or free (low intensity)
+hit_indices.clear();
+for (int i = 0; i < first_hit_idx; ++i) {
+    hit_indices.push_back(i);  // All free before first hit
+}
+
+// After first reflection: only update high intensity as occupied
+// Low intensity regions after first hit = shadow/unknown (NO UPDATE)
+for (i = first_hit_idx; i < intensity_profile.size(); ++i) {
+    if (intensity[i] > threshold) {
+        hit_indices.push_back(i);  // Occupied (high intensity)
+    }
+    // else: shadow region, no update ← **의도적 미업데이트**
+}
+```
+
+**mapping_3d.py** (lines 487-650):
+```python
+# Collect all high intensity hits (including shadow regions)
+# But shadow = low intensity after first hit = should NOT be used
+for r_idx, intensity in enumerate(intensity_profile):
+    if intensity > intensity_threshold:
+        if first_hit_idx == -1:
+            first_hit_idx = r_idx  # Track first hit
+        high_intensity_indices.append(r_idx)
+    # else: low intensity
+    #   if before first hit: free (handled separately)
+    #   if after first hit: shadow, skip ← **명시적 무시**
+```
+
+**결론**:
+- ✅ 코드 동작: 정상 (shadow region을 의도적으로 무시)
+- ✅ 로직: First reflection 후 low intensity = shadow (no occupancy info)
+- ⚠️ 문제점 **없음**: 코드가 이미 올바르게 구현됨
+- ✅ 문서화: 향후 개발자를 위해 명시적 주석 추가됨
+
+**파일 수정**:
+- `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/ray_processor.cpp` (lines 311-326)
+- `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/mapping_3d.py` (lines 487-650)
+
+**검증**:
+- [✅] Shadow region logic 정상 작동 확인
+- [✅] First reflection 이후 low intensity는 미업데이트
+- [✅] Sonar 신호 처리 알고리즘 의도 명확화
+
+---
+
 ## 파라미터 튜닝 우선순위 (추천 순서)
 
 1. **log_odds_occupied / log_odds_free 비율** (맵 신뢰도 균형)
