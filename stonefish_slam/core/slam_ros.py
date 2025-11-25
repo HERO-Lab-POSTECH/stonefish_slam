@@ -620,7 +620,7 @@ class SLAMNode(SLAM, Node):
                                     # Debug: Why is point cloud empty?
                                     self.get_logger().warn(
                                         f"3D point cloud is empty after {self.mapper_3d.frame_count} frames, "
-                                        f"{len(self.mapper_3d.octree.voxels)} total voxels"
+                                        f"{self.mapper_3d.get_voxel_count()} total voxels"
                                     )
                             except Exception as e:
                                 import traceback

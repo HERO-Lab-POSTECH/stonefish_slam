@@ -621,6 +621,18 @@ class SonarMapping3D:
                 self.use_dda = False
                 print(f"[WARN] C++ DDA module not found ({e}), using Python traversal")
 
+    def get_voxel_count(self):
+        """
+        Get total number of voxels in the map (backend-agnostic).
+
+        Returns:
+            int: Total number of voxels
+        """
+        if self.use_cpp_backend:
+            return self.cpp_octree.get_num_nodes()
+        else:
+            return len(self.octree.voxels) if self.octree else 0
+
     def create_transform_matrix(self, position, tilt_rad):
         """
         Create 4x4 transform with tilt angle (pitch rotation)
@@ -1412,7 +1424,7 @@ class SonarMapping3D:
                     'occupied': classified['occupied'],
                     'free': classified['free'],
                     'unknown': classified['unknown'],
-                    'num_voxels': len(self.octree.voxels),
+                    'num_voxels': self.get_voxel_count(),
                     'num_occupied': len(classified['occupied']),
                     'num_free': len(classified['free']),
                     'num_unknown': len(classified['unknown']),
@@ -1436,7 +1448,7 @@ class SonarMapping3D:
                 result = {
                     'points': points,
                     'probabilities': probabilities,
-                    'num_voxels': len(self.octree.voxels),
+                    'num_voxels': self.get_voxel_count(),
                     'num_occupied': len(occupied_voxels),
                     'frame_count': self.frame_count
                 }
