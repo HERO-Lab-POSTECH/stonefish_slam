@@ -584,10 +584,10 @@ class SonarMapping3D:
                 high_intensity_indices.append(r_idx)  # Collect all high intensity after first
             # Low intensity after first hit: shadow region, don't update
 
-        # If no hit found, skip this ray entirely (no information)
+        # If no hit found, treat entire range as free space
         if first_hit_idx == -1:
-            # No reflection: don't update as free space (we don't know if it's free or just out of range)
-            return
+            # No reflection within max_range → entire measured range is free space
+            first_hit_idx = len(intensity_profile)  # Treat entire range as free
 
         # Calculate vertical aperture parameters
         half_aperture = self.vertical_aperture / 2

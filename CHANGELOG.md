@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **No-hit ray의 free space 업데이트 추가** (2025-11-26)
+  - **증상**:
+    - 반사가 없는 ray (first_hit_idx < 0)는 맵 업데이트하지 않음
+    - 빈 공간 정보 누락으로 occupancy map 품질 저하
+  - **근본 원인**:
+    - intensity_profile은 0~max_range 측정 결과이므로 반사 없음 = free space 확실
+    - No-hit 처리를 생략하여 unknown 상태로 유지되는 논리적 오류
+  - **수정 사항** (`ray_processor.cpp`):
+    - `process_sonar_ray()`: first_hit_idx < 0일 때 -1 대신 len(intensity_profile) 사용
+    - 반사 없는 ray도 전체 range를 free space로 업데이트
+    - Log-odds 계산에 포함
+  - **효과**:
+    - No-hit ray가 0~max_range를 올바른 free space로 분류
+    - 더 정확한 occupancy map 생성
+    - 맵의 신뢰도 향상
+  - **파일**: `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 - **3D Mapping Bearing-Aware Shadow Validation 구현** (2025-11-26)
   - **증상**:
     - Vertical aperture 확산으로 인한 bearing 간섭 문제
