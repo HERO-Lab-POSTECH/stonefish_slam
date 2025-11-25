@@ -39,7 +39,7 @@ class MappingTestNode(Node):
         odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
         sonar_topic = self.get_parameter('sonar_topic').get_parameter_value().string_value
 
-        # Initialize mapper with complete config
+        # Initialize mapper with COMPLETE config (all required parameters)
         config = {
             # Sonar hardware
             'max_range': 40.0,
@@ -51,26 +51,47 @@ class MappingTestNode(Node):
             'sonar_position': [0.25, 0.0, 0.08],
             'sonar_tilt_deg': 10.0,
 
-            # 3D mapping
+            # 3D mapping core
             'voxel_resolution': resolution,
             'min_probability': 0.6,
             'intensity_threshold': 50,
+            'max_frames': 1000,  # Maximum frames to store
+            'dynamic_expansion': True,  # Auto-expand octree bounds
+
+            # Log-odds Bayesian update
             'log_odds_occupied': 1.5,
             'log_odds_free': -2.0,
             'log_odds_min': -10.0,
             'log_odds_max': 10.0,
+
+            # Adaptive update
             'adaptive_update': True,
             'adaptive_threshold': 0.5,
             'adaptive_max_ratio': 0.5,
+
+            # C++ backend
             'use_cpp_backend': True,
-            'enable_propagation': False,
+            'use_cpp_ray_processor': True,
+
+            # Ray processing
             'use_range_weighting': True,
             'lambda_decay': 0.1,
             'enable_gaussian_weighting': False,
-            'use_dda_traversal': True,
+            'gaussian_sigma_factor': 2.5,
             'bearing_step': 2,
             'free_vertical_factor': 8.0,
             'occupied_vertical_factor': 3.0,
+
+            # DDA traversal
+            'use_dda_traversal': True,
+
+            # Bearing propagation
+            'enable_propagation': False,
+            'propagation_radius': 2,
+            'propagation_sigma': 1.5,
+
+            # Profiling
+            'enable_profiling': True,
         }
 
         self.mapper_3d = SonarMapping3D(config)
