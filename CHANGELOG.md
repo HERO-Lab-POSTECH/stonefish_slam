@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Utils 정리 - ROS1 레거시 코드 제거** (2025-11-25)
+  - **io.py 정리** (260줄 → 74줄, 71% 감소):
+    - ROS1 bag 함수 제거: read_bag, load_nav_data, get_log_dir, create_log, common_parser (186줄)
+    - 미사용 로깅 함수 제거: LOGCOLORS, colorlog, loginfo/debug/warn/error (70줄)
+    - 유지: add_lock (오프라인 bag replay), CodeTimer (성능 측정, slam.py에서 사용)
+    - CodeTimer.__exit__: logdebug() → print() 변경
+    - 불필요 import 제거 (numpy, tqdm, time)
+  - **현재 구조 유지**:
+    - 8개 파일 유지 (conversions, fusion, io, profiler, sonar, topics, visualization, __init__)
+    - 이미 기능별로 명확히 분리됨 (통합 시 오히려 복잡도 증가)
+    - Matplotlib 플로팅 함수 보존 (추후 SLAM 결과 분석용)
+  - **효과**:
+    - utils 디렉토리: 1244줄 → 1058줄 (15% 감소)
+    - ROS2 전용 코드로 정리
+    - 코드 명확성 유지
+
 - **Sensors 폴더 재구성 - core/utils로 이동** (2025-11-25)
   - **파일 이동** (논리적 구조 개선):
     - `sensors/CFAR.py` → `core/cfar.py` (feature extraction 핵심 알고리즘)
