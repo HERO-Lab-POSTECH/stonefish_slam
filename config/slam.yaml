@@ -2,7 +2,7 @@ slam_node:
   ros__parameters:
     # ==================== Sonar Hardware Configuration ====================
     sonar:
-      max_range: 20.0           # Maximum sonar range (m) - UNIFIED
+      max_range: 30.0           # Maximum sonar range (m) - UNIFIED
       min_range: 0.5            # Minimum sonar range (m)
       horizontal_fov: 130.0     # Horizontal field of view (degrees)
       vertical_aperture: 20.0   # Vertical beam aperture (degrees)
@@ -16,7 +16,7 @@ slam_node:
       map_2d_resolution: 0.1    # 2D occupancy grid resolution (meters/pixel)
       map_size: [4000, 4000]    # [width, height] in pixels
       map_update_interval: 1    # update every N keyframes
-      intensity_threshold: 80   # minimum intensity (0-255) for pixels
+      intensity_threshold: 10   # minimum intensity (0-255) for pixels
 
     # ==================== 3D Mapping Configuration ====================
     mapping_3d:
@@ -32,6 +32,9 @@ slam_node:
       use_range_weighting: true # use exponential range weighting
       lambda_decay: 0.1         # decay factor for range weighting
       use_cpp_backend: true     # Test 5: C++ backend 활성화 (DDA + OpenMP)
+      enable_propagation: false  # Test 7: Bearing propagation (ray 사이 보간)
+      propagation_radius: 2     # ±2 bearing 전파
+      propagation_sigma: 1.5    # Gaussian 가중치 표준편차
 
     # ==================== SLAM Parameters ====================
     # how often to add keyframes, this can be varied but between 1 and 4 meters is best

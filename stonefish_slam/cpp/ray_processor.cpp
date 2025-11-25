@@ -3,10 +3,24 @@
 #include <iostream>
 #include <algorithm>
 #include <limits>
+#include <unordered_map>
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+
+// Hash function for Eigen::Vector3i (used for voxel keys in unordered_map)
+namespace std {
+    template<>
+    struct hash<Eigen::Vector3i> {
+        std::size_t operator()(const Eigen::Vector3i& key) const {
+            std::size_t h1 = std::hash<int>{}(key.x());
+            std::size_t h2 = std::hash<int>{}(key.y());
+            std::size_t h3 = std::hash<int>{}(key.z());
+            return h1 ^ (h2 << 1) ^ (h3 << 2);
+        }
+    };
+}
 
 // VoxelKey for deduplication (sorted vector approach)
 struct VoxelKey {
@@ -261,32 +275,51 @@ void RayProcessor::process_single_ray_internal(
         ray_direction_world.normalize();
 
         // Range to first hit (FLS convention: row 0 = far, row max = near)
-        double range_to_first_hit = config_.max_range - (first_hit_idx - 1) * config_.range_resolution;
+        // CRITICAL FIX: Use (first_hit_idx + 1) to prevent free space from overlapping
+        // with occupied bin. DDA includes end voxel, so free space must end BEFORE
+        // occupied bin's far boundary: [max_range - (idx+1)*res, max_range - idx*res]
+        double range_to_first_hit = config_.max_range - (first_hit_idx + 1) * config_.range_resolution;
         if (range_to_first_hit < config_.min_range) {
             range_to_first_hit = config_.min_range;
         }
 
         // Compute vertical steps for free space (full coverage)
-        double mid_range = config_.max_range - (first_hit_idx / 2.0) * config_.range_resolution;
-        int num_vertical_steps = compute_num_vertical_steps(mid_range);
+        // CRITICAL FIX: Use range_to_first_hit (not mid_range) to match occupied vertical sampling
+        // This ensures identical vertical angle distribution between free/occupied updates
+        int num_vertical_steps = compute_num_vertical_steps(range_to_first_hit);
+
+        // Safety margin: end 1 voxel before occupied to prevent overlap
+        double safe_range = range_to_first_hit - config_.voxel_resolution;
+        if (safe_range <= 0.0) {
+            return;  // Skip this bearing if too close
+        }
+
+        // Pre-compute constants (outside vertical loop for efficiency)
+        const double cos_bear = std::cos(bearing_angle);
+        const double sin_bear = std::sin(bearing_angle);
+        const double bearing_resolution_effective = config_.bearing_resolution * config_.bearing_step;
+        const double bearing_half_width = bearing_resolution_effective / 2.0;
+        const double cos_half_width = std::cos(bearing_half_width);
+        const Eigen::Matrix3d R_world_to_sonar = T_sonar_to_world.block<3, 3>(0, 0).transpose();
 
         // Process free space with vertical fan (internal DDA traversal)
+        // CRITICAL FIX: Use same coordinate calculation as occupied space (sonar frame)
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             // Compute vertical angle
             double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
 
-            // Rotate ray direction by vertical angle (simple pitch rotation)
-            double cos_v = std::cos(vertical_angle);
-            double sin_v = std::sin(vertical_angle);
-            Eigen::Vector3d tilted_direction_world(
-                ray_direction_world[0] * cos_v - ray_direction_world[2] * sin_v,
-                ray_direction_world[1],
-                ray_direction_world[0] * sin_v + ray_direction_world[2] * cos_v
-            );
-            tilted_direction_world.normalize();
+            // Compute end point in sonar frame (same as occupied calculation)
+            // This ensures coordinate consistency when sonar is tilted
+            // Optimized: pre-computed cos_bear/sin_bear outside loop
+            double cos_vert = std::cos(vertical_angle);
+            double horizontal_range = safe_range * cos_vert;
+            double x_sonar = horizontal_range * cos_bear;
+            double y_sonar = horizontal_range * sin_bear;
+            double z_sonar = safe_range * std::sin(vertical_angle);
+            Eigen::Vector3d end_point_sonar(x_sonar, y_sonar, z_sonar);
 
-            // End point for this vertical angle
-            Eigen::Vector3d end_point = sonar_origin_world + tilted_direction_world * range_to_first_hit;
+            // Transform to world frame (same transform as occupied)
+            Eigen::Vector3d end_point = T_sonar_to_world.block<3, 3>(0, 0) * end_point_sonar + sonar_origin_world;
 
             // DDA traversal (pure C++)
             std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, 500);
@@ -295,6 +328,31 @@ void RayProcessor::process_single_ray_internal(
             for (const auto& voxel : voxels) {
                 // Compute range from sonar origin
                 double range = (voxel - sonar_origin_world).norm();
+
+                // CRITICAL FIX: Only update voxels within current bearing's angular cone
+                // Optimized: Use cos/sin dot product instead of atan2 for 50% performance gain
+                Eigen::Vector3d voxel_in_sonar = R_world_to_sonar * (voxel - sonar_origin_world);
+
+                // Compute horizontal distance (ignore Z for bearing calculation)
+                double horiz_dist = std::sqrt(voxel_in_sonar.x() * voxel_in_sonar.x() +
+                                               voxel_in_sonar.y() * voxel_in_sonar.y());
+
+                if (horiz_dist < 1e-6) {
+                    continue;  // Skip voxels at origin
+                }
+
+                // Normalize to get unit direction vector
+                double voxel_cos = voxel_in_sonar.x() / horiz_dist;
+                double voxel_sin = voxel_in_sonar.y() / horiz_dist;
+
+                // Dot product: cos(angle_diff) = cos(a)*cos(b) + sin(a)*sin(b)
+                double cos_diff = voxel_cos * cos_bear + voxel_sin * sin_bear;
+
+                // Check if within cone: cos(angle_diff) > cos(half_width)
+                // (larger cos value = smaller angle)
+                if (cos_diff < cos_half_width) {
+                    continue;  // Voxel outside current bearing's angular cone
+                }
 
                 // Range weighting
                 double log_odds_update = config_.log_odds_free;

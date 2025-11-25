@@ -23,7 +23,7 @@ def generate_launch_description():
                 {
                     # Standalone-specific settings only
                     'resolution': 0.2,  # Test 3: 0.3 → 0.2
-                    'frame_interval': 10,
+                    'frame_interval': 20,
                     'odom_topic': '/bluerov2/odometry',
                     'sonar_topic': '/bluerov2/fls/image',
                 }

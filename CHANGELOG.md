@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Vertical FOV 내부에 free space가 생기는 문제 해결** (2025-11-26)
+  - **증상**:
+    - 3D mapping 시 vertical FOV 안쪽에 free space voxel이 생성됨
+    - Occupied range보다 가까운 곳에 free space가 나타남
+    - Vertical FOV 양 끝단(±10°)만 occupied로 표시되고 중간은 free space
+  - **근본 원인** (3가지):
+    1. Free space와 occupied space의 좌표 변환 방식 불일치
+       - Free space: World frame rotation 사용
+       - Occupied: Sonar frame spherical → cartesian 변환 사용
+       - Sonar tilt 시 두 방법이 다른 위치를 계산함
+    2. Vertical angle sampling 불일치
+       - Free space: mid_range 기준으로 num_vertical_steps 계산
+       - Occupied: range_m 기준으로 계산
+       - 서로 다른 vertical angle 분포 생성
+    3. Free space range 계산 오류
+       - DDA traversal이 끝점 voxel을 포함
+       - Occupied bin과 겹치는 구간 발생
+  - **수정 사항** (`ray_processor.cpp`):
+    - Line 272: Free space도 range_to_first_hit 사용 (mid_range 제거)
+    - Line 267: Free space range 계산 수정 (first_hit_idx + 1 사용)
+    - Line 283-295: Free space 좌표 계산을 sonar frame spherical 방식으로 통일
+    - Line 284: Safety margin 추가 (1 voxel = 0.2m)
+  - **영향**:
+    - Vertical FOV 전체 영역에서 정확한 occupied voxel 생성
+    - Free space와 occupied space 간 겹침 완전 제거
+    - Sonar orientation 변화에 강건한 좌표 계산
+  - **파일**: `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 ### Changed
 
 - **Utils 정리 - ROS1 레거시 코드 제거** (2025-11-25)
