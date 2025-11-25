@@ -75,9 +75,9 @@ install(PROGRAMS
 )
 
 install(PROGRAMS
-  stonefish_slam/nodes/feature_extraction_node_sim.py
+  stonefish_slam/nodes/feature_extraction_node.py
   DESTINATION lib/${PROJECT_NAME}
-  RENAME feature_extraction_node_sim
+  RENAME feature_extraction_node
 )
 
 install(PROGRAMS

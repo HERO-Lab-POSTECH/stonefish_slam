@@ -1,5 +1,5 @@
 # Feature Extraction configuration for ROS2
-feature_extraction_sim_node:
+feature_extraction_node:
   ros__parameters:
     # Vehicle name
     vehicle_name: 'bluerov2'

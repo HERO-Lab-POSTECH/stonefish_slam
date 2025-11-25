@@ -51,8 +51,8 @@ def generate_launch_description():
     # Feature extraction node
     feature_extraction_node = Node(
         package='stonefish_slam',
-        executable='feature_extraction_node_sim',
-        name='feature_extraction_sim_node',  # Must match the name in feature.yaml
+        executable='feature_extraction_node',
+        name='feature_extraction_node',  # Must match the name in feature.yaml
         output='screen',
         parameters=[
             feature_config,

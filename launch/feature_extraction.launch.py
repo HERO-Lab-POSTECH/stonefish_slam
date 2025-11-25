@@ -44,8 +44,8 @@ def generate_launch_description():
     # Feature extraction sim node
     feature_extraction_node = Node(
         package='stonefish_slam',
-        executable='feature_extraction_node_sim',
-        name='feature_extraction_sim_node',
+        executable='feature_extraction_node',
+        name='feature_extraction_node',
         output='screen',
         parameters=[
             config_file,
