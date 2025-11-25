@@ -14,7 +14,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'resolution': 0.3,
-                'frame_interval': 5,
+                'frame_interval': 10,
                 'odom_topic': '/bluerov2/odometry',
                 'sonar_topic': '/bluerov2/fls/image',
             }],
