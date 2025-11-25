@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **3D Mapping Shadow Validation 완전 재설계 (Bearing-centric)** (2025-11-26)
+  - **증상**:
+    - Unknown 영역(shadow)이 free space로 업데이트됨
+    - Shadow validation이 voxel bearing 기준으로만 확인 (단일 bearing 체크)
+    - 멀리 떨어진 bearing의 shadow 감지 못함 (범위 밖 bearing 무시)
+  - **근본 원인**:
+    - **Voxel-centric 접근**: voxel bearing ± angular_width 범위만 확인
+    - 해당 범위 밖의 bearing은 모두 무시됨
+    - 예: Bearing 0°의 shadow인데 voxel bearing이 30°면 감지 실패
+  - **수정 사항** (Bearing-centric 접근으로 완전 재설계):
+    - **Python** (`mapping_3d.py` line 700-740):
+      - `_is_voxel_in_shadow()` 완전 재작성
+      - **모든 bearing 순회**하여 각 bearing의 shadow cone 확인
+      - 조건: `voxel_range > first_hit AND voxel이 bearing angular cone 내`
+      - Angular cone 계산: `bearing_half_width_rad = actual_bearing_resolution * bearing_step * 0.5`
+      - Conservative shadow check (노이즈 방어)
+    - **C++** (`ray_processor.cpp` line 800-850):
+      - Python과 동일한 bearing-centric 로직 구현
+      - `std::vector<double>` first_hit_map 순회
+      - Bearing cone 내 최소값 검색으로 conservative 판정
+  - **효과**:
+    - Unknown 영역이 free로 업데이트되는 문제 완전 해결
+    - 모든 bearing의 shadow 정확히 감지 (멀리 떨어진 bearing도)
+    - Conservative한 shadow 판정으로 맵 신뢰도 향상
+    - Python/C++ 동일 로직 적용으로 일관성 확보
+  - **성능**: 모든 bearing 순회지만 O(1) first_hit_map 조회로 오버헤드 무시할 수준
+  - **파일**:
+    - `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/core/mapping_3d.py`
+    - `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
+
 - **Occupied Voxel Shadow Validation 추가** (2025-11-26)
   - **증상**:
     - Occupied voxel이 다른 bearing의 free space에 의해 덮어씌워짐
