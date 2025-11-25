@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Nodes 디렉토리 정리 및 토픽명 일관성 개선** (2025-11-25)
+  - **삭제된 파일** (1개):
+    - `nodes/mapping_3d_test_node.py` (중복, CMakeLists.txt 설치 항목 없음)
+    - 이유: mapping_3d_standalone_node.py와 동일 기능
+  - **Topic 네이밍 일관성 개선**:
+    - `mapping_3d_standalone_node.py`: `/mapping_test/pointcloud` → `/mapping_3d_standalone/pointcloud`
+    - 노드명과 topic 이름 일치
+  - **효과**:
+    - 중복 코드 제거 (213줄 감소)
+    - Topic 네이밍 일관성 확보
+    - 유지보수성 향상
+
 - **Core 모듈 네이밍 통일 및 sim 접미사 제거** (2025-11-25)
   - **Phase 1: 파일명 변경**
     - `core/feature_extraction_sim.py` → `core/feature_extraction.py`
