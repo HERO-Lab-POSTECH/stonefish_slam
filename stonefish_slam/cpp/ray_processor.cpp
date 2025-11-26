@@ -766,7 +766,8 @@ bool RayProcessor::is_voxel_in_shadow(
     // Pre-compute constants
     double fov_rad = config_.horizontal_fov * M_PI / 180.0;
     double actual_bearing_resolution = fov_rad / (num_bearings - 1);
-    double bearing_half_width = actual_bearing_resolution * 20.0;  // ±20 bearings for vertical aperture coverage
+    // Use vertical aperture for shadow cone width (matches beam physical footprint)
+    double bearing_half_width = config_.vertical_aperture / 2.0;  // Half of vertical aperture in radians
 
     // Calculate exclude index if specified
     int exclude_idx = -1;
