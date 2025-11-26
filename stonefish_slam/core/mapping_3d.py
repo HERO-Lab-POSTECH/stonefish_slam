@@ -70,16 +70,6 @@ class SonarMapping3D:
             self.sonar_tilt
         )
 
-        # DEBUG: Print transform info (with flush)
-        import sys
-        print(f"[DEBUG] Sonar tilt: {np.degrees(self.sonar_tilt):.1f}° (rad: {self.sonar_tilt:.3f})", flush=True)
-        print(f"[DEBUG] Sonar position (base_link): {self.sonar_position}", flush=True)
-        print(f"[DEBUG] T_sonar_to_base rotation:\n{self.T_sonar_to_base[:3, :3]}", flush=True)
-        sys.stdout.flush()
-
-        # Debug flag for ray sampling
-        self.debug_ray_count = 0
-
         # Pre-compute angles for efficiency
         self.bearing_angles = np.linspace(
             -self.horizontal_fov/2,
@@ -393,19 +383,6 @@ class SonarMapping3D:
                     first_hit_map[b_idx] = self.max_range - r_idx * self.range_resolution
                     break
 
-        # DEBUG: First-hit map statistics
-        if not hasattr(self, '_first_hit_debug_count'):
-            self._first_hit_debug_count = 0
-
-        self._first_hit_debug_count += 1
-        if self._first_hit_debug_count <= 3:
-            num_hits = np.sum(first_hit_map < self.max_range)
-            min_hit = np.min(first_hit_map[first_hit_map < self.max_range]) if num_hits > 0 else self.max_range
-            max_hit = np.max(first_hit_map[first_hit_map < self.max_range]) if num_hits > 0 else self.max_range
-            print(f"[FIRST-HIT DEBUG] Frame {self._first_hit_debug_count}: "
-                  f"Bearings with hits: {num_hits}/{bearing_bins}, "
-                  f"Range: [{min_hit:.1f}m, {max_hit:.1f}m]", flush=True)
-
         return first_hit_map
 
     def _voxel_to_sonar_coords(self, voxel_world, T_world_to_sonar):
@@ -591,15 +568,6 @@ class SonarMapping3D:
 
         return propagated_updates
 
-    def propagate_bearing_updates(self, voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world):
-        """
-        Wrapper that calls optimized version
-        Kept for backward compatibility
-        """
-        return self.propagate_bearing_updates_optimized(
-            voxel_updates, sampled_bearing_idx, bearing_bins, T_sonar_to_world
-        )
-
     def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators=None, T_world_to_sonar=None, first_hit_map=None):
         """
         Process a single sonar ray (bearing) and accumulate voxel updates
@@ -745,23 +713,10 @@ class SonarMapping3D:
                     pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])
                     pt_world = T_sonar_to_world @ pt_sonar
 
-                    # CRITICAL: Check actual range after transform
-                    sonar_origin_world = T_sonar_to_world[:3, 3]
-                    actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
-                    if actual_range <= self.min_range:
-                        continue  # Skip points at or below min_range
-
                     # Shadow validation: check if voxel is in another bearing's shadow
                     if T_world_to_sonar is not None and first_hit_map is not None:
                         if self._is_voxel_in_shadow(pt_world[:3], T_world_to_sonar, first_hit_map):
                             continue  # Skip voxel in shadow region
-
-                    # DEBUG: Sample first few rays
-                    if self.debug_ray_count < 5:
-                        print(f"[RAY DEBUG] v_angle={np.degrees(vertical_angle):.1f}°, "
-                              f"sonar=[{x_sonar:.2f}, {y_sonar:.2f}, {z_sonar:.2f}], "
-                              f"world=[{pt_world[0]:.2f}, {pt_world[1]:.2f}, {pt_world[2]:.2f}]", flush=True)
-                        self.debug_ray_count += 1
 
                     # Get voxel key and accumulate update
                     if self.use_cpp_backend:
@@ -833,12 +788,6 @@ class SonarMapping3D:
                 # Transform to world frame
                 pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])
                 pt_world = T_sonar_to_world @ pt_sonar
-
-                # CRITICAL: Check actual range after transform
-                sonar_origin_world = T_sonar_to_world[:3, 3]
-                actual_range = np.linalg.norm(pt_world[:3] - sonar_origin_world)
-                if actual_range <= self.min_range:
-                    continue  # Skip points at or below min_range
 
                 # Shadow validation: exclude current bearing (occupied voxels should not be blocked by their own bearing)
                 if T_world_to_sonar is not None and first_hit_map is not None:
@@ -993,7 +942,7 @@ class SonarMapping3D:
                     if self.enable_profiling:
                         prop_start = time.time()
 
-                    propagated = self.propagate_bearing_updates(
+                    propagated = self.propagate_bearing_updates_optimized(
                         voxel_updates, b_idx, bearing_bins, T_sonar_to_world
                     )
 
@@ -1017,10 +966,6 @@ class SonarMapping3D:
             # [B] Ray processing timing end
             if self.profiling_enabled:
                 t_ray_total = time.perf_counter() - t_ray_start
-
-        # [F] Bearing propagation timing (NOTE: already measured above if enabled)
-        if self.profiling_enabled:
-            t_prop_total = 0.0  # Measured inside loop above if enabled
 
         # Apply averaged updates to all voxels (only if Python path was used)
         if not use_cpp_path:
@@ -1082,7 +1027,7 @@ class SonarMapping3D:
             self.profiling_data['dda_traversal'].append(timing_accumulators['dda'])
             self.profiling_data['dict_merge'].append(timing_accumulators['merge'])
             self.profiling_data['occupied_processing'].append(timing_accumulators['occupied'])
-            self.profiling_data['bearing_propagation'].append(t_prop_total)
+            self.profiling_data['bearing_propagation'].append(0.0)  # Not used in C++ path
             self.profiling_data['octree_updates'].append(t_octree_total)
             self.profiling_data['voxels_per_frame'].append(num_voxels_updated)
             self.profiling_data['rays_per_frame'].append(len(processed_bearings))

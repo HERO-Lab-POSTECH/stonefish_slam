@@ -239,9 +239,6 @@ void RayProcessor::process_sonar_image(
             }
         }
 
-        std::cout << "Deduplication: " << total_updates << " → " << unique_count
-                  << " → " << filtered_count << " voxels (Z-filtered: "
-                  << (unique_count - filtered_count) << " above robot)" << std::endl;
 
         origin_ptr[0] = sonar_origin_world[0];
         origin_ptr[1] = sonar_origin_world[1];
@@ -278,9 +275,6 @@ void RayProcessor::process_single_ray_internal(
         // with occupied bin. DDA includes end voxel, so free space must end BEFORE
         // occupied bin's far boundary: [max_range - (idx+1)*res, max_range - idx*res]
         range_to_first_hit = config_.max_range - (first_hit_idx + 1) * config_.range_resolution;
-        if (range_to_first_hit < config_.min_range) {
-            range_to_first_hit = config_.min_range;
-        }
     }
 
     // Always perform free space processing (even if no hit found)
@@ -343,22 +337,10 @@ void RayProcessor::process_single_ray_internal(
             }
 
             // Add to voxel updates with range weighting
-            // Shadow validation counters
-            static std::atomic<int> shadow_skip{0};
-            static std::atomic<int> shadow_total{0};
-
             for (const auto& voxel : voxels) {
                 // SHADOW VALIDATION: Skip voxels in shadow region
                 bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_bearings);
-                shadow_total++;
                 if (is_shadow) {
-                    shadow_skip++;
-                    // Print every 1000 checks
-                    if (shadow_total % 1000 == 0) {
-                        std::cout << "[C++ FREE SHADOW] Checked: " << shadow_total.load()
-                                  << ", Skipped: " << shadow_skip.load()
-                                  << " (" << (100.0 * shadow_skip.load() / shadow_total.load()) << "%)" << std::endl;
-                    }
                     continue;  // Voxel is beyond first hit, skip free space update
                 }
 
@@ -423,59 +405,6 @@ void RayProcessor::process_single_ray_internal(
     }
 }
 
-// Legacy version: for external Python calls (maintains API compatibility)
-void RayProcessor::process_single_ray(
-    int bearing_idx,
-    int num_bearings,
-    const std::vector<uint8_t>& intensity_profile,
-    const Eigen::Matrix4d& T_sonar_to_world
-) {
-    // NOTE: Legacy API does NOT support shadow validation
-    // For full shadow validation, use process_sonar_image() instead
-
-    // Use internal version with temporary buffer, then insert to octree
-    std::vector<VoxelUpdate> voxel_updates;
-    voxel_updates.reserve(1000);  // Typical ray size
-
-    Eigen::Vector3d sonar_origin_world = T_sonar_to_world.block<3, 1>(0, 3);
-    Eigen::Matrix4d T_world_to_sonar = T_sonar_to_world.inverse();
-
-    // Create dummy first_hit_map (no shadow validation for single ray)
-    std::vector<double> first_hit_map(num_bearings, config_.max_range);
-
-    process_single_ray_internal(bearing_idx, num_bearings, intensity_profile,
-                                T_sonar_to_world, T_world_to_sonar,
-                                sonar_origin_world, first_hit_map, voxel_updates);
-
-    // Convert to NumPy and insert to octree
-    if (!voxel_updates.empty()) {
-        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(voxel_updates.size()), 3};
-        py::array_t<double> points_np(points_shape);
-        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(voxel_updates.size()));
-        py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
-
-        auto points_buf = points_np.request();
-        auto log_odds_buf = log_odds_np.request();
-        auto origin_buf = origin_np.request();
-
-        double* points_ptr = static_cast<double*>(points_buf.ptr);
-        double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
-        double* origin_ptr = static_cast<double*>(origin_buf.ptr);
-
-        for (size_t i = 0; i < voxel_updates.size(); ++i) {
-            points_ptr[i * 3 + 0] = voxel_updates[i].x;
-            points_ptr[i * 3 + 1] = voxel_updates[i].y;
-            points_ptr[i * 3 + 2] = voxel_updates[i].z;
-            log_odds_ptr[i] = voxel_updates[i].log_odds;
-        }
-
-        origin_ptr[0] = sonar_origin_world[0];
-        origin_ptr[1] = sonar_origin_world[1];
-        origin_ptr[2] = sonar_origin_world[2];
-
-        octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
-    }
-}
 
 // Internal version: collect occupied voxels in C++ buffer (GIL-free, OpenMP-safe)
 void RayProcessor::process_occupied_voxels_internal(
@@ -494,7 +423,7 @@ void RayProcessor::process_occupied_voxels_internal(
         double range_m = config_.max_range - r_idx * config_.range_resolution;
 
         // Skip out-of-range
-        if (range_m > config_.max_range || range_m <= config_.min_range) {
+        if (range_m > config_.max_range) {
             continue;
         }
 
@@ -560,48 +489,6 @@ void RayProcessor::process_occupied_voxels_internal(
     }
 }
 
-// Legacy version: for external Python calls (maintains API compatibility)
-void RayProcessor::process_occupied_voxels(
-    const std::vector<int>& hit_indices,
-    double bearing_angle,
-    const Eigen::Matrix4d& T_sonar_to_world
-) {
-    std::vector<VoxelUpdate> voxel_updates;
-    Eigen::Vector3d sonar_origin_world = T_sonar_to_world.block<3, 1>(0, 3);
-
-    process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,
-                                     sonar_origin_world, voxel_updates);
-
-    // Convert to NumPy and insert to octree
-    if (!voxel_updates.empty()) {
-        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(voxel_updates.size()), 3};
-        py::array_t<double> points_np(points_shape);
-        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(voxel_updates.size()));
-        py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
-
-        auto points_buf = points_np.request();
-        auto log_odds_buf = log_odds_np.request();
-        auto origin_buf = origin_np.request();
-
-        double* points_ptr = static_cast<double*>(points_buf.ptr);
-        double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
-        double* origin_ptr = static_cast<double*>(origin_buf.ptr);
-
-        for (size_t i = 0; i < voxel_updates.size(); ++i) {
-            points_ptr[i * 3 + 0] = voxel_updates[i].x;
-            points_ptr[i * 3 + 1] = voxel_updates[i].y;
-            points_ptr[i * 3 + 2] = voxel_updates[i].z;
-            log_odds_ptr[i] = voxel_updates[i].log_odds;
-        }
-
-        origin_ptr[0] = sonar_origin_world[0];
-        origin_ptr[1] = sonar_origin_world[1];
-        origin_ptr[2] = sonar_origin_world[2];
-
-        octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
-    }
-}
-
 // Find first hit
 int RayProcessor::find_first_hit(const std::vector<uint8_t>& intensity_profile) const {
     for (size_t i = 0; i < intensity_profile.size(); ++i) {
@@ -610,34 +497,6 @@ int RayProcessor::find_first_hit(const std::vector<uint8_t>& intensity_profile) 
         }
     }
     return -1;  // No hit found
-}
-
-// Find last hit
-int RayProcessor::find_last_hit(const std::vector<uint8_t>& intensity_profile) const {
-    for (int i = static_cast<int>(intensity_profile.size()) - 1; i >= 0; --i) {
-        if (intensity_profile[i] > config_.intensity_threshold) {
-            return i;
-        }
-    }
-    return -1;  // No hit found
-}
-
-// Extract all hit indices
-std::vector<int> RayProcessor::extract_hit_indices(
-    const std::vector<uint8_t>& intensity_profile,
-    int start_idx,
-    int end_idx
-) const {
-    std::vector<int> hit_indices;
-    hit_indices.reserve(end_idx - start_idx + 1);
-
-    for (int i = start_idx; i <= end_idx && i < static_cast<int>(intensity_profile.size()); ++i) {
-        if (intensity_profile[i] > config_.intensity_threshold) {
-            hit_indices.push_back(i);
-        }
-    }
-
-    return hit_indices;
 }
 
 // Compute range weight
@@ -775,9 +634,6 @@ bool RayProcessor::is_voxel_in_shadow(
         }
     }
 
-    // Debug counter
-    static std::atomic<int> debug_count{0};
-
     // Check each bearing in first_hit_map
     for (int b_idx = 0; b_idx < num_bearings; ++b_idx) {
         // Skip excluded bearing (for occupied voxels)
@@ -806,15 +662,6 @@ bool RayProcessor::is_voxel_in_shadow(
 
         // Check if voxel is within this bearing's cone
         if (angle_diff <= bearing_half_width) {
-            // Debug: Print first 5 shadow hits
-            int count = debug_count.fetch_add(1);
-            if (count < 5) {
-                std::cout << "[C++ SHADOW HIT] Voxel range=" << voxel_range
-                          << "m, bearing=" << (voxel_bearing_rad * 180.0 / M_PI)
-                          << "°, hit by bearing_idx=" << b_idx
-                          << " (angle=" << (bearing_angle * 180.0 / M_PI)
-                          << "°, first_hit=" << first_hit_range << "m)" << std::endl;
-            }
             // Voxel is in this bearing's shadow cone
             return true;
         }

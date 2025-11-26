@@ -246,24 +246,6 @@ private:
     );
 
     /**
-     * @brief Process single ray - legacy version for Python API
-     *
-     * Maintains backward compatibility with external Python calls.
-     * Uses internal version and inserts to octree immediately.
-     *
-     * @param bearing_idx Bearing index in polar image
-     * @param num_bearings Total number of bearings (for angle calculation)
-     * @param intensity_profile Intensity values along range (1D array)
-     * @param T_sonar_to_world Transformation matrix
-     */
-    void process_single_ray(
-        int bearing_idx,
-        int num_bearings,
-        const std::vector<uint8_t>& intensity_profile,
-        const Eigen::Matrix4d& T_sonar_to_world
-    );
-
-    /**
      * @brief Process occupied voxels - internal version (GIL-free, OpenMP-safe)
      *
      * Collects occupied voxel updates in C++ buffer.
@@ -293,53 +275,11 @@ private:
     );
 
     /**
-     * @brief Process occupied voxels - legacy version for Python API
-     *
-     * For each range bin with high intensity:
-     * 1. Create vertical fan of points (±num_vertical_steps)
-     * 2. Apply range weighting: exp(-λ × r / r_max)
-     * 3. Apply Gaussian vertical weighting (optional)
-     * 4. Transform to world frame (Eigen batch operation)
-     * 5. Update octree directly
-     *
-     * This replaces Python lines 942-1017 (occupied processing loop)
-     *
-     * @param hit_indices Indices of range bins with high intensity
-     * @param bearing_angle Horizontal bearing angle (radians)
-     * @param T_sonar_to_world Transformation matrix
-     */
-    void process_occupied_voxels(
-        const std::vector<int>& hit_indices,
-        double bearing_angle,
-        const Eigen::Matrix4d& T_sonar_to_world
-    );
-
-    /**
      * @brief Find first intensity peak above threshold
      * @param intensity_profile Intensity values (0-255)
      * @return Index of first hit, or -1 if none found
      */
     int find_first_hit(const std::vector<uint8_t>& intensity_profile) const;
-
-    /**
-     * @brief Find last intensity peak above threshold
-     * @param intensity_profile Intensity values (0-255)
-     * @return Index of last hit, or -1 if none found
-     */
-    int find_last_hit(const std::vector<uint8_t>& intensity_profile) const;
-
-    /**
-     * @brief Extract all indices with intensity above threshold
-     * @param intensity_profile Intensity values (0-255)
-     * @param start_idx Start search from this index
-     * @param end_idx End search at this index
-     * @return Vector of indices with high intensity
-     */
-    std::vector<int> extract_hit_indices(
-        const std::vector<uint8_t>& intensity_profile,
-        int start_idx,
-        int end_idx
-    ) const;
 
     /**
      * @brief Compute range-based weighting factor

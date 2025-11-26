@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Shadow Validation Bearing Width 수정** (2025-11-26)
+  - **문제**: 그림자 영역이 다시 관측해도 채워지지 않음 (바닥에 구멍)
+  - **원인**: `bearing_half_width`가 0.176° (horizontal resolution)으로 설정되어 FLS vertical aperture (±10°)의 1%만 커버
+  - **해결**: `bearing_half_width = vertical_aperture / 2 = 10°`로 변경
+  - **결과**:
+    - Shadow validation skip rate: 2% → 15.86% (정상 범위)
+    - 바닥 구멍 문제 해결
+    - Unknown 영역이 free space로 잘못 업데이트되던 문제 해결
+  - **파일**:
+    - `stonefish_slam/core/mapping_3d.py`
+    - `stonefish_slam/cpp/ray_processor.cpp`
+    - `stonefish_slam/cpp/ray_processor.h`
+
+### Fixed
+
 - **3D Mapping Shadow Validation 완전 재설계 (Bearing-centric)** (2025-11-26)
   - **증상**:
     - Unknown 영역(shadow)이 free space로 업데이트됨
@@ -236,6 +251,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **파일**: `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
 
 ### Changed
+
+- **3D Mapping 코드 정리 및 리팩토링** (2025-11-26)
+  - **디버그 코드 제거**: print문, 카운터, 디버그 변수 (~80 lines)
+  - **Min-range 체크 로직 제거**: Sonar 이미지에서 자동 처리 (~10 lines)
+  - **Dead Code 제거**: 미사용 레거시 API 함수
+    - `process_single_ray()`, `process_occupied_voxels()`, `find_last_hit()`, `extract_hit_indices()` (~180 lines)
+  - **주석 정리**: 실험 이력 및 불필요한 주석 (~30 lines)
+  - **핵심 기능 보존**:
+    - Shadow validation 로직
+    - First hit map 계산
+    - DDA traversal (C++ 최적화)
+    - Range/Gaussian weighting
+    - Adaptive Bayesian update
+    - Profiling infrastructure
+  - **코드 라인 감소**: 2871 → 2600 lines (-271 lines, **-9.4%**)
+  - **파일별 변화**:
+    - `mapping_3d.py`: 1420 → 1364 lines (-56)
+    - `ray_processor.cpp`: 1019 → 865 lines (-154)
+    - `ray_processor.h`: 432 → 371 lines (-61)
 
 - **Utils 정리 - ROS1 레거시 코드 제거** (2025-11-25)
   - **io.py 정리** (260줄 → 74줄, 71% 감소):
