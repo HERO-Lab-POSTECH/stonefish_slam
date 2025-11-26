@@ -538,13 +538,8 @@ void RayProcessor::process_occupied_voxels_internal(
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             int idx = v_step + num_vertical_steps;
 
-            // Shadow validation: exclude current bearing (occupied voxels should not be blocked by their own bearing)
-            if (T_world_to_sonar != nullptr && first_hit_map != nullptr && num_bearings > 0) {
-                Eigen::Vector3d pt_world(points_world(0, idx), points_world(1, idx), points_world(2, idx));
-                if (is_voxel_in_shadow(pt_world, *T_world_to_sonar, *first_hit_map, num_bearings, bearing_angle)) {
-                    continue;  // Skip voxel in other bearings' shadow
-                }
-            }
+            // NO shadow validation for occupied voxels!
+            // Occupied voxels are direct observations, should always be updated
 
             // Compute log-odds with optional Gaussian weighting
             double log_odds_update = base_log_odds;
