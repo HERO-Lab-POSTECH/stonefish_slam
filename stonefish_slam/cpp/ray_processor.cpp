@@ -260,6 +260,14 @@ void RayProcessor::process_single_ray_internal(
     const std::vector<double>& first_hit_map,
     std::vector<VoxelUpdate>& voxel_updates
 ) {
+    // FOV EDGE EXCLUSION: Skip outer 5% of horizontal FOV (central 90%)
+    double bearing_angle = compute_bearing_angle(bearing_idx, num_bearings);
+    double fov_rad = config_.horizontal_fov * M_PI / 180.0;
+    double max_bearing_angle = (fov_rad / 2.0) * 0.9;  // 90% of half FOV
+    if (std::abs(bearing_angle) > max_bearing_angle) {
+        return;  // Skip edge bearings
+    }
+
     // 1. Find first hit only (ignore anything after first reflection)
     int first_hit_idx = find_first_hit(intensity_profile);
 
@@ -314,6 +322,12 @@ void RayProcessor::process_single_ray_internal(
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             // Compute vertical angle
             double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
+
+            // FOV EDGE EXCLUSION: Skip outer 5% of vertical FOV (central 90%)
+            double max_vertical_angle = half_aperture_ * 0.9;  // 90% of half aperture
+            if (std::abs(vertical_angle) > max_vertical_angle) {
+                continue;  // Skip edge voxels
+            }
 
             // Compute end point in sonar frame (same as occupied calculation)
             // This ensures coordinate consistency when sonar is tilted
@@ -467,13 +481,21 @@ void RayProcessor::process_occupied_voxels_internal(
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             int idx = v_step + num_vertical_steps;
 
+            // Compute vertical angle for edge exclusion and Gaussian weighting
+            double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
+
+            // FOV EDGE EXCLUSION: Skip outer 5% of vertical FOV (central 90%)
+            double max_vertical_angle = half_aperture_ * 0.9;  // 90% of half aperture
+            if (std::abs(vertical_angle) > max_vertical_angle) {
+                continue;  // Skip edge voxels
+            }
+
             // NO shadow validation for occupied voxels!
             // Occupied voxels are direct observations, should always be updated
 
             // Compute log-odds with optional Gaussian weighting
             double log_odds_update = base_log_odds;
             if (config_.enable_gaussian_weighting && num_vertical_steps > 0) {
-                double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
                 double normalized_angle = vertical_angle / half_aperture_;
                 double gaussian_weight = std::exp(-0.5 * std::pow(normalized_angle * config_.gaussian_sigma_factor, 2));
                 log_odds_update *= gaussian_weight;

@@ -2,14 +2,14 @@ slam_node:
   ros__parameters:
     # ==================== Sonar Hardware Configuration ====================
     sonar:
-      max_range: 30.0           # Maximum sonar range (m) - UNIFIED
+      max_range: 15.0           # Maximum sonar range (m) - UNIFIED
       min_range: 0.5            # Minimum sonar range (m)
       horizontal_fov: 130.0     # Horizontal field of view (degrees)
       vertical_aperture: 20.0   # Vertical beam aperture (degrees)
-      image_width: 918          # Number of bearings
-      image_height: 512         # Number of range bins
-      sonar_position: [0.25, 0.0, 0.08]  # Sonar position relative to base_link (FRD)
-      sonar_tilt_deg: 30.0      # Sonar tilt angle (degrees, downward) - UNIFIED
+      image_width: 512          # Number of bearings
+      image_height: 500         # Number of range bins
+      sonar_position: [0.0, 0.0, 0.0]  # Sonar position relative to base_link (FRD)
+      sonar_tilt_deg: 45.0      # Sonar tilt angle (degrees, downward) - UNIFIED
 
     # ==================== 2D Mapping Configuration ====================
     mapping_2d:
@@ -22,9 +22,9 @@ slam_node:
     mapping_3d:
       map_3d_voxel_size: 0.2    # 3D octree voxel size (meters) - Test 3: 0.3 → 0.2
       min_probability: 0.6      # minimum probability for occupied voxel
-      log_odds_occupied: 1.5    # log-odds increment for occupied - Test 8: 2.0 → 3.5 (침식 방지)
-      log_odds_free: -2.0       # log-odds decrement for free space - Test 10: -3.0 → -4.0 (carving 강화)
-      log_odds_min: -12.0       # minimum log-odds (clamping) - Test 8: -15.0 → -12.0 (비대칭 완화)
+      log_odds_occupied: 2.0    # log-odds increment for occupied - Test 8: 2.0 → 3.5 (침식 방지)
+      log_odds_free: -3.0      # log-odds decrement for free space - Test 10: -3.0 → -4.0 (carving 강화)
+      log_odds_min: -30.0       # minimum log-odds (clamping) - Test 8: -15.0 → -12.0 (비대칭 완화)
       log_odds_max: 20.0        # maximum log-odds (clamping) - Test 2: 10.0 → 20.0
       adaptive_update: true     # enable adaptive Bayesian update
       adaptive_threshold: 0.5   # probability threshold for protection - Test 9: 5.0 → 0.5 (원복, 동적 업데이트 허용)
