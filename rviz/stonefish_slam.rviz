@@ -5,8 +5,7 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
-        - /3D Map1/Status1
-        - /Axes1/Status1
+        - /Axes1
       Splitter Ratio: 0.5323529243469238
     Tree Height: 795
   - Class: rviz_common/Views
@@ -42,19 +41,9 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        base_link:
-          Value: true
         bluerov2/base_link:
           Value: false
         bluerov2/base_link_frd:
-          Value: true
-        bluerov2_map:
-          Value: true
-        bluerov2_odom:
-          Value: true
-        map:
-          Value: true
-        odom:
           Value: true
         world_ned:
           Value: true
@@ -68,11 +57,103 @@ Visualization Manager:
           bluerov2/base_link:
             bluerov2/base_link_frd:
               {}
-          bluerov2_map:
-            {}
-          map:
-            {}
       Update Interval: 0
+      Value: true
+    - Class: rviz_default_plugins/Axes
+      Enabled: true
+      Length: 0.800000011920929
+      Name: Axes
+      Radius: 0.10000000149011612
+      Reference Frame: bluerov2/base_link_frd
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Waypoint Markers
+      Namespaces:
+        "": true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_generator_node/waypoint_markers
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Constraint
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /stonefish_slam/slam/constraint
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: FLS Cartesian
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /bluerov2/fls/display
+      Value: true
+    - Alpha: 1
+      Axes Length: 1
+      Axes Radius: 0.10000000149011612
+      Class: rviz_default_plugins/PoseWithCovariance
+      Color: 255; 25; 0
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: true
+      Enabled: false
+      Head Length: 0.30000001192092896
+      Head Radius: 0.10000000149011612
+      Name: PoseWithCovariance
+      Shaft Length: 1
+      Shaft Radius: 0.05000000074505806
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /stonefish_slam/slam/pose
+      Value: false
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 204; 41; 204
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.20000000298023224
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /bluerov2/lookahead_point
       Value: true
     - Alpha: 1
       Buffer Length: 1
@@ -102,23 +183,11 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /path_generator_node/path
       Value: true
-    - Class: rviz_default_plugins/MarkerArray
-      Enabled: true
-      Name: Waypoint Markers
-      Namespaces:
-        "": true
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /path_generator_node/waypoint_markers
-      Value: true
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 255; 0; 0
-      Enabled: false
+      Enabled: true
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
@@ -141,7 +210,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /bluerov2/actual_trajectory
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -210,69 +279,6 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
-    - Class: rviz_default_plugins/Marker
-      Enabled: true
-      Name: Constraint
-      Namespaces:
-        {}
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /stonefish_slam/slam/constraint
-      Value: true
-    - Alpha: 1
-      Axes Length: 1
-      Axes Radius: 0.10000000149011612
-      Class: rviz_default_plugins/PoseWithCovariance
-      Color: 255; 25; 0
-      Covariance:
-        Orientation:
-          Alpha: 0.5
-          Color: 255; 255; 127
-          Color Style: Unique
-          Frame: Local
-          Offset: 1
-          Scale: 1
-          Value: true
-        Position:
-          Alpha: 0.30000001192092896
-          Color: 204; 51; 204
-          Scale: 1
-          Value: true
-        Value: true
-      Enabled: false
-      Head Length: 0.30000001192092896
-      Head Radius: 0.10000000149011612
-      Name: PoseWithCovariance
-      Shaft Length: 1
-      Shaft Radius: 0.05000000074505806
-      Shape: Arrow
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /stonefish_slam/slam/pose
-      Value: false
-    - Alpha: 1
-      Class: rviz_default_plugins/PointStamped
-      Color: 204; 41; 204
-      Enabled: true
-      History Length: 1
-      Name: PointStamped
-      Radius: 0.20000000298023224
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /bluerov2/lookahead_point
-      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -307,20 +313,6 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: false
-    - Class: rviz_default_plugins/Image
-      Enabled: true
-      Max Value: 1
-      Median window: 5
-      Min Value: 0
-      Name: FLS Cartesian
-      Normalize Range: true
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /bluerov2/fls/display
-      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: false
       Autocompute Value Bounds:
@@ -354,13 +346,6 @@ Visualization Manager:
         Value: /mapping_3d_standalone/pointcloud
       Use Fixed Frame: true
       Use rainbow: false
-      Value: true
-    - Class: rviz_default_plugins/Axes
-      Enabled: true
-      Length: 0.800000011920929
-      Name: Axes
-      Radius: 0.20000000298023224
-      Reference Frame: bluerov2/base_link_frd
       Value: true
   Enabled: true
   Global Options:
@@ -411,7 +396,7 @@ Window Geometry:
   Height: 1403
   Hide Left Dock: false
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd00000004000000000000015600000525fc020000000ffb000000100044006900730070006c006100790073010000003b0000039c000000c700fffffffb0000001a0046004c0053002000430061007200740065007300690061006e01000003dd000001830000002800fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a00560069006500770073000000034e00000133000000a000fffffffb0000000a0049006d0061006700650000000340000000cc0000000000000000fb0000000c00430061006d006500720061000000033f000000cd0000000000000000fb0000000a0049006d006100670065000000033f000000cd0000000000000000fb0000000c00430061006d006500720061010000033f000000cd0000000000000000fb0000001a0046004c0053002000430061007200740065007300690061006e0000000486000000da0000000000000000fb0000001200530065006c0065006300740069006f006e00000004a9000000b70000005c00ffffff000000010000015600000525fc0200000002fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000005000000014efc0100000002fb0000000800540069006d00650100000000000004b00000000000000000fb0000000800540069006d00650100000000000004500000000000000000000003a40000052500000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000004000000000000016f00000525fc020000000ffb000000100044006900730070006c006100790073010000003b0000039c000000c700fffffffb0000001a0046004c0053002000430061007200740065007300690061006e01000003dd000001830000002800fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a00560069006500770073000000034e00000133000000a000fffffffb0000000a0049006d0061006700650000000340000000cc0000000000000000fb0000000c00430061006d006500720061000000033f000000cd0000000000000000fb0000000a0049006d006100670065000000033f000000cd0000000000000000fb0000000c00430061006d006500720061010000033f000000cd0000000000000000fb0000001a0046004c0053002000430061007200740065007300690061006e0000000486000000da0000000000000000fb0000001200530065006c0065006300740069006f006e00000004a9000000b70000005c00ffffff000000010000015600000525fc0200000002fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000005000000014efc0100000002fb0000000800540069006d00650100000000000004b00000000000000000fb0000000800540069006d006501000000000000045000000000000000000000038b0000052500000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Views:

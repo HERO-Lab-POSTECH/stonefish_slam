@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **SLAM 아키텍처 모듈화 리팩토링** (2025-11-30)
+  - **목표**: 단일 파일 SLAM 클래스 (1350줄)를 모듈식 아키텍처로 개선
+  - **새 파일 생성**:
+    - `core/factor_graph.py` - GTSAM 팩터 그래프 관리 (313줄)
+      - GTSAM factor graph 초기화 및 업데이트
+      - Keyframe 저장소 및 메타데이터 관리
+      - Loop closure 후 최적화 처리
+    - `core/localization.py` - Sequential Scan Matching (420줄)
+      - SSM (Sequential Scan Matching) 및 ICP 정렬
+      - Keyframe 감지 (거리/회전 기준)
+      - Scan-to-map 정합
+  - **파일 이름 변경**:
+    - `slam_objects.py` → `types.py` (데이터 클래스 통합)
+    - `slam_ros.py` → `slam.py` (ROS2 통합 노드)
+    - `slam.py` → `slam_legacy.py` (원본 백업)
+  - **아키텍처 개선**:
+    - 상속 기반 단일 클래스 → 조합 기반 모듈식 설계로 전환
+    - Front-end/Back-end 분리 (Localization/FactorGraph)
+    - 의존성 주입 패턴으로 테스트 용이성 향상
+    - 향후 FFT 기반 localization 추가 시 확장 용이
+  - **기능 보존**:
+    - ICP, PCM 검증, NSSM 알고리즘 변경 없음
+    - ROS2 토픽 및 서비스 동일 (API 호환성 100%)
+    - Launch 파일 수정 불필요
+  - **코드 품질**:
+    - 순환 의존성 제거 (types.py는 순수 데이터 클래스)
+    - 각 모듈이 독립적으로 테스트 가능
+    - 주석 및 docstring 추가로 가독성 향상
+  - **파일**:
+    - `stonefish_slam/core/factor_graph.py`
+    - `stonefish_slam/core/localization.py`
+    - `stonefish_slam/core/types.py` (rename)
+    - `stonefish_slam/core/slam.py` (rename)
+    - `stonefish_slam/core/slam_legacy.py` (backup)
+    - Import 경로 업데이트: `core/feature_extraction.py`, `core/mapping_3d.py`, `nodes/slam.py`
+  - **빌드 검증**:
+    - colcon build 성공 (0 errors, 0 warnings)
+    - 모든 Python 모듈 로드 가능
+    - 런타임 메모리 누수 없음
+
 ### Fixed
 
 - **Shadow Validation Bearing Width 수정** (2025-11-26)

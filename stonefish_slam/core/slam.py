@@ -1,782 +1,912 @@
-import gtsam
+# python imports
 import numpy as np
+import struct
+import rclpy
+from rclpy.node import Node
+from rclpy.duration import Duration
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from tf2_ros import TransformBroadcaster, Buffer, TransformListener
+import cv_bridge
+from nav_msgs.msg import Odometry
+from message_filters import Subscriber, ApproximateTimeSynchronizer
+from sensor_msgs.msg import PointCloud2, Image
+from visualization_msgs.msg import Marker
+from geometry_msgs.msg import PoseWithCovarianceStamped
 
-from ctypes import Union
-from typing import Any
-from numpy import True_
-from scipy.optimize import shgo
-from itertools import combinations
-from collections import defaultdict
-from sklearn.covariance import MinCovDet
-import time as time_pkg
-
-from stonefish_slam.utils.sonar import OculusProperty
+# stonefish_slam imports
+from stonefish_slam.utils.io import *
 from stonefish_slam.utils.conversions import *
 from stonefish_slam.utils.visualization import *
-from stonefish_slam.utils.io import *
+from stonefish_slam.core.factor_graph import FactorGraph
+from stonefish_slam.core.localization import Localization
+from stonefish_slam.core.types import Keyframe, STATUS, ICPResult
+from stonefish_slam.core.mapping_2d import SonarMapping2D
+from stonefish_slam.core.mapping_3d import SonarMapping3D
 from stonefish_slam.cpp import pcl
-
-from stonefish_slam.core.slam_objects import (
-    STATUS,
-    Keyframe,
-    InitializationResult,
-    ICPResult,
-    SMParams,
-)
+from stonefish_slam.utils.topics import *
 
 
-class SLAM(object):
-    """The class to run underwater sonar based SLAM"""
+def pointcloud2_to_xyz_array(cloud_msg):
+    """
+    Convert PointCloud2 message to numpy array of XYZ points
+
+    Args:
+        cloud_msg: sensor_msgs.msg.PointCloud2
+
+    Returns:
+        numpy array of shape (N, 3) with xyz coordinates
+    """
+    # Get point step and create dtype
+    point_step = cloud_msg.point_step
+
+    # Parse fields to find x, y, z offsets
+    field_names = [field.name for field in cloud_msg.fields]
+
+    # Find offsets for x, y, z
+    x_offset = None
+    y_offset = None
+    z_offset = None
+
+    for field in cloud_msg.fields:
+        if field.name == 'x':
+            x_offset = field.offset
+        elif field.name == 'y':
+            y_offset = field.offset
+        elif field.name == 'z':
+            z_offset = field.offset
+
+    if x_offset is None or y_offset is None or z_offset is None:
+        raise ValueError("PointCloud2 must have x, y, z fields")
+
+    # Convert data to numpy array
+    num_points = cloud_msg.width * cloud_msg.height
+    points = []
+
+    for i in range(num_points):
+        offset = i * point_step
+
+        # Unpack x, y, z as floats
+        x = struct.unpack('f', cloud_msg.data[offset + x_offset:offset + x_offset + 4])[0]
+        y = struct.unpack('f', cloud_msg.data[offset + y_offset:offset + y_offset + 4])[0]
+        z = struct.unpack('f', cloud_msg.data[offset + z_offset:offset + z_offset + 4])[0]
+
+        points.append([x, y, z])
+
+    # Ensure we return a 2D array even when empty
+    if len(points) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+
+    return np.array(points, dtype=np.float32)
+
+
+class SLAMNode(Node):
+    """ROS2 SLAM node using modular factor graph and localization components.
+    """
 
     def __init__(self):
-        """Class constructor for the SLAM class, note we do not feed arguments in in the pythonic way
-        we use the ros param system to get the params. Note that almost everything is eligible for
-        overwrite when the yaml file is called. See config/slam.yaml."""
+        # Initialize ROS2 Node first
+        Node.__init__(self, 'slam_node')
 
-        # configure sonar info
-        self.oculus = OculusProperty()
+        # Initialize SLAM modules (composition instead of inheritance)
+        self.fg = FactorGraph()
+        self.localization = Localization(self.fg)
 
-        # Create a new factor when
-        # - |ti - tj| > min_duration and
-        # - |xi - xj| > max_translation or
-        # - |ri - rj| > max_rotation
-        self.keyframe_duration = None
-        self.keyframe_translation = None
-        self.keyframe_rotation = None
+        # No lock needed (synchronous processing)
 
-        # List of keyframes, a keyframe is a step in the SLAM solution
-        self.keyframes = []
+        # TF2 buffer for timestamp synchronization (30s cache for delayed mapping)
+        self.tf_buffer = Buffer(cache_time=Duration(seconds=30))
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # Current (non-key)frame with real-time pose update
-        # TODO propagate cov from previous keyframe
-        self.current_frame = None
+        # Mapping statistics
+        self.mapping_stats = {
+            'keyframes_total': 0,
+            'maps_published': 0
+        }
 
-        # init isam the graph optimization tool
-        self.isam_params = gtsam.ISAM2Params()
-        self.isam = gtsam.ISAM2(self.isam_params)
+        # Mapping initialization (configured in init_node)
+        self.mapper = None
+        self.enable_2d_mapping = False
+        self.map_update_interval = 1  # 매 키프레임마다 업데이트
+        self.last_map_update_kf = 0
+        self.bridge = cv_bridge.CvBridge()
 
-        # define the graph and initial guess matrix, values. Use these to push info into isam
-        self.graph = gtsam.NonlinearFactorGraph()
-        self.values = gtsam.Values()
+        # Initialize node parameters and subscribers/publishers
+        self.init_node()
 
-        # initial location noise model [x, y, theta]
-        self.prior_sigmas = None  # place holder
+    def init_node(self, ns="~") -> None:
+        """Configures the SLAM node
 
-        # Noise model without ICP, just dead reckoning
-        # [x, y, theta]
-        self.odom_sigmas = None  # place holder
-
-        # Downsample paramter for point cloud for ICP and publishing
-        self.point_resolution = 0.5
-
-        # Noise radius in overlap estimation
-        self.point_noise = 0.5
-
-        # paramters for sequnetial scan matching (SSM)
-        self.ssm_params = SMParams()  # object to hold all the params
-        self.ssm_params.initialization = True  # flag to indicate if we did this step
-        self.ssm_params.initialization_params = 50, 1, 0.01
-        self.ssm_params.min_st_sep = 1
-        self.ssm_params.min_points = 50
-        self.ssm_params.max_translation = 2.0
-        self.ssm_params.max_rotation = np.pi / 6
-        self.ssm_params.target_frames = 3
-        # Don't use ICP covariance
-        self.ssm_params.cov_samples = 0
-
-        # paramters for loop closures (NSSM)
-        self.nssm_params = SMParams()
-        self.nssm_params.initialization = True
-        self.nssm_params.initialization_params = 100, 5, 0.01
-        self.nssm_params.min_st_sep = 10
-        self.nssm_params.min_points = 100
-        self.nssm_params.max_translation = 6.0
-        self.nssm_params.max_rotation = np.pi / 2
-        self.nssm_params.source_frames = 5
-        self.nssm_params.cov_samples = 30
-
-        # define ICP
-        self.icp = pcl.ICP()
-        self.icp_ssm = pcl.ICP()
-
-        # Pairwise consistent measurement, for loop closure outlier rejection
-        self.nssm_queue = []  # the loop closur queue
-        self.pcm_queue_size = 5  # default val
-        self.min_pcm = 3  # default val
-
-        # Use fixed noise model in two cases
-        # - Sequential scan matching
-        # - ICP cov is too small in non-sequential scan matching
-        # [x, y, theta]
-        self.icp_odom_sigmas = None
-
-        # Can't save fig in online mode
-        # TODO remove this
-        self.save_fig = False
-        self.save_data = False
-
-    @property
-    def current_keyframe(self) -> Keyframe:
-        """Get the current keyframe from the SLAM solution
-
-        Returns:
-            Keyframe: the current keyframe (most recent keyframe) in the system
+        Args:
+            ns (str, optional): The namespace of the node. Defaults to "~".
         """
+        # keyframe paramters, how often to add them
+        self.declare_parameter('keyframe_duration', 1.0)
+        self.declare_parameter('keyframe_translation', 3.0)
+        self.declare_parameter('keyframe_rotation', 0.5236)  # 30 degrees in radians
 
-        # the current keyframe
-        return self.keyframes[-1]
+        keyframe_duration_sec = self.get_parameter('keyframe_duration').value
+        keyframe_duration = Duration(seconds=keyframe_duration_sec)
+        keyframe_translation = self.get_parameter('keyframe_translation').value
+        keyframe_rotation = self.get_parameter('keyframe_rotation').value
 
-    @property
-    def current_key(self) -> int:
-        """Get the length of the list that stores the keyframes
+        # Set keyframe criteria in localization module
+        self.localization.keyframe_duration = keyframe_duration
+        self.localization.keyframe_translation = keyframe_translation
+        self.localization.keyframe_rotation = keyframe_rotation
 
-        Returns:
-            int: the length of self.keyframes
-        """
+        # SLAM paramter, are we using SLAM or just dead reckoning
+        self.declare_parameter('enable_slam', True)
+        self.enable_slam = self.get_parameter('enable_slam').value
+        self.get_logger().info(f"SLAM STATUS: {self.enable_slam}")
 
-        return len(self.keyframes)
+        # noise models
+        self.declare_parameter('slam_prior_noise', [0.1, 0.1, 0.01])
+        self.declare_parameter('slam_odom_noise', [0.2, 0.2, 0.02])
+        self.declare_parameter('slam_icp_noise', [0.1, 0.1, 0.01])
+
+        prior_sigmas = self.get_parameter('slam_prior_noise').value
+        odom_sigmas = self.get_parameter('slam_odom_noise').value
+        icp_odom_sigmas = self.get_parameter('slam_icp_noise').value
+
+        # Store noise sigmas for later noise model creation
+        self.prior_sigmas = prior_sigmas
+        self.odom_sigmas = odom_sigmas
+        self.icp_odom_sigmas = icp_odom_sigmas
+
+        # Set noise sigmas in localization module
+        self.localization.odom_sigmas = odom_sigmas
+        self.localization.icp_odom_sigmas = icp_odom_sigmas
+
+        # resultion for map downsampling
+        self.declare_parameter('point_downsample_resolution', 0.5)
+        point_resolution = self.get_parameter('point_downsample_resolution').value
+        self.localization.point_resolution = point_resolution
+
+        # sequential scan matching parameters (SSM)
+        self.declare_parameter('ssm.enable', True)
+        self.declare_parameter('ssm.min_points', 50)
+        self.declare_parameter('ssm.max_translation', 3.0)
+        self.declare_parameter('ssm.max_rotation', 0.5236)  # 30 degrees
+        self.declare_parameter('ssm.target_frames', 3)
+
+        self.localization.ssm_params.enable = self.get_parameter('ssm.enable').value
+        self.localization.ssm_params.min_points = self.get_parameter('ssm.min_points').value
+        self.localization.ssm_params.max_translation = self.get_parameter('ssm.max_translation').value
+        self.localization.ssm_params.max_rotation = self.get_parameter('ssm.max_rotation').value
+        self.localization.ssm_params.target_frames = self.get_parameter('ssm.target_frames').value
+        self.get_logger().info(f"SSM: {self.localization.ssm_params.enable}")
+
+        # non sequential scan matching parameters (NSSM) aka loop closures
+        self.declare_parameter('nssm.enable', True)
+        self.declare_parameter('nssm.min_st_sep', 8)
+        self.declare_parameter('nssm.min_points', 50)
+        self.declare_parameter('nssm.max_translation', 10.0)
+        self.declare_parameter('nssm.max_rotation', 1.0472)  # 60 degrees
+        self.declare_parameter('nssm.source_frames', 5)
+        self.declare_parameter('nssm.cov_samples', 30)
+
+        self.localization.nssm_params.enable = self.get_parameter('nssm.enable').value
+        self.localization.nssm_params.min_st_sep = self.get_parameter('nssm.min_st_sep').value
+        self.localization.nssm_params.min_points = self.get_parameter('nssm.min_points').value
+        self.localization.nssm_params.max_translation = self.get_parameter('nssm.max_translation').value
+        self.localization.nssm_params.max_rotation = self.get_parameter('nssm.max_rotation').value
+        self.localization.nssm_params.source_frames = self.get_parameter('nssm.source_frames').value
+        self.localization.nssm_params.cov_samples = self.get_parameter('nssm.cov_samples').value
+        self.get_logger().info(f"NSSM: {self.localization.nssm_params.enable}")
+
+        # pairwise consistency maximization parameters for loop closure
+        # outliar rejection
+        self.declare_parameter('pcm_queue_size', 5)
+        self.declare_parameter('min_pcm', 2)
+
+        self.fg.pcm_queue_size = self.get_parameter('pcm_queue_size').value
+        self.fg.min_pcm = self.get_parameter('min_pcm').value
+
+        # ===== Sonar Hardware Parameters =====
+        self.declare_parameter('sonar.max_range', 40.0)
+        self.declare_parameter('sonar.min_range', 0.5)
+        self.declare_parameter('sonar.horizontal_fov', 130.0)
+        self.declare_parameter('sonar.vertical_aperture', 20.0)
+        self.declare_parameter('sonar.image_width', 918)
+        self.declare_parameter('sonar.image_height', 512)
+        self.declare_parameter('sonar.sonar_position', [0.25, 0.0, 0.08])
+        self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
+
+        # ===== 2D Mapping Parameters =====
+        self.declare_parameter('mapping_2d.map_2d_resolution', 0.1)
+        self.declare_parameter('mapping_2d.map_size', [4000, 4000])
+        self.declare_parameter('mapping_2d.map_update_interval', 1)
+        self.declare_parameter('mapping_2d.intensity_threshold', 50)
+
+        # ===== 3D Mapping Parameters =====
+        self.declare_parameter('mapping_3d.map_3d_voxel_size', 0.1)
+        self.declare_parameter('mapping_3d.min_probability', 0.6)
+        self.declare_parameter('mapping_3d.log_odds_occupied', 1.5)
+        self.declare_parameter('mapping_3d.log_odds_free', -2.0)
+        self.declare_parameter('mapping_3d.log_odds_min', -10.0)
+        self.declare_parameter('mapping_3d.log_odds_max', 10.0)
+        self.declare_parameter('mapping_3d.adaptive_update', True)
+        self.declare_parameter('mapping_3d.adaptive_threshold', 0.5)
+        self.declare_parameter('mapping_3d.adaptive_max_ratio', 0.5)
+        self.declare_parameter('mapping_3d.use_cpp_backend', True)
+        self.declare_parameter('mapping_3d.enable_propagation', False)
+        self.declare_parameter('mapping_3d.use_range_weighting', True)
+        self.declare_parameter('mapping_3d.lambda_decay', 0.1)
+        self.declare_parameter('mapping_3d.enable_gaussian_weighting', False)
+        self.declare_parameter('mapping_3d.use_dda_traversal', True)
+        self.declare_parameter('mapping_3d.bearing_step', 2)
+
+        # ===== Mapping Enable Flags =====
+        self.declare_parameter('enable_2d_mapping', True)
+        self.declare_parameter('enable_3d_mapping', True)
+
+        self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
+        self.map_update_interval = self.get_parameter('mapping_2d.map_update_interval').value
+
+        # Build sonar config dict (unified for 2D and 3D)
+        sonar_config = {
+            'max_range': self.get_parameter('sonar.max_range').value,
+            'min_range': self.get_parameter('sonar.min_range').value,
+            'horizontal_fov': self.get_parameter('sonar.horizontal_fov').value,
+            'vertical_aperture': self.get_parameter('sonar.vertical_aperture').value,
+            'image_width': self.get_parameter('sonar.image_width').value,
+            'image_height': self.get_parameter('sonar.image_height').value,
+            'sonar_position': self.get_parameter('sonar.sonar_position').value,
+            'sonar_tilt_deg': self.get_parameter('sonar.sonar_tilt_deg').value,
+        }
+
+        # Fixed map resolution for DDS message size compatibility
+        # Auto-calculated: sonar_range / sonar_bins = 40/512 = 0.078m → 5120x5120 pixels (26MB)
+        # Fixed: 0.2m → 1000x1000 pixels (1MB) - reduces message size by 26x
+        map_resolution = 0.2  # Fixed resolution for 200x200m map
+
+        if self.enable_2d_mapping:
+            map_size = tuple(self.get_parameter('mapping_2d.map_size').value)
+            intensity_threshold = self.get_parameter('mapping_2d.intensity_threshold').value
+
+            self.mapper = SonarMapping2D(
+                map_resolution=map_resolution,
+                map_size=map_size,
+                sonar_range=sonar_config['max_range'],
+                sonar_fov=sonar_config['horizontal_fov'],
+                sonar_tilt_deg=sonar_config['sonar_tilt_deg'],
+                intensity_threshold=intensity_threshold
+            )
+            self.get_logger().info(
+                f"2D Mapping enabled: resolution={map_resolution}m/px, "
+                f"max_range={sonar_config['max_range']}m, tilt={sonar_config['sonar_tilt_deg']}°, "
+                f"intensity_threshold={intensity_threshold}"
+            )
+
+        # Store sonar parameters for compatibility
+        self.sonar_fov = sonar_config['horizontal_fov']
+        self.sonar_range = sonar_config['max_range']
+        self.intensity_threshold = self.get_parameter('mapping_2d.intensity_threshold').value
+
+        # Initialize 3D mapper
+        self.enable_3d_mapping = self.get_parameter('enable_3d_mapping').value
+        self.mapper_3d = None
+        self.map_3d_pub = None
+
+        if self.enable_3d_mapping:
+            self.get_logger().info("Initializing 3D mapping...")
+
+            # Build 3D mapping config dict (includes sonar + 3D-specific params)
+            mapping_3d_config = {
+                # Sonar parameters (shared from sonar_config)
+                'max_range': sonar_config['max_range'],
+                'min_range': sonar_config['min_range'],
+                'horizontal_fov': sonar_config['horizontal_fov'],
+                'vertical_aperture': sonar_config['vertical_aperture'],
+                'image_width': sonar_config['image_width'],
+                'image_height': sonar_config['image_height'],
+                'sonar_position': sonar_config['sonar_position'],
+                'sonar_tilt_deg': sonar_config['sonar_tilt_deg'],
+                'intensity_threshold': self.intensity_threshold,
+
+                # 3D mapping specific
+                'voxel_resolution': self.get_parameter('mapping_3d.map_3d_voxel_size').value,
+                'min_probability': self.get_parameter('mapping_3d.min_probability').value,
+                'log_odds_occupied': self.get_parameter('mapping_3d.log_odds_occupied').value,
+                'log_odds_free': self.get_parameter('mapping_3d.log_odds_free').value,
+                'log_odds_min': self.get_parameter('mapping_3d.log_odds_min').value,
+                'log_odds_max': self.get_parameter('mapping_3d.log_odds_max').value,
+                'adaptive_update': self.get_parameter('mapping_3d.adaptive_update').value,
+                'adaptive_threshold': self.get_parameter('mapping_3d.adaptive_threshold').value,
+                'adaptive_max_ratio': self.get_parameter('mapping_3d.adaptive_max_ratio').value,
+                'use_cpp_backend': self.get_parameter('mapping_3d.use_cpp_backend').value,
+                'enable_propagation': self.get_parameter('mapping_3d.enable_propagation').value,
+                'use_range_weighting': self.get_parameter('mapping_3d.use_range_weighting').value,
+                'lambda_decay': self.get_parameter('mapping_3d.lambda_decay').value,
+                'enable_gaussian_weighting': self.get_parameter('mapping_3d.enable_gaussian_weighting').value,
+                'use_dda_traversal': self.get_parameter('mapping_3d.use_dda_traversal').value,
+                'bearing_step': self.get_parameter('mapping_3d.bearing_step').value,
+
+                # Fixed parameters
+                'max_frames': 0,
+                'dynamic_expansion': True,
+            }
+
+            # Create mapper
+            self.mapper_3d = SonarMapping3D(config=mapping_3d_config)
+            self.get_logger().info(
+                f"3D Mapper initialized: resolution={mapping_3d_config['voxel_resolution']}m, "
+                f"max_range={mapping_3d_config['max_range']}m, tilt={mapping_3d_config['sonar_tilt_deg']}°"
+            )
+
+        # max delay between an incoming point cloud and dead reckoning
+        self.feature_odom_sync_max_delay = 0.5
+
+        # QoS profile for subscriptions (matching simulator's BEST_EFFORT)
+        qos_sub_profile = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=20
+        )
+
+        # QoS profile for publishers
+        qos_pub_profile = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        # QoS profile for image publishers (BEST_EFFORT for compatibility with image viewers)
+        qos_image_pub_profile = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        # QoS profile for PointCloud2 (RELIABLE for RViz compatibility)
+        qos_pointcloud_pub_profile = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        # define the subsrcibing topics
+        self.feature_sub = Subscriber(self, PointCloud2, SONAR_FEATURE_TOPIC, qos_profile=qos_sub_profile)
+        self.odom_sub = Subscriber(self, Odometry, LOCALIZATION_ODOM_TOPIC, qos_profile=qos_sub_profile)
+
+        # Add debug prints for topic names
+        self.get_logger().info(f"Subscribing to feature topic: {SONAR_FEATURE_TOPIC}")
+        self.get_logger().info(f"Subscribing to odom topic: {LOCALIZATION_ODOM_TOPIC}")
+
+        # Sonar image subscriber for 2D/3D mapping
+        if self.enable_2d_mapping or self.enable_3d_mapping:
+            self.sonar_sub = Subscriber(self, Image, '/bluerov2/fls/image', qos_profile=qos_sub_profile)
+            self.get_logger().info("Subscribing to sonar image: /bluerov2/fls/image")
+
+        # define the sync policy
+        if self.enable_2d_mapping or self.enable_3d_mapping:
+            self.time_sync = ApproximateTimeSynchronizer(
+                [self.feature_sub, self.odom_sub, self.sonar_sub],
+                20,
+                self.feature_odom_sync_max_delay
+            )
+            self.time_sync.registerCallback(self.SLAM_callback_with_mapping)
+            self.get_logger().info("Using 3-way synchronizer (feature + odom + sonar)")
+        else:
+            self.time_sync = ApproximateTimeSynchronizer(
+                [self.feature_sub, self.odom_sub],
+                20,
+                self.feature_odom_sync_max_delay
+            )
+            self.time_sync.registerCallback(self.SLAM_callback)
+            self.get_logger().info("Using 2-way synchronizer (feature + odom)")
+
+        self.get_logger().info(f"Created time synchronizer with max delay: {self.feature_odom_sync_max_delay}")
+
+        # pose publisher
+        self.pose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, SLAM_POSE_TOPIC, 10)
+
+        # dead reckoning topic
+        self.odom_pub = self.create_publisher(Odometry, SLAM_ODOM_TOPIC, 10)
+
+        # SLAM trajectory topic
+        self.traj_pub = self.create_publisher(
+            PointCloud2, SLAM_TRAJ_TOPIC, qos_pub_profile)
+
+        # constraints between poses
+        self.constraint_pub = self.create_publisher(
+            Marker, SLAM_CONSTRAINT_TOPIC, qos_pub_profile)
+
+        # point cloud publisher topic
+        self.cloud_pub = self.create_publisher(
+            PointCloud2, SLAM_CLOUD_TOPIC, qos_pub_profile)
+
+        # 2D map publisher
+        if self.enable_2d_mapping:
+            self.map_2d_pub = self.create_publisher(
+                Image,
+                SLAM_NS + 'mapping/map_2d_image',
+                qos_profile=qos_image_pub_profile
+            )
+            self.get_logger().info(f"Publishing 2D map to: {SLAM_NS}mapping/map_2d_image (QoS: BEST_EFFORT)")
+
+        # 3D map publisher
+        if self.enable_3d_mapping:
+            self.map_3d_pub = self.create_publisher(
+                PointCloud2,
+                SLAM_NS + 'mapping/map_3d_pointcloud',
+                qos_profile=qos_pointcloud_pub_profile
+            )
+            self.get_logger().info(f"Publishing 3D map to: {SLAM_NS}mapping/map_3d_pointcloud (QoS: RELIABLE)")
+
+        # tf broadcaster to show pose
+        self.tf = TransformBroadcaster(self)
+
+        # cv bridge object
+        self.CVbridge = cv_bridge.CvBridge()
+
+        # get the ICP configuration from the yaml file
+        self.declare_parameter('icp_config', '')
+        icp_config = self.get_parameter('icp_config').value
+        if icp_config:
+            self.localization.icp.loadFromYaml(icp_config)
+
+        # Extract robot ID from odometry topic
+        # LOCALIZATION_ODOM_TOPIC = "/bluerov2/odometry" → rov_id = "bluerov2"
+        if LOCALIZATION_ODOM_TOPIC.startswith('/'):
+            parts = LOCALIZATION_ODOM_TOPIC.split('/')
+            self.rov_id = parts[1] if len(parts) > 1 else ""
+        else:
+            self.rov_id = ""
+
+        self.get_logger().info(f"Detected vehicle ID: '{self.rov_id}' from topic {LOCALIZATION_ODOM_TOPIC}")
+
+        # call the configure function
+        self.configure()
+        self.get_logger().info("SLAM node is initialized")
+
+        # 2D mapping uses synchronous processing (no thread needed)
+        if self.enable_2d_mapping:
+            self.get_logger().info("2D mapping enabled (synchronous mode)")
 
     def configure(self) -> None:
-        """Configure SLAM"""
+        """Configure SLAM noise models."""
+        import gtsam
 
-        # check nssm covariance params
-        assert (
-            self.nssm_params.cov_samples == 0
-            or self.nssm_params.cov_samples
-            < self.nssm_params.initialization_params[0]
-            * self.nssm_params.initialization_params[1]
-        )
+        # Create noise models using GTSAM
+        prior_model = gtsam.noiseModel.Diagonal.Sigmas(np.r_[self.prior_sigmas])
+        odom_model = gtsam.noiseModel.Diagonal.Sigmas(np.r_[self.odom_sigmas])
+        icp_odom_model = gtsam.noiseModel.Diagonal.Sigmas(np.r_[self.icp_odom_sigmas])
 
-        # check ssm covariance params
-        assert (
-            self.ssm_params.cov_samples == 0
-            or self.ssm_params.cov_samples
-            < self.ssm_params.initialization_params[0]
-            * self.ssm_params.initialization_params[1]
-        )
+        # Set noise models in factor graph
+        self.fg.set_noise_models(prior_model, odom_model, icp_odom_model)
 
-        assert self.nssm_params.source_frames < self.nssm_params.min_st_sep
-
-        # create noise models
-        self.prior_model = self.create_noise_model(self.prior_sigmas)
-        self.odom_model = self.create_noise_model(self.odom_sigmas)
-        self.icp_odom_model = self.create_noise_model(self.icp_odom_sigmas)
-
-    def get_states(self) -> np.array:
-        """Retrieve all states as array which are represented as
-            [time, pose2, dr_pose3, cov]
-            - pose2: [x, y, yaw]
-            - dr_pose3: [x, y, z, roll, pitch, yaw]
-            - cov: 3 x 3
-
-        Returns:
-            np.array: the state array
-        """
-
-        # build the state array
-        states = np.zeros(
-            self.current_key,
-            dtype=[
-                ("time", np.float64),
-                ("pose", np.float32, 3),
-                ("dr_pose3", np.float32, 6),
-                ("cov", np.float32, 9),
-            ],
-        )
-
-        # Update all
-        values = self.isam.calculateEstimate()
-        for key in range(self.current_key):
-            pose = values.atPose2(X(key))
-            cov = self.isam.marginalCovariance(X(key))
-            self.keyframes[key].update(pose, cov)
-
-        # pull the state
-        t_zero = self.keyframes[0].time
-        for key in range(self.current_key):
-            keyframe = self.keyframes[key]
-            # ROS2: Convert Time message to seconds (sec + nanosec fields)
-            t_zero_sec = t_zero.sec + t_zero.nanosec / 1e9
-            keyframe_sec = keyframe.time.sec + keyframe.time.nanosec / 1e9
-            states[key]["time"] = keyframe_sec - t_zero_sec
-            states[key]["pose"] = g2n(keyframe.pose)
-            states[key]["dr_pose3"] = g2n(keyframe.dr_pose3)
-            states[key]["cov"] = keyframe.transf_cov.ravel()
-        return states
-
-    @staticmethod
-    def sample_pose(pose: gtsam.Pose2, covariance: np.array) -> gtsam.Pose2:
-        """Generate a random pose using the covariance matrix to define a normal dist.
+    def SLAM_callback(self, feature_msg: PointCloud2, odom_msg: Odometry) -> None:
+        """SLAM call back. Subscibes to the feature msg point cloud and odom msg
+            Handles the whole SLAM system and publishes map, poses and constraints
 
         Args:
-            pose (gtsam.Pose2): The pose we wish to add random to
-            covariance (np.array): The covariance associated with this pose
-
-        Returns:
-            gtsam.Pose2: the provided pose with some random noise added
+            feature_msg (PointCloud2): the incoming sonar point cloud
+            odom_msg (Odometry): the incoming DVL/IMU state estimate
         """
 
-        # get the random noise and add it to the provided pose
-        delta = np.random.multivariate_normal(np.zeros(3), covariance)
-        return pose.compose(n2g(delta, "Pose2"))
+        self.get_logger().info("SLAM_callback", throttle_duration_sec=1.0)
 
-    def sample_current_pose(self) -> gtsam.Pose2:
-        """Add random noise to self.current_keyframe.pose using self.sample_pose()
+        # get rostime from the point cloud
+        time = feature_msg.header.stamp
 
-        Returns:
-            gtsam.Pose2: The self.current_keyframe.pose with noise added
-        """
+        # get the dead reckoning pose from the odom msg, GTSAM pose object
+        dr_pose3 = r2g(odom_msg.pose.pose)
 
-        return self.sample_pose(self.current_keyframe.pose, self.current_keyframe.cov)
+        # init a new key frame
+        frame = Keyframe(False, time, dr_pose3)
 
-    def get_points(
-        self, frames: list = None, ref_frame: Any = None, return_keys: bool = False
-    ) -> np.array:
-        """Get a point cloud, doing the following steps
-            - Accumulate points in frames
-            - Transform them to reference frame
-            - Downsample points
-            - Return the corresponding keys for every point
+        # convert the point cloud message to a numpy array of 2D
+        points = pointcloud2_to_xyz_array(feature_msg)
+        # Extract [x, y] from FRD frame point cloud (original Oculus used [x, -z])
+        points = np.c_[points[:, 0], points[:, 1]]
 
-        Args:
-            frames (list, optional): The list of indexes for the frames we care about. Defaults to None.
-            ref_frame (Any, optional): The frame we want the points relative to, can be gtsam.Pose2 or int index. Defaults to None.
-            return_keys (bool, optional): Do we want to return the keys?. Defaults to False.
-
-        Returns:
-            np.array: the point cloud array, maybe with keys for each point
-        """
-
-        # if there are no frames speced just get them all
-        if frames is None:
-            frames = range(self.current_key)
-
-        # check if the ref frame is a gtsam.Pose2, if it is not we assume it's an index in the list of self.keyframes
-        if ref_frame is not None:
-            if isinstance(ref_frame, gtsam.Pose2):
-                ref_pose = ref_frame
-            else:
-                ref_pose = self.keyframes[ref_frame].pose
-
-        # Define a blank array to add our points to
-        if return_keys:
-            all_points = [np.zeros((0, 3), np.float32)]
+        # In case feature extraction is skipped in this frame
+        if len(points) and np.isnan(points[0, 0]):
+            frame.status = False
         else:
-            all_points = [np.zeros((0, 2), np.float32)]
+            frame.status = self.localization.is_keyframe(frame)
 
-        # Loop over the provided keyframe indexes
-        for key in frames:
-            # if we have a reference frame then use that, otherwise use the SLAM frame
-            if ref_frame is not None:
-                # transform to the reference frame provided
-                points = self.keyframes[key].points
-                pose = self.keyframes[key].pose
-                transf = ref_pose.between(pose)
-                transf_points = Keyframe.transform_points(points, transf)
+        # set the frames twist
+        frame.twist = odom_msg.twist.twist
+
+        # update the keyframe with pose information from dead reckoning
+        if self.fg.keyframes:
+            dr_odom = self.fg.current_keyframe.dr_pose.between(frame.dr_pose)
+            pose = self.fg.current_keyframe.pose.compose(dr_odom)
+            frame.update(pose)
+
+        # check frame staus, are we actually adding a keyframe?
+        if frame.status:
+
+            # add the point cloud to the frame
+            frame.points = points
+
+            # perform seqential scan matching
+            # if this is the first frame do not
+            if not self.fg.keyframes:
+                self.fg.add_prior_factor(frame)
             else:
-                transf_points = self.keyframes[key].transf_points
+                self.add_sequential_scan_matching(frame)
 
-            # if we want the key with each point, get those here
-            if return_keys:
-                transf_points = np.c_[
-                    transf_points, key * np.ones((len(transf_points), 1))
-                ]
-            all_points.append(transf_points)
+            # update the factor graph with the new frame
+            self.fg.update_graph(frame)
 
-        # combine the points into a numpy array
-        all_points = np.concatenate(all_points)
+            # if loop closures are enabled
+            # nonsequential scan matching is True (a loop closure occured) update graph again
+            if self.localization.nssm_params.enable and self.add_nonsequential_scan_matching():
+                self.fg.update_graph()
 
-        # apply voxel downsampling and return
-        if return_keys:
-            return pcl.downsample(
-                all_points[:, :2], all_points[:, (2,)], self.point_resolution
-            )
-        else:
-            return pcl.downsample(all_points, self.point_resolution)
+        # update current time step and publish the topics
+        self.localization.current_frame = frame
+        self.publish_all()
 
-    def compute_icp(
-        self,
-        source_points: np.array,
-        target_points: np.array,
-        guess: np.array = gtsam.Pose2(),
-    ) -> Union:
-        """Compute standard ICP
+    def SLAM_callback_with_mapping(self, feature_msg: PointCloud2, odom_msg: Odometry, sonar_msg: Image) -> None:
+        """SLAM callback with 2D mapping support (3-way synchronization).
+
+        Integrates sonar image acquisition into the SLAM pipeline for 2D map generation.
 
         Args:
-            source_points (np.array): source point cloud [x,y]
-            target_points (np.array): target point cloud [x,y]
-            guess (np.array, optional): the inital guess, if not provided we use identity. Defaults to gtsam.Pose2().
-
-        Returns:
-            Union[str,gtsam.Pose2]: returns the status message and the result as a gtsam.Pose2
+            feature_msg (PointCloud2): the incoming sonar point cloud
+            odom_msg (Odometry): the incoming DVL/IMU state estimate
+            sonar_msg (Image): the incoming sonar image
         """
-
-        # setup the points
-        source_points = np.array(source_points, np.float32)
-        target_points = np.array(target_points, np.float32)
-
-        # convert the guess to a matrix and apply ICP
-        guess = guess.matrix()
-        message, T = self.icp.compute(source_points, target_points, guess)
-
-        # parse the ICP output
-        x, y = T[:2, 2]
-        theta = np.arctan2(T[1, 0], T[0, 0])
-
-        return message, gtsam.Pose2(x, y, theta)
-
-    def compute_icp_with_cov(
-        self, source_points: np.array, target_points: np.array, guesses: list
-    ) -> Union:
-        """Compute ICP with a covariance matrix
-
-        Args:
-            source_points (np.array): source point cloud [x,y]
-            target_points (np.array): target point cloud [x,y]
-            guesses (list): list of initial guesses
-
-        Returns:
-            Union[str,gtsam.Pose2,np.array,np.array]: status message,transform,covariance matrix,transforms tested
-        """
-
-        # parse the points
-        source_points = np.array(source_points, np.float32)
-        target_points = np.array(target_points, np.float32)
-
-        # check each of the provided guesses with ICP
-        sample_transforms = []
-        start = time_pkg.time()
-        for g in guesses:
-            g = g.matrix()
-            message, T = self.icp.compute(source_points, target_points, g)
-
-            # only keep what works
-            if message == "success":
-                x, y = T[:2, 2]
-                theta = np.arctan2(T[1, 0], T[0, 0])
-                sample_transforms.append((x, y, theta))
-
-            # enforce a max run time for this loop
-            if time_pkg.time() - start >= 2.0:
-                break
-
-        # check if we have enough transforms to get a covariance
-        sample_transforms = np.array(sample_transforms)
-        if len(sample_transforms) < 5:
-            return "Too few samples for covariance computation", None, None, None
-
-        # Can't use np.cov(). Too many outliers
+        # 1. Convert sonar image
         try:
-            fcov = MinCovDet(store_precision=False, support_fraction=0.8).fit(
-                sample_transforms
-            )
-        except ValueError as e:
-            return "Failed to calculate covariance", None, None, None
+            sonar_image = self.bridge.imgmsg_to_cv2(sonar_msg, desired_encoding="mono8")
+        except Exception as e:
+            self.get_logger().error(f"Failed to convert sonar image: {e}")
+            sonar_image = None
 
-        # parse the result
-        m = n2g(fcov.location_, "Pose2")
-        cov = fcov.covariance_
+        # 2. Standard SLAM processing
+        # Use sonar timestamp for consistency (feature + mapping use same time)
+        time = sonar_msg.header.stamp
+        dr_pose3 = r2g(odom_msg.pose.pose)
+        frame = Keyframe(False, time, dr_pose3)
 
-        # unrotate to local frame
-        R = m.rotation().matrix()
-        cov[:2, :] = R.T.dot(cov[:2, :])
-        cov[:, :2] = cov[:, :2].dot(R)
+        # Convert point cloud
+        points = pointcloud2_to_xyz_array(feature_msg)
+        points = np.c_[points[:, 0], points[:, 1]]
 
-        # check if the default covariance for ICP is bigger than the one we just estimated
-        default_cov = np.diag(self.icp_odom_sigmas) ** 2
-        if np.linalg.det(cov) < np.linalg.det(default_cov):
-            cov = default_cov
-
-        return "success", m, cov, sample_transforms
-
-    def get_overlap(
-        self,
-        source_points: np.array,
-        target_points: np.array,
-        source_pose: gtsam.Pose2 = None,
-        target_pose: gtsam.Pose2 = None,
-        return_indices: bool = False,
-    ) -> int:
-        """Get the overlap between the provided clouds, the count of points with a nearest neighbor
-
-        Args:
-            source_points (np.array): source point cloud
-            target_points (np.array): target point cloud
-            source_pose (gtsam.Pose2, optional): pose for the source points. Defaults to None.
-            target_pose (gtsam.Pose2, optional): pose for the target points. Defaults to None.
-            return_indices (bool, optional): if we want the cloud indexes. Defaults to False.
-
-        Returns:
-            int: the number of points with a nearest neighbor
-        """
-
-        # transform the points if we have a pose
-        if source_pose:
-            source_points = Keyframe.transform_points(source_points, source_pose)
-        if target_pose:
-            target_points = Keyframe.transform_points(target_points, target_pose)
-
-        # match the points using nearest neigbor with PCL
-        # note that un-matched points get a -1 in indices
-        indices, dists = pcl.match(target_points, source_points, 1, self.point_noise)
-
-        # if we want the indices, send those
-        if return_indices:
-            return np.sum(indices != -1), indices
+        # Check if valid points
+        if len(points) and np.isnan(points[0, 0]):
+            frame.status = False
         else:
-            return np.sum(indices != -1)
+            frame.status = self.localization.is_keyframe(frame)
 
-    def add_prior(self, keyframe: Keyframe) -> None:
-        """Add the prior factor for the first pose in the SLAM solution. This is the starting frame.
+        # Set frame twist
+        frame.twist = odom_msg.twist.twist
 
-        Args:
-            keyframe (Keyframe): the keyframe object for the initial frame
-        """
+        # Update keyframe pose from dead reckoning
+        if self.fg.keyframes:
+            dr_odom = self.fg.current_keyframe.dr_pose.between(frame.dr_pose)
+            pose = self.fg.current_keyframe.pose.compose(dr_odom)
+            frame.update(pose)
 
-        pose = keyframe.pose
-        factor = gtsam.PriorFactorPose2(X(0), pose, self.prior_model)
-        self.graph.add(factor)
-        self.values.insert(X(0), pose)
+        # 3. Process keyframe
+        if frame.status:
+            # Add points
+            frame.points = points
 
-    def add_odometry(self, keyframe: Keyframe) -> None:
-        """Add the odometry factor between provided keyframe and the last keyframe
+            # Add sonar image to frame with acquisition timestamp
+            if sonar_image is not None:
+                frame.image = sonar_image
+                frame.sonar_time = sonar_msg.header.stamp  # Store sonar acquisition time for mapping
 
-        Args:
-            keyframe (Keyframe): the incoming keyframe, basically keyframe_t
-        """
+            # Sequential scan matching
+            if not self.fg.keyframes:
+                self.fg.add_prior_factor(frame)
+            else:
+                self.add_sequential_scan_matching(frame)
 
-        # get the time a pose differnce between the provided keyframe and the last logged one
-        # ROS2: Convert Time message to seconds (sec + nanosec fields)
-        current_sec = keyframe.time.sec + keyframe.time.nanosec / 1e9
-        last_sec = self.keyframes[-1].time.sec + self.keyframes[-1].time.nanosec / 1e9
-        dt = current_sec - last_sec
-        dr_odom = self.keyframes[-1].pose.between(keyframe.pose)
-
-        # build a factor and insert it into the graph, providing an initial guess as well
-        factor = gtsam.BetweenFactorPose2(
-            X(self.current_key - 1), X(self.current_key), dr_odom, self.odom_model
-        )
-        self.graph.add(factor)
-        self.values.insert(X(self.current_key), keyframe.pose)
-
-    def get_map(self, frames, resolution=None):
-        # Implemented in slam_node
-        # TODO remove this code
-        raise NotImplementedError
-
-    def get_matching_cost_subroutine1(
-        self,
-        source_points: np.array,
-        source_pose: gtsam.Pose2,
-        target_points: np.array,
-        target_pose: gtsam.Pose2,
-        source_pose_cov: np.array = None,
-    ) -> Union:
-        """Perform global cost point cloud alignment. Here we transform source points to target points.
-
-        Args:
-            source_points (np.array): source point cloud
-            source_pose (gtsam.Pose2): pose for the source_points
-            target_points (np.array): target point cloud
-            target_pose (gtsam.Pose2): pose for the target_points
-            source_pose_cov (np.array, optional): Covariance for the source points. Defaults to None.
-
-        Returns:
-            Union[function,list]: the function to be optimized by scipy.shgo and a list of poses
-        """
-        # pose_samples = []
-        # target_tree = KDTree(target_points)
-
-        # def subroutine(x):
-        #     # x = [x, y, theta]
-        #     delta = n2g(x, "Pose2")
-        #     sample_source_pose = source_pose.compose(delta)
-        #     sample_transform = target_pose.between(sample_source_pose)
-
-        #     points = Keyframe.transform_points(source_points, sample_transform)
-        #     dists, indices = target_tree.query(
-        #         points, distance_upper_bound=self.point_noise
-        #     )
-
-        #     cost = -np.sum(indices != len(target_tree.data))
-
-        #     pose_samples.append(np.r_[g2n(sample_source_pose), cost])
-        #     return cost
-
-        # return subroutine, pose_samples
-
-        # maintain a list of poses we try
-        pose_samples = []
-
-        # create a grid for the target points
-        xmin, ymin = np.min(target_points, axis=0) - 2 * self.point_noise
-        xmax, ymax = np.max(target_points, axis=0) + 2 * self.point_noise
-        resolution = self.point_noise / 10.0
-        xs = np.arange(xmin, xmax, resolution)
-        ys = np.arange(ymin, ymax, resolution)
-        target_grids = np.zeros((len(ys), len(xs)), np.uint8)
-
-        # populate the grid for the target points
-        r = np.int32(np.round((target_points[:, 1] - ymin) / resolution))
-        c = np.int32(np.round((target_points[:, 0] - xmin) / resolution))
-        r = np.clip(r, 0, target_grids.shape[0] - 1)
-        c = np.clip(c, 0, target_grids.shape[1] - 1)
-        target_grids[r, c] = 255
-
-        # dilate the grid
-        dilate_hs = int(np.ceil(self.point_noise / resolution))
-        dilate_size = 2 * dilate_hs + 1
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE, (dilate_size, dilate_size), (dilate_hs, dilate_hs)
-        )
-        target_grids = cv2.dilate(target_grids, kernel)
-
-        # # Calculate distance to the nearest points
-        # target_grids = cv2.bitwise_not(target_grids)
-        # target_grids = cv2.distanceTransform(target_grids, cv2.DIST_L2, 3)
-        # target_grids = 1.0 - 0.2 * target_grids / self.point_noise
-        # target_grids = np.clip(target_grids, 0.2, 1.0)
-
-        source_pose_info = np.linalg.inv(source_pose_cov)
-
-        def subroutine(x: np.array) -> float:
-            """The optimization subroutine, called iterativly by scipy.shgo
-
-            Args:
-                x (gtsam.Pose2): the source pose as an array. [x, y, theta]
-
-            Returns:
-                float: cost of this step
-            """
-
-            # package the incoming pose as a gtsam.Pose2
-            # apply this pose to the source_pose and get the transform between source and target
-            delta = n2g(x, "Pose2")
-            sample_source_pose = source_pose.compose(delta)
-            sample_transform = target_pose.between(sample_source_pose)
-
-            # apply this new transform to the source points
-            # then limit the points to only points that fit inside the target grid
-            points = Keyframe.transform_points(source_points, sample_transform)
-            r = np.int32(np.round((points[:, 1] - ymin) / resolution))
-            c = np.int32(np.round((points[:, 0] - xmin) / resolution))
-            inside = (
-                (0 <= r)
-                & (r < target_grids.shape[0])
-                & (0 <= c)
-                & (c < target_grids.shape[1])
+            # Update factor graph
+            self.fg.update_graph(frame)
+            self.get_logger().info(
+                f"Keyframe added: #{len(self.fg.keyframes)}, "
+                f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f}), "
+                f"has_image={frame.image is not None}"
             )
 
-            # get the number of cells that overlap and log the pose
-            cost = -np.sum(target_grids[r[inside], c[inside]] > 0)
-            pose_samples.append(np.r_[g2n(sample_source_pose), cost])
+            # Loop closure
+            if self.localization.nssm_params.enable and self.add_nonsequential_scan_matching():
+                self.fg.update_graph()
 
-            return cost
+            # 4. Update 2D/3D maps immediately (synchronous)
+            if (self.enable_2d_mapping or self.enable_3d_mapping) and (len(self.fg.keyframes) - self.last_map_update_kf >= self.map_update_interval):
+                # Get new keyframes for incremental update
+                new_keyframes = list(self.fg.keyframes[self.last_map_update_kf:])
 
-        return subroutine, pose_samples
+                if new_keyframes:
+                    try:
+                        # Update 2D map if enabled
+                        if self.enable_2d_mapping and self.mapper:
+                            # Construct source_frame with namespace (use FRD for correct NED mapping)
+                            source_frame = 'base_link_frd' if self.rov_id == "" else f"{self.rov_id}/base_link_frd"
 
-    def get_matching_cost_subroutine2(self, source_points, source_pose, occ):
-        # TODO remove this code
+                            # Update map immediately (synchronous - no queue, no thread)
+                            self.mapper.update_global_map_from_slam(
+                                new_keyframes,  # New keyframes to process
+                                tf2_buffer=None,  # Disabled: use keyframe.pose
+                                target_frame='world_ned',
+                                source_frame=source_frame,
+                                all_slam_keyframes=self.fg.keyframes  # Complete list for bounds calculation
+                            )
+
+                            # Get and publish map image immediately
+                            map_image = self.mapper.get_map_image()
+                            self.get_logger().info(
+                                f"get_map_image() returned: shape={map_image.shape if map_image is not None else None}, "
+                                f"size={map_image.size if map_image is not None else 0}"
+                            )
+
+                            if map_image is not None and map_image.size > 0:
+                                self.get_logger().info(f"Converting to ROS Image message...")
+                                image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
+                                image_msg.header.stamp = self.get_clock().now().to_msg()
+                                image_msg.header.frame_id = "map"
+
+                                self.get_logger().info(
+                                    f"Publishing to {self.map_2d_pub.topic_name if hasattr(self.map_2d_pub, 'topic_name') else 'unknown'}"
+                                )
+                                self.map_2d_pub.publish(image_msg)
+                                self.get_logger().info("publish() called successfully")
+
+                                self.get_logger().info(
+                                    f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
+                                    f"{len(new_keyframes)} new keyframes, "
+                                    f"bounds=X[{self.mapper.min_x:.1f},{self.mapper.max_x:.1f}] "
+                                    f"Y[{self.mapper.min_y:.1f},{self.mapper.max_y:.1f}]"
+                                )
+                            else:
+                                self.get_logger().error(f"Map image is None or empty! Cannot publish.")
+
+                        # 5. Update 3D map (independent of 2D mapping)
+                        if self.enable_3d_mapping and self.mapper_3d:
+                            try:
+                                # Update 3D map from same new keyframes
+                                self.mapper_3d.update_map_from_slam(
+                                    new_keyframes,
+                                    all_slam_keyframes=self.fg.keyframes
+                                )
+
+                                # Get and publish PointCloud2
+                                pc_msg = self.mapper_3d.get_pointcloud2_msg(
+                                    frame_id='world_ned',
+                                    stamp=self.get_clock().now().to_msg()
+                                )
+
+                                if pc_msg.width > 0:  # Only publish if not empty
+                                    self.map_3d_pub.publish(pc_msg)
+                                    self.get_logger().info(
+                                        f"Published 3D point cloud: {pc_msg.width} points, "
+                                        f"frame {self.mapper_3d.frame_count}"
+                                    )
+                                else:
+                                    # Debug: Why is point cloud empty?
+                                    self.get_logger().warn(
+                                        f"3D point cloud is empty after {self.mapper_3d.frame_count} frames, "
+                                        f"{self.mapper_3d.get_voxel_count()} total voxels"
+                                    )
+                            except Exception as e:
+                                import traceback
+                                self.get_logger().error(f"3D mapping update failed: {e}\n{traceback.format_exc()}")
+
+                        # Update counter AFTER both 2D and 3D mapping
+                        self.last_map_update_kf = len(self.fg.keyframes)
+
+                    except Exception as e:
+                        import traceback
+                        self.get_logger().error(f"Synchronous mapping failed: {e}\n{traceback.format_exc()}")
+
+            # Track keyframe count
+            self.mapping_stats['keyframes_total'] = len(self.fg.keyframes)
+
+        # Update current frame and publish
+        self.localization.current_frame = frame
+        self.publish_all()
+
+    def publish_all(self) -> None:
+        """Publish to all ouput topics
+            trajectory, contraints, point cloud and the full GTSAM instance
         """
-        Ceres scan matching
-
-        Cost = - sum_i  ||1 - M_nearest(Tx s_i)||^2,
-                given transform Tx, source points S, occupancy map M
-        """
-        pose_samples = []
-        x0, y0, resolution, occ_arr = occ
-
-        def subroutine(x):
-            # x = [x, y, theta]
-            delta = n2g(x, "Pose2")
-            sample_pose = source_pose.compose(delta)
-
-            xy = Keyframe.transform_points(source_points, sample_pose)
-            r = np.int32(np.round((xy[:, 1] - y0) / resolution))
-            c = np.int32(np.round((xy[:, 0] - x0) / resolution))
-
-            sel = (r >= 0) & (c >= 0) & (r < occ_arr.shape[0]) & (c < occ_arr.shape[1])
-            hit_probs_inside_map = occ_arr[r[sel], c[sel]]
-            num_hits_outside_map = len(xy) - np.sum(sel)
-
-            cost = (
-                np.sum((1.0 - hit_probs_inside_map) ** 2)
-                + num_hits_outside_map * (1.0 - 0.5) ** 2
-            )
-            cost = np.sqrt(cost / len(source_points))
-
-            pose_samples.append(np.r_[g2n(sample_pose), cost])
-            return cost
-
-        return subroutine, pose_samples
-
-    def initialize_sequential_scan_matching(
-        self, keyframe: Keyframe
-    ) -> InitializationResult:
-        """Init a sequential scan matching call by using global ICP.
-
-        Args:
-            keyframe (Keyframe): the keyframe we want to register
-
-        Returns:
-            InitializationResult: the results of the the initilization
-        """
-
-        # instanciate an ICP InitializationResult object
-        ret = InitializationResult()
-        ret.status = STATUS.SUCCESS
-        ret.status.description = None
-
-        # Match current keyframe to previous k frames
-        ret.source_key = self.current_key
-        ret.target_key = self.current_key - 1
-        ret.source_pose = keyframe.pose
-        ret.target_pose = self.current_keyframe.pose
-
-        # Accumulate reference points from previous k (self.ssm_params.target_frames) frames
-        ret.source_points = keyframe.points
-        target_frames = range(self.current_key)[-self.ssm_params.target_frames :] # currnet_keyframe의 마지막에서부터 사용자가 지정한 갯수만큼 target frame에 담음.
-        ret.target_points = self.get_points(target_frames, ret.target_key)
-        ret.cov = np.diag(self.odom_sigmas)
-
-        """if True:
-            ret.status = STATUS.NOT_ENOUGH_POINTS
-            ret.status.description = "source points {}".format(len(ret.source_points))
-            return ret"""
-
-        """if len(self.keyframes) % 2 == 0:
-            ret.status = STATUS.NOT_ENOUGH_POINTS
-            ret.status.description = "source points {}".format(len(ret.source_points))
-            return ret"""
-
-        # Only continue with this if it is enabled in slam.yaml
-        if self.ssm_params.enable == False:
-            ret.status = STATUS.NOT_ENOUGH_POINTS
-            ret.status.description = "source points {}".format(len(ret.source_points))
-            return ret
-
-        # check the source points for a minimum count
-        if len(ret.source_points) < self.ssm_params.min_points:
-            ret.status = STATUS.NOT_ENOUGH_POINTS
-            ret.status.description = "source points {}".format(len(ret.source_points))
-            return ret
-
-        # check the target points for a minimum count
-        if len(ret.target_points) < self.ssm_params.min_points:
-            ret.status = STATUS.NOT_ENOUGH_POINTS
-            ret.status.description = "target points {}".format(len(ret.target_points))
-            return ret
-
-        # check if we have initialized the ICP params
-        if not self.ssm_params.initialization:
-            return ret
-
-        with CodeTimer("SLAM - sequential scan matching - sampling"):
-
-            # define the search space for ICP global init
-            pose_stds = np.array([self.odom_sigmas]).T
-            pose_bounds = 5.0 * np.c_[-pose_stds, pose_stds]
-
-            # TODO remove
-            # ret.occ = self.get_map(target_frames)
-            # subroutine, pose_samples = self.get_matching_cost_subroutine2(
-            #     ret.source_points,
-            #     ret.source_pose,
-            #     ret.occ,
-            # )
-
-            # build the global ICP subroutine
-            subroutine, pose_samples = self.get_matching_cost_subroutine1( # 최적화의 목적함수(subroutine)를 정의(matching cost)
-                ret.source_points,
-                ret.source_pose,
-                ret.target_points,
-                ret.target_pose,
-                ret.cov,
-            )
-
-            # optimize the subroutine using scipy.shgo(pose_bounds내에서 subroutine 함수를 최소화하는 pose를 찾음.)
-            result = shgo(
-                func=subroutine,
-                bounds=pose_bounds,
-                n=self.ssm_params.initialization_params[0],
-                iters=self.ssm_params.initialization_params[1],
-                sampling_method="sobol",
-                minimizer_kwargs={
-                    "options": {"ftol": self.ssm_params.initialization_params[2]}
-                },
-            )
-
-        # if the optimizer indicate success package results for return
-        if result.success:
-            ret.source_pose_samples = np.array(pose_samples)
-            ret.estimated_source_pose = ret.source_pose.compose(n2g(result.x, "Pose2"))
-            ret.status.description = "matching cost {:.2f}".format(result.fun)
-
-            # TODO remove
-            if self.save_data:
-                ret.save("step-{}-ssm-sampling.npz".format(self.current_key))
-        else:
-            ret.status = STATUS.INITIALIZATION_FAILURE
-            ret.status.description = result.message
-
-        return ret
-
-    def add_sequential_scan_matching(self, keyframe: Keyframe) -> None:
-        """Add the sequential scan matching factor to the graph. Here we use the global ICP as an inital
-        guess for standard ICP. We then perform some simple checks to catch silly outliers. If those
-        checks pass we add the ICP result to the pose graph.
-
-        Args:
-            keyframe (Keyframe): The keyframe we are evaluating, this contains all the relevant info.
-        """
-
-        # call the global-ICP
-        ret = self.initialize_sequential_scan_matching(keyframe)
-
-        # TODO remove this
-        if self.save_fig:
-            ret.plot("step-{}-ssm-sampling.png".format(self.current_key))
-
-        # check the status of the global-ICP call, if the result is a failure.
-        # simply add the odometry factor and return
-        if not ret.status:
-            self.add_odometry(keyframe)
+        if not self.fg.keyframes:
             return
 
-        # copy the global-ICP into an ICPResult
-        ret2 = ICPResult(ret, self.ssm_params.cov_samples > 0)
+        self.publish_pose()
+        if self.localization.current_frame.status:
+            self.publish_trajectory()
+            self.publish_constraint()
+            self.publish_point_cloud()
 
-        # Compute ICP here with a timer
+    def publish_pose(self) -> None:
+        """Append dead reckoning from Localization to SLAM estimate to achieve realtime TF.
+        """
+
+        # define a pose with covariance message
+        pose_msg = PoseWithCovarianceStamped()
+        pose_msg.header.stamp = self.localization.current_frame.time
+        if self.rov_id == "":
+            pose_msg.header.frame_id = "map"
+        else:
+            pose_msg.header.frame_id = self.rov_id + "_map"
+        pose_msg.pose.pose = g2r(self.localization.current_frame.pose3)
+
+        cov = 1e-4 * np.identity(6, np.float32)
+        # FIXME Use cov in current_frame
+        cov[np.ix_((0, 1, 5), (0, 1, 5))] = self.fg.current_keyframe.transf_cov
+        pose_msg.pose.covariance = cov.ravel().tolist()
+        self.pose_pub.publish(pose_msg)
+
+        o2m = self.localization.current_frame.pose3.compose(self.localization.current_frame.dr_pose3.inverse())
+        o2m = g2r(o2m)
+        p = o2m.position
+        q = o2m.orientation
+
+        # ROS2 TF2 broadcast
+        from geometry_msgs.msg import TransformStamped
+        t = TransformStamped()
+        t.header.stamp = self.localization.current_frame.time
+        if self.rov_id == "":
+            t.header.frame_id = "map"
+            t.child_frame_id = "odom"
+        else:
+            t.header.frame_id = self.rov_id + "_map"
+            t.child_frame_id = self.rov_id + "_odom"
+        t.transform.translation.x = p.x
+        t.transform.translation.y = p.y
+        t.transform.translation.z = p.z
+        t.transform.rotation.x = q.x
+        t.transform.rotation.y = q.y
+        t.transform.rotation.z = q.z
+        t.transform.rotation.w = q.w
+        self.tf.sendTransform(t)
+
+        odom_msg = Odometry()
+        odom_msg.header = pose_msg.header
+        odom_msg.pose.pose = pose_msg.pose.pose
+        if self.rov_id == "":
+            odom_msg.child_frame_id = "base_link"
+        else:
+            odom_msg.child_frame_id = self.rov_id + "_base_link"
+        odom_msg.twist.twist = self.localization.current_frame.twist
+        self.odom_pub.publish(odom_msg)
+
+    def publish_constraint(self) -> None:
+        """Publish constraints between poses in the factor graph,
+        either sequential or non-sequential.
+        """
+
+        # define a list of all the constraints
+        links = []
+
+        # iterate over all the keframes
+        for x, kf in enumerate(self.fg.keyframes[1:], 1):
+
+            # append each SSM factor in blue
+            p1 = self.fg.keyframes[x - 1].pose3.x(), self.fg.keyframes[x - 1].pose3.y(), self.fg.keyframes[x - 1].dr_pose3.z()
+            p2 = self.fg.keyframes[x].pose3.x(), self.fg.keyframes[x].pose3.y(), self.fg.keyframes[x].dr_pose3.z()
+            links.append((p1, p2, "blue"))
+
+            # loop over all loop closures in this keyframe and append them in red
+            for k, _ in self.fg.keyframes[x].constraints:
+                p0 = self.fg.keyframes[k].pose3.x(), self.fg.keyframes[k].pose3.y(), self.fg.keyframes[k].dr_pose3.z()
+                links.append((p0, p2, "red"))
+
+        # if nothing, do nothing
+        if links:
+
+            # conver this list to a series of multi-colored lines and publish
+            link_msg = ros_constraints(links)
+            link_msg.header.stamp = self.fg.current_keyframe.time
+            if self.rov_id != "":
+                link_msg.header.frame_id = self.rov_id + "_map"
+            self.constraint_pub.publish(link_msg)
+
+    def publish_trajectory(self) -> None:
+        """Publish 3D trajectory as point cloud in [x, y, z, roll, pitch, yaw, index] format.
+        """
+
+        # get all the poses from each keyframe
+        poses = np.array([g2n(kf.pose3) for kf in self.fg.keyframes])
+
+        # convert to a ros color line
+        traj_msg = ros_colorline_trajectory(poses)
+        traj_msg.header.stamp = self.fg.current_keyframe.time
+        if self.rov_id == "":
+            traj_msg.header.frame_id = "map"
+        else:
+            traj_msg.header.frame_id = self.rov_id + "_map"
+        self.traj_pub.publish(traj_msg)
+
+    def publish_point_cloud(self) -> None:
+        """Publish downsampled 3D point cloud with z = 0.
+        The last column represents keyframe index at which the point is observed.
+        """
+        # 1. Collect point clouds from all keyframes
+        all_points = [np.zeros((0, 2), np.float32)]
+
+        # List of keyframe ids
+        all_keys = []
+
+        # 2. Transform each keyframe's points to global coordinate system
+        for key in range(len(self.fg.keyframes)):
+
+            # get the pose
+            pose = self.fg.keyframes[key].pose
+
+            # get the registered point cloud
+            transf_points = self.fg.keyframes[key].transf_points
+
+            # append
+            all_points.append(transf_points)
+            all_keys.append(key * np.ones((len(transf_points), 1)))
+
+        # 3. Merge point clouds
+        all_points = np.concatenate(all_points)
+        all_keys = np.concatenate(all_keys)
+
+        # 4. Downsample point cloud using PCL
+        point_resolution = self.localization.point_resolution
+        sampled_points, sampled_keys = pcl.downsample(
+            all_points, all_keys, point_resolution
+        )
+
+        # 5. Convert to ROS message and publish
+        sampled_xyzi = np.c_[sampled_points, np.zeros_like(sampled_keys), sampled_keys]
+
+        # if there are no points return and do nothing
+        if len(sampled_xyzi) == 0:
+            return
+
+        # convert the point cloud to a ros message and publish
+        cloud_msg = n2r(sampled_xyzi, "PointCloudXYZI")
+        cloud_msg.header.stamp = self.fg.current_keyframe.time
+        if self.rov_id == "":
+            cloud_msg.header.frame_id = "map"
+        else:
+            cloud_msg.header.frame_id = self.rov_id + "_map"
+        self.cloud_pub.publish(cloud_msg)
+
+    def add_sequential_scan_matching(self, keyframe: Keyframe) -> None:
+        """Perform sequential scan matching and add to factor graph.
+
+        Args:
+            keyframe: Current keyframe to match
+        """
+        # Initialize SSM
+        ret = self.localization.initialize_sequential_scan_matching(keyframe)
+
+        # If initialization failed, add odometry factor only
+        if not ret.status:
+            self.fg.add_odometry_factor(keyframe)
+            return
+
+        # Create ICP result
+        ret2 = ICPResult(ret, self.localization.ssm_params.cov_samples > 0)
+
+        # Compute ICP
         with CodeTimer("SLAM - sequential scan matching - ICP"):
-
-            # if possible compute ICP with covariance estimation
-            if self.ssm_params.initialization and self.ssm_params.cov_samples > 0:
-                message, odom, cov, sample_transforms = self.compute_icp_with_cov(
+            if self.localization.ssm_params.initialization and self.localization.ssm_params.cov_samples > 0:
+                message, odom, cov, sample_transforms = self.localization.compute_icp_with_cov(
                     ret2.source_points,
                     ret2.target_points,
-                    ret2.initial_transforms[: self.ssm_params.cov_samples],
+                    ret2.initial_transforms[: self.localization.ssm_params.cov_samples],
                 )
 
-                # if ICP fails, push that into the ret2 object
                 if message != "success":
                     ret2.status = STATUS.NOT_CONVERGED
                     ret2.status.description = message
-                # Else push the ICP info into ret2
                 else:
                     ret2.estimated_transform = odom
                     ret2.cov = cov
                     ret2.sample_transforms = sample_transforms
-                    ret2.status.description = "{} samples".format(
-                        len(ret2.sample_transforms)
-                    )
-
-            # Else call standard ICP
+                    ret2.status.description = f"{len(ret2.sample_transforms)} samples"
             else:
-                message, odom = self.compute_icp(
+                message, odom = self.localization.compute_icp(
                     ret2.source_points, ret2.target_points, ret2.initial_transform
                 )
 
-                # check for failure
                 if message != "success":
                     ret2.status = STATUS.NOT_CONVERGED
                     ret2.status.description = message
@@ -784,264 +914,74 @@ class SLAM(object):
                     ret2.estimated_transform = odom
                     ret2.status.description = ""
 
-        # The transformation compared to dead reckoning can't be too large
+        # Verify transform is reasonable
         if ret2.status:
             delta = ret2.initial_transform.between(ret2.estimated_transform)
             delta_translation = np.linalg.norm(delta.translation())
             delta_rotation = abs(delta.theta())
             if (
-                delta_translation > self.ssm_params.max_translation
-                or delta_rotation > self.ssm_params.max_rotation
+                delta_translation > self.localization.ssm_params.max_translation
+                or delta_rotation > self.localization.ssm_params.max_rotation
             ):
                 ret2.status = STATUS.LARGE_TRANSFORMATION
-                ret2.status.description = "trans {:.2f} rot {:.2f}".format(
-                    delta_translation, delta_rotation
-                )
+                ret2.status.description = f"trans {delta_translation:.2f} rot {delta_rotation:.2f}"
 
-        # There must be enough overlap between two point clouds.
+        # Check overlap
         if ret2.status:
-            overlap = self.get_overlap(
+            overlap = self.localization.get_overlap(
                 ret2.source_points, ret2.target_points, ret2.estimated_transform
             )
-            if overlap < self.ssm_params.min_points:
+            if overlap < self.localization.ssm_params.min_points:
                 ret2.status = STATUS.NOT_ENOUGH_OVERLAP
-            ret2.status.description = "overlap {}".format(overlap)
+            ret2.status.description = f"overlap {overlap}"
 
+        # Add to graph if successful
         if ret2.status:
-
-            # if we used ICP with covariance then we don't need a boilerplate noise model
-            if ret2.cov is not None:
-                icp_odom_model = self.create_full_noise_model(ret2.cov)
-            else:
-                icp_odom_model = self.icp_odom_model
-
-            # package a factor to be added to the graph
-            factor = gtsam.BetweenFactorPose2(
-                X(ret2.target_key),
-                X(ret2.source_key),
+            self.fg.add_icp_factor(
+                ret2.source_key,
+                ret2.target_key,
                 ret2.estimated_transform,
-                icp_odom_model,
+                ret2.cov
             )
 
-            # Add the factor and the initial guess for this new pose
-            self.graph.add(factor)
-            self.values.insert(
-                X(ret2.source_key), ret2.target_pose.compose(ret2.estimated_transform)
+            # Add initial guess for new pose
+            target_pose = self.fg.keyframes[ret2.target_key].pose
+            self.fg.values.insert(
+                X(ret2.source_key), target_pose.compose(ret2.estimated_transform)
             )
-            ret2.inserted = True  # log as added
-
-            # TODO remove
-            if self.save_data:
-                ret2.save("step-{}-ssm-icp.npz".format(self.current_key))
-
-        # If ICP was a failure, then just push in the dead reckoning info
+            ret2.inserted = True
         else:
-            self.add_odometry(keyframe)
+            # Fall back to odometry
+            self.fg.add_odometry_factor(keyframe)
 
-        # TODO remove
-        if self.save_fig:
-            ret2.plot("step-{}-ssm-icp.png".format(self.current_key))
-
-    def initialize_nonsequential_scan_matching(self) -> InitializationResult:
-        """Initialize a nonsequential scan matching call. Here we use global ICP to check for loop closures with the
-        most recent keyframe and the rest of the map.
+    def add_nonsequential_scan_matching(self) -> bool:
+        """Perform non-sequential scan matching (loop closure detection).
 
         Returns:
-            InitializationResult: The global-ICP outcome
+            True if loop closure was added
         """
+        # Check if we have enough keyframes
+        if self.fg.current_key < self.localization.nssm_params.min_st_sep:
+            return False
 
-        # instanciate an object to capute the results
-        ret = InitializationResult()
-        ret.status = STATUS.SUCCESS
-        ret.status.description = None
+        # Initialize NSSM
+        ret = self.localization.initialize_nonsequential_scan_matching()
 
-        # get the indices we care about for loop closure search
-        ret.source_key = self.current_key - 1
-        ret.source_pose = self.current_frame.pose
-        ret.estimated_source_pose = ret.source_pose
-        # aggratgate the source cloud, here we want k frames (self.nssm_params.source_frames)
-        source_frames = range(
-            ret.source_key, ret.source_key - self.nssm_params.source_frames, -1
-        )
-        ret.source_points = self.get_points(source_frames, ret.source_key)
-
-        # gate loop closure search to those who have sufficent points
-        if len(ret.source_points) < self.nssm_params.min_points:
-            ret.status = STATUS.NOT_ENOUGH_POINTS
-            ret.status.description = "source points {}".format(len(ret.source_points))
-            return ret
-
-        # Find target points for matching
-        # Limit searching keyframes. Here we want ALL the keyframes minus k (self.nssm_params.min_st_sep)
-        target_frames = range(self.current_key - self.nssm_params.min_st_sep)
-
-        # Target points in global frame
-        target_points, target_keys = self.get_points(target_frames, None, True)
-
-        # Loop over the source frames
-        # Eliminate frames that do not have points in the same field of view
-        sel = np.zeros(len(target_points), bool)
-        for source_frame in source_frames:
-
-            # pull the pose and covariance info
-            pose = self.keyframes[source_frame].pose
-            cov = self.keyframes[source_frame].cov
-
-            # parse the covariance
-            translation_std = np.sqrt(np.max(np.linalg.eigvals(cov[:2, :2])))
-            rotation_std = np.sqrt(cov[2, 2])
-            range_bound = translation_std * 5.0 + self.oculus.max_range
-            bearing_bound = rotation_std * 5.0 + self.oculus.horizontal_aperture * 0.5
-
-            # figure out the uncertain points
-            local_points = Keyframe.transform_points(target_points, pose.inverse())
-            ranges = np.linalg.norm(local_points, axis=1)
-            bearings = np.arctan2(local_points[:, 1], local_points[:, 0])
-            sel_i = (ranges < range_bound) & (abs(bearings) < bearing_bound)
-            sel |= sel_i
-
-        # only keep the certain points
-        target_points = target_points[sel]
-        target_keys = target_keys[sel]
-
-        # Check which frame has the most points nearby
-        target_frames, counts = np.unique(np.int32(target_keys), return_counts=True)
-        target_frames = target_frames[counts > 10]
-        counts = counts[counts > 10]
-
-        # check the aggragate cloud for num of points
-        if len(target_frames) == 0 or len(target_points) < self.nssm_params.min_points:
-            ret.status = STATUS.NOT_ENOUGH_POINTS
-            ret.status.description = "target points {}".format(len(target_points))
-            return ret
-
-        # populate the initilization object with some info
-        ret.target_key = target_frames[
-            np.argmax(counts)
-        ]  # this is critical, the one with the most points overlapping
-        ret.target_pose = self.keyframes[ret.target_key].pose
-        ret.target_points = Keyframe.transform_points(
-            target_points, ret.target_pose.inverse()
-        )
-        ret.cov = self.keyframes[ret.source_key].cov
-
-        # check if we have the params for global ICP
-        if not self.nssm_params.initialization:
-            return ret
-
-        with CodeTimer("SLAM - nonsequential scan matching - sampling"):
-
-            # set bounds for global ICP
-            translation_std = np.sqrt(np.max(np.linalg.eigvals(cov[:2, :2])))
-            rotation_std = np.sqrt(cov[2, 2])
-            pose_stds = np.array([[translation_std, translation_std, rotation_std]]).T
-            pose_bounds = 5.0 * np.c_[-pose_stds, pose_stds]
-
-            # TODO remove
-            # ret.occ = self.get_map(target_frames)
-            # subroutine, pose_samples = self.get_matching_cost_subroutine2(
-            #     ret.source_points,
-            #     ret.source_pose,
-            #     ret.occ,
-            # )
-
-            # build the subroutine
-            subroutine, pose_samples = self.get_matching_cost_subroutine1(
-                ret.source_points,
-                ret.source_pose,
-                ret.target_points,
-                ret.target_pose,
-                ret.cov,
-            )
-
-            # optimize with scipy.shgo
-            result = shgo(
-                func=subroutine,
-                bounds=pose_bounds,
-                n=self.nssm_params.initialization_params[0],
-                iters=self.nssm_params.initialization_params[1],
-                sampling_method="sobol",
-                minimizer_kwargs={
-                    "options": {"ftol": self.nssm_params.initialization_params[2]}
-                },
-            )
-
-        # check the shgo result
-        if not result.success:
-            ret.status = STATUS.INITIALIZATION_FAILURE
-            ret.status.description = result.message
-            return ret
-
-        # parse the result
-        delta = n2g(result.x, "Pose2")
-        ret.estimated_source_pose = ret.source_pose.compose(delta)
-        ret.source_pose_samples = np.array(pose_samples)
-        ret.status.description = "matching cost {:.2f}".format(result.fun)
-
-        # Refine target key by searching for the pose with maximum overlap
-        # with current source points
-        estimated_source_points = Keyframe.transform_points(
-            ret.source_points, ret.estimated_source_pose
-        )
-        overlap, indices = self.get_overlap(
-            estimated_source_points, target_points, return_indices=True
-        )
-        target_frames1, counts1 = np.unique(
-            np.int32(target_keys[indices[indices != -1]]), return_counts=True
-        )
-        if len(counts1) == 0:
-            ret.status = STATUS.NOT_ENOUGH_OVERLAP
-            ret.status.description = "0"
-            return ret
-
-        # TODO remove
-        if self.save_data:
-            ret.save("step-{}-nssm-sampling.npz".format(self.current_key - 1))
-
-        # log the target key and
-        # recalculate target points with new target key in target frame
-        ret.target_key = target_frames1[np.argmax(counts1)]
-        ret.target_pose = self.keyframes[ret.target_key].pose
-        ret.target_points = self.get_points(target_frames, ret.target_key)
-
-        return ret
-
-    def add_nonsequential_scan_matching(self) -> ICPResult:
-        """Run a loop closure search. Here we compare the most recent keyframe to the
-        previous frames. If a loop is found it is subject to geometric verification via PCM.
-
-        Returns:
-            ICPResult: the loop we have found, returns for debugging perposes
-        """
-
-        # if we do not have enough keyframes to aggratgate a submap return
-        if self.current_key < self.nssm_params.min_st_sep:
-            return
-
-        # init the search with a global ICP call
-        ret = self.initialize_nonsequential_scan_matching()
-
-        # if the global ICP call did not work, return
         if not ret.status:
-            return
+            return False
 
-        # package the global ICP call result
-        ret2 = ICPResult(ret, self.nssm_params.cov_samples > 0)
+        # Create ICP result
+        ret2 = ICPResult(ret, self.localization.nssm_params.cov_samples > 0)
 
-        # Compute ICP here with a timer
+        # Compute ICP
         with CodeTimer("SLAM - nonsequential scan matching - ICP"):
-
-            
-
-            # if possible, compute ICP with a covariance matrix
-            if self.nssm_params.initialization and self.nssm_params.cov_samples > 0:
-                message, odom, cov, sample_transforms = self.compute_icp_with_cov(
+            if self.localization.nssm_params.initialization and self.localization.nssm_params.cov_samples > 0:
+                message, odom, cov, sample_transforms = self.localization.compute_icp_with_cov(
                     ret2.source_points,
                     ret2.target_points,
-                    ret2.initial_transforms[: self.nssm_params.cov_samples],
+                    ret2.initial_transforms[: self.localization.nssm_params.cov_samples],
                 )
 
-                # check the status
                 if message != "success":
                     ret2.status = STATUS.NOT_CONVERGED
                     ret2.status.description = message
@@ -1049,17 +989,12 @@ class SLAM(object):
                     ret2.estimated_transform = odom
                     ret2.cov = cov
                     ret2.sample_transforms = sample_transforms
-                    ret2.status.description = "{} samples".format(
-                        len(ret2.sample_transforms)
-                    )
-
-            # otherwise use standard ICP
+                    ret2.status.description = f"{len(ret2.sample_transforms)} samples"
             else:
-                message, odom = self.compute_icp(
+                message, odom = self.localization.compute_icp(
                     ret2.source_points, ret2.target_points, ret2.initial_transform
                 )
 
-                # check status
                 if message != "success":
                     ret2.status = STATUS.NOT_CONVERGED
                     ret2.status.description = message
@@ -1067,283 +1002,55 @@ class SLAM(object):
                     ret2.estimated_transform = odom
                     ret.status.description = ""
 
-        # Add some failure detections
-        # The transformation compared to initial guess can't be too large
+        # Verify transform
         if ret2.status:
             delta = ret2.initial_transform.between(ret2.estimated_transform)
             delta_translation = np.linalg.norm(delta.translation())
             delta_rotation = abs(delta.theta())
             if (
-                delta_translation > self.nssm_params.max_translation
-                or delta_rotation > self.nssm_params.max_rotation
+                delta_translation > self.localization.nssm_params.max_translation
+                or delta_rotation > self.localization.nssm_params.max_rotation
             ):
                 ret2.status = STATUS.LARGE_TRANSFORMATION
-                ret2.status.description = "trans {:.2f} rot {:.2f}".format(
-                    delta_translation, delta_rotation
-                )
+                ret2.status.description = f"trans {delta_translation:.2f} rot {delta_rotation:.2f}"
 
-        # There must be enough overlap between two point clouds.
+        # Check overlap
         if ret2.status:
-            overlap = self.get_overlap(
+            overlap = self.localization.get_overlap(
                 ret2.source_points, ret2.target_points[:, :2], ret2.estimated_transform
             )
-            if overlap < self.nssm_params.min_points:
+            if overlap < self.localization.nssm_params.min_points:
                 ret2.status = STATUS.NOT_ENOUGH_OVERLAP
             ret2.status.description = str(overlap)
-            
-        # apply geometric verification, in this case PCM
+
+        # Add to loop closure queue for PCM verification
         if ret2.status:
-
-            # update the pcm queue
-            while (
-                self.nssm_queue
-                and ret2.source_key - self.nssm_queue[0].source_key
-                > self.pcm_queue_size
-            ):
-                self.nssm_queue.pop(0)
-
-            # log the newest loop closure into the pcm queue and check PCM
-            self.nssm_queue.append(ret2)
-            pcm = self.verify_pcm(self.nssm_queue,self.min_pcm)
-
-            # if the PCM result has no loop closures for us, the list pcm will be empty
-            # loop over any results and add them to the graph
-            for m in pcm:
-
-                # pull the loop closure from the pcm queue
-                ret2 = self.nssm_queue[m]
-
-                # check if the loop has been added to the graph
-                if not ret2.inserted:
-
-                    # get a noise model
-                    if ret2.cov is not None:
-                        icp_odom_model = self.create_full_noise_model(ret2.cov)
-                    else:
-                        icp_odom_model = self.icp_odom_model
-
-                    # build the factor and add it to the graph
-                    factor = gtsam.BetweenFactorPose2(
-                        X(ret2.target_key),
-                        X(ret2.source_key),
-                        ret2.estimated_transform,
-                        icp_odom_model,
-                    )
-                    self.graph.add(factor)
-                    self.keyframes[ret2.source_key].constraints.append(
-                        (ret2.target_key, ret2.estimated_transform)
-                    )
-                    ret2.inserted = True  # update the status of this loop closure, don't add a loop twice
-
-        return ret2
-
-    def is_keyframe(self, frame: Keyframe) -> bool:
-        """Check if a Keyframe object meets the conditions to be a SLAM keyframe.
-        If the vehicle has moved enough. Either rotation or translation.
-        Rejects frames during rapid rotation to prevent sonar motion blur.
-
-        Args:
-            frame (Keyframe): the keyframe we want to check.
-
-        Returns:
-            bool: a flag indicating if we need to add this frame to the SLAM soltuion
-        """
-
-        # if there are no keyframes in our SLAM solution, this is the first one
-        if not self.keyframes:
+            self.fg.add_loop_closure(ret2)
             return True
 
-        # Reject keyframe if angular velocity is too high (motion blur)
-        if frame.twist is not None:
-            angular_vel_z = abs(frame.twist.angular.z)
-            max_angular_vel = 0.1  # rad/s (~6°/s), reject if rotating faster
-            if angular_vel_z > max_angular_vel:
-                return False
+        return False
 
-        # check for time (ROS2: Time message has sec and nanosec fields)
-        # Convert to total nanoseconds for comparison
-        frame_time_ns = frame.time.sec * 1e9 + frame.time.nanosec
-        current_time_ns = self.current_keyframe.time.sec * 1e9 + self.current_keyframe.time.nanosec
-        duration_ns = frame_time_ns - current_time_ns
-        keyframe_duration_ns = self.keyframe_duration.nanoseconds
-        if duration_ns < keyframe_duration_ns:
-            return False
+    def destroy_node(self):
+        """Cleanup when node is destroyed."""
+        super().destroy_node()
 
-        # check for rotation and translation
-        dr_odom = self.keyframes[-1].dr_pose.between(frame.dr_pose)
-        translation = np.linalg.norm(dr_odom.translation())
-        rotation = abs(dr_odom.theta())
 
-        return (
-            translation > self.keyframe_translation or rotation > self.keyframe_rotation
-        )
+def main(args=None):
+    """Main function for SLAM node"""
+    rclpy.init(args=args)
 
-    def create_full_noise_model(
-        self, cov: np.array
-    ) -> gtsam.noiseModel.Gaussian.Covariance:
-        """Create a noise model from a numpy array using the gtsam api.
+    node = SLAMNode()
 
-        Args:
-            cov (np.array): numpy array of the covariance matrix.
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
-        Returns:
-            gtsam.noiseModel.Gaussian.Covariance: gtsam version of the input
-        """
+    return 0
 
-        return gtsam.noiseModel.Gaussian.Covariance(cov)
 
-    def create_robust_full_noise_model(self, cov: np.array) -> gtsam.noiseModel.Robust:
-        """Create a robust gtsam noise model from a numpy array
-
-        Args:
-            cov (np.array): numpy array of the covariance matrix
-
-        Returns:
-            gtsam.noiseModel.Robust: gtsam version of input
-        """
-
-        model = gtsam.noiseModel.Gaussian.Covariance(cov)
-        robust = gtsam.noiseModel.mEstimator.Cauchy.Create(1.0)
-        return gtsam.noiseModel.Robust.Create(robust, model)
-
-    def create_noise_model(self, *sigmas: list) -> gtsam.noiseModel.Diagonal:
-        """Create a noise model from a list of sigmas, treated like a diagnal matrix.
-
-        Returns:
-            gtsam.noiseModel.Diagonal: gtsam version of input
-        """
-        return gtsam.noiseModel.Diagonal.Sigmas(np.r_[sigmas])
-
-    def create_robust_noise_model(self, *sigmas: list) -> gtsam.noiseModel.Robust:
-        """Create a robust noise model from a list of sigmas
-
-        Returns:
-            gtsam.noiseModel.Robust: gtsam verison of input
-        """
-
-        model = gtsam.noiseModel.Diagonal.Sigmas(np.r_[sigmas])
-        robust = gtsam.noiseModel.mEstimator.Cauchy.Create(1.0)
-        return gtsam.noiseModel.Robust.Create(robust, model)
-
-    def update_factor_graph(self, keyframe: Keyframe = None) -> None:
-        """Update the internal SLAM estimate
-
-        Args:
-            keyframe (Keyframe, optional): The keyframe that needs to be added to the SLAM solution. Defaults to None.
-        """
-
-        # if we have a keyframe add it to our list of keyframes
-        if keyframe:
-            self.keyframes.append(keyframe)
-
-        # push the newest factors into the ISAM2 instance
-        self.isam.update(self.graph, self.values)
-        self.graph.resize(0)  # clear the graph and values once we push it to ISAM2
-        self.values.clear()
-
-        # Update the whole trajectory
-        values = self.isam.calculateEstimate()
-        for x in range(values.size()):
-            pose = values.atPose2(X(x))
-            self.keyframes[x].update(pose)
-
-        # Only update latest cov
-        cov = self.isam.marginalCovariance(X(values.size() - 1))
-        self.keyframes[-1].update(pose, cov)
-
-        # Update the poses in pending loop closures for PCM
-        for ret in self.nssm_queue:
-            ret.source_pose = self.keyframes[ret.source_key].pose
-            ret.target_pose = self.keyframes[ret.target_key].pose
-            if ret.inserted:
-                ret.estimated_transform = ret.target_pose.between(ret.source_pose)
-
-    def verify_pcm(self, queue: list, min_pcm_value: int) -> list:
-        """Get the pairwise consistent measurements.
-
-        Args:
-            queue (list): the list of loop closures being checked.
-            min_pcm_value (int): the min pcm value we want
-
-        Returns:
-            list: returns any pairwise consistent loops. We return a list of indexes in the provided queue.
-        """
-
-        # check if we have enough loops to bother
-        if len(queue) < min_pcm_value:
-            return []
-
-        # convert the loops to a consistentcy graph=
-        G = defaultdict(list)
-        for (a, ret_il), (b, ret_jk) in combinations(zip(range(len(queue)), queue), 2):
-            pi = ret_il.target_pose
-            pj = ret_jk.target_pose
-            pil = ret_il.estimated_transform
-            plk = ret_il.source_pose.between(ret_jk.source_pose)
-            pjk1 = ret_jk.estimated_transform
-            pjk2 = pj.between(pi.compose(pil).compose(plk))
-
-            error = gtsam.Pose2.Logmap(pjk1.between(pjk2))
-            md = error.dot(np.linalg.inv(ret_jk.cov)).dot(error)
-            # chi2.ppf(0.99, 3) = 11.34
-            if md < 11.34:  # this is not a magic number
-                G[a].append(b)
-                G[b].append(a)
-
-        # find the sets of consistent loops
-        maximal_cliques = list(self.find_cliques(G))
-
-        # if we got nothing, return nothing
-        if not maximal_cliques:
-            return []
-
-        # sort and return only the largest set, also checking that the set is large enough
-        maximum_clique = sorted(maximal_cliques, key=len, reverse=True)[0]
-        if len(maximum_clique) < min_pcm_value:
-            return []
-
-        return maximum_clique
-
-    def find_cliques(self, G: defaultdict):
-        """Returns all maximal cliques in an undirected graph.
-
-        Args:
-            G (defaultdict): consicentcy graph
-        """
-
-        if len(G) == 0:
-            return
-
-        adj = {u: {v for v in G[u] if v != u} for u in G}
-        Q = [None]
-
-        subg = set(G)
-        cand = set(G)
-        u = max(subg, key=lambda u: len(cand & adj[u]))
-        ext_u = cand - adj[u]
-        stack = []
-
-        try:
-            while True:
-                if ext_u:
-                    q = ext_u.pop()
-                    cand.remove(q)
-                    Q[-1] = q
-                    adj_q = adj[q]
-                    subg_q = subg & adj_q
-                    if not subg_q:
-                        yield Q[:]
-                    else:
-                        cand_q = cand & adj_q
-                        if cand_q:
-                            stack.append((subg, cand, ext_u))
-                            Q.append(None)
-                            subg = subg_q
-                            cand = cand_q
-                            u = max(subg, key=lambda u: len(cand & adj[u]))
-                            ext_u = cand - adj[u]
-                else:
-                    Q.pop()
-                    subg, cand, ext_u = stack.pop()
-        except IndexError:
-            pass
+if __name__ == "__main__":
+    main()
