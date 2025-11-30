@@ -56,7 +56,8 @@ def generate_launch_description():
         ),
         launch_arguments={
             'mode': 'mapping-only',
-            'enable_slam': 'false',
+            'ssm.enable': 'false',
+            'nssm.enable': 'false',
             'enable_2d_mapping': LaunchConfiguration('enable_2d_mapping'),
             'enable_3d_mapping': LaunchConfiguration('enable_3d_mapping'),
             'vehicle_name': LaunchConfiguration('vehicle_name'),

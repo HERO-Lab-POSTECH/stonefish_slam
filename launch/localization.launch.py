@@ -43,7 +43,8 @@ def generate_launch_description():
         ),
         launch_arguments={
             'mode': 'localization-only',
-            'enable_slam': 'true',
+            'ssm.enable': 'true',
+            'nssm.enable': 'false',
             'enable_2d_mapping': 'false',
             'enable_3d_mapping': 'false',
             'vehicle_name': LaunchConfiguration('vehicle_name'),

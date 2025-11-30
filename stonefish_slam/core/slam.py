@@ -532,11 +532,13 @@ class SLAMNode(Node):
             sonar_msg (Image): Sonar image message (polar coordinates)
             odom_msg (Odometry): Dead reckoning odometry
         """
-        self.get_logger().info("SLAM_callback_integrated", throttle_duration_sec=1.0)
-
         # 1. Extract features internally using FeatureExtraction module
         try:
             points = self.feature_extractor.extract_features(sonar_msg)
+            self.get_logger().info(
+                f"Callback: extracted {len(points)} features",
+                throttle_duration_sec=1.0
+            )
         except Exception as e:
             self.get_logger().error(f"Feature extraction failed: {e}")
             return

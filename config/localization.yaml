@@ -19,7 +19,6 @@ slam_node:
     point_downsample_resolution: 0.5  # Point cloud voxel leaf size (meters)
 
     # ==================== Sequential Scan Matching (SSM) ====================
-    ssm.enable: false  # is this module enabled?
     ssm.min_points: 50  # the min number of points to try SSM
     ssm.max_translation: 3.0  # the max translation allowed
     ssm.max_rotation: 0.5236  # 30 degrees in radians

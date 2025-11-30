@@ -51,6 +51,18 @@ def generate_launch_description():
         description='Enable 3D mapping'
     )
 
+    ssm_enable_arg = DeclareLaunchArgument(
+        'ssm.enable',
+        default_value='true',
+        description='Enable Sequential Scan Matching (localization)'
+    )
+
+    nssm_enable_arg = DeclareLaunchArgument(
+        'nssm.enable',
+        default_value='true',
+        description='Enable Non-Sequential Scan Matching (loop closure)'
+    )
+
     # Get package directories
     pkg_share = get_package_share_directory('stonefish_slam')
 
@@ -84,6 +96,8 @@ def generate_launch_description():
                 'mode': LaunchConfiguration('mode'),
                 'enable_2d_mapping': LaunchConfiguration('enable_2d_mapping'),
                 'enable_3d_mapping': LaunchConfiguration('enable_3d_mapping'),
+                'ssm.enable': LaunchConfiguration('ssm.enable'),
+                'nssm.enable': LaunchConfiguration('nssm.enable'),
                 'vehicle_name': LaunchConfiguration('vehicle_name')
             }
         ]
@@ -121,6 +135,8 @@ def generate_launch_description():
         mode_arg,
         enable_2d_mapping_arg,
         enable_3d_mapping_arg,
+        ssm_enable_arg,
+        nssm_enable_arg,
 
         # Nodes
         slam_node,

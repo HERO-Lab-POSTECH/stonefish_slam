@@ -11,3 +11,7 @@ slam_node:
     # ==================== Module Enable Flags ====================
     enable_2d_mapping: false
     enable_3d_mapping: true
+
+    # Localization modules
+    ssm.enable: true   # Sequential Scan Matching (for localization)
+    nssm.enable: true  # Non-Sequential Scan Matching (loop closure)

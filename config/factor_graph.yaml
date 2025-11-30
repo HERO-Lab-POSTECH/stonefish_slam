@@ -3,7 +3,6 @@
 slam_node:
   ros__parameters:
     # ==================== Non-Sequential Scan Matching (Loop Closure) ====================
-    nssm.enable: false  # is this module enabled?
     nssm.min_st_sep: 15  # the size of the exclusion zone around the most recent keyframe (increased for true loops)
     nssm.min_points: 150  # min number of points (increased to reduce noise)
     nssm.max_translation: 5.0  # max translation allowed (decreased from 10.0 - stricter validation)
