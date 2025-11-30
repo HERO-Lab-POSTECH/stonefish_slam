@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **SLAM TF tree 수정** (2025-12-01)
-  - `odom → base_link` TF 발행 추가 (dead_reckoning node 역할 대체)
-  - 완전한 TF tree 구성: `world_ned → map → odom → base_link`
-  - `bluerov2_odom` frame이 로봇 위치에 정상적으로 생성
-  - **파일**: `stonefish_slam/core/slam.py:1015-1035`
+- **Sonar 파라미터 초기화 누락 수정** (2025-12-01)
+  - `localization.oculus.max_range` 초기화 누락으로 NSSM 계산 시 TypeError 발생
+  - `init_node()`에서 sonar.yaml 파라미터를 읽어 OculusProperty 객체 설정
+  - 설정 항목: max_range, range_resolution, num_ranges, horizontal_aperture, vertical_aperture, num_bearings, angular_resolution
+  - 리팩토링 이전에는 ping 메시지로 자동 설정되었으나, 현재는 ROS2 파라미터 기반으로 수동 설정 필요
+  - **파일**: `stonefish_slam/core/slam.py:264-288`
 
 ### Added
 

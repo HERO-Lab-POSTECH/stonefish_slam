@@ -261,6 +261,32 @@ class SLAMNode(Node):
         if self.localization is not None:
             self.localization.point_resolution = point_resolution
 
+        # Sonar configuration (loaded from sonar.yaml)
+        if self.localization is not None:
+            # Configure oculus object with parameters from sonar.yaml
+            # Note: In original code, this was done via oculus.configure(ping) message callback
+            # Now we use ROS2 parameters instead
+            sonar_max_range = self.get_parameter('sonar.max_range').value
+            sonar_min_range = self.get_parameter('sonar.min_range').value
+            sonar_horizontal_fov = self.get_parameter('sonar.horizontal_fov').value
+            sonar_vertical_fov = self.get_parameter('sonar.vertical_aperture').value
+            # Use image_width/height from sonar.yaml (corresponds to num_beams/num_bins)
+            sonar_num_bins = self.get_parameter('sonar.image_height').value
+            sonar_num_beams = self.get_parameter('sonar.image_width').value
+
+            # Set critical parameters manually (configure() requires ping message)
+            self.localization.oculus.max_range = sonar_max_range
+            self.localization.oculus.range_resolution = sonar_max_range / sonar_num_bins
+            self.localization.oculus.num_ranges = sonar_num_bins
+            self.localization.oculus.horizontal_aperture = np.radians(sonar_horizontal_fov)
+            self.localization.oculus.vertical_aperture = np.radians(sonar_vertical_fov)
+            self.localization.oculus.num_bearings = sonar_num_beams
+            self.localization.oculus.angular_resolution = np.radians(sonar_horizontal_fov) / sonar_num_beams
+
+            self.get_logger().info(f"Sonar configured: max_range={sonar_max_range}m, "
+                                   f"resolution={self.localization.oculus.range_resolution:.3f}m, "
+                                   f"FOV={sonar_horizontal_fov}deg")
+
         # sequential scan matching parameters (SSM) (loaded from localization.yaml)
         if self.localization is not None:
             # SSM is disabled in mapping-only mode
@@ -988,12 +1014,14 @@ class SLAMNode(Node):
         pose_msg.pose.covariance = cov.ravel().tolist()
         self.pose_pub.publish(pose_msg)
 
+        # Calculate map → odom transform
         o2m = current_frame.pose3.compose(current_frame.dr_pose3.inverse())
         o2m = g2r(o2m)
         p = o2m.position
         q = o2m.orientation
 
-        # ROS2 TF2 broadcast
+        # ROS2 TF2 broadcast (map → odom only)
+        # Simulator already publishes world_ned → base_link_frd
         from geometry_msgs.msg import TransformStamped
         t = TransformStamped()
         t.header.stamp = current_frame.time
@@ -1011,28 +1039,6 @@ class SLAMNode(Node):
         t.transform.rotation.z = q.z
         t.transform.rotation.w = q.w
         self.tf.sendTransform(t)
-
-        # Also broadcast odom → base_link transform (replaces dead_reckoning node)
-        # Since we use simulator odometry directly (world_ned absolute coords),
-        # odom frame == world_ned frame, so dr_pose3 can be used directly
-        t_odom = TransformStamped()
-        t_odom.header.stamp = current_frame.time
-        if self.rov_id == "":
-            t_odom.header.frame_id = "odom"
-            t_odom.child_frame_id = "base_link"
-        else:
-            t_odom.header.frame_id = self.rov_id + "_odom"
-            t_odom.child_frame_id = self.rov_id + "/base_link"
-
-        dr_pose = g2r(current_frame.dr_pose3)
-        t_odom.transform.translation.x = dr_pose.position.x
-        t_odom.transform.translation.y = dr_pose.position.y
-        t_odom.transform.translation.z = dr_pose.position.z
-        t_odom.transform.rotation.x = dr_pose.orientation.x
-        t_odom.transform.rotation.y = dr_pose.orientation.y
-        t_odom.transform.rotation.z = dr_pose.orientation.z
-        t_odom.transform.rotation.w = dr_pose.orientation.w
-        self.tf.sendTransform(t_odom)
 
         odom_msg = Odometry()
         odom_msg.header = pose_msg.header

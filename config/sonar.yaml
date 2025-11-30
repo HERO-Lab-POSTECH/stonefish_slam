@@ -15,6 +15,6 @@ slam_node:
       image_width: 512                   # Number of bearings (horizontal beams)
       image_height: 500                  # Number of range bins
       min_range: 0.5                     # Minimum range (m)
-      max_range: 40.0                    # Maximum range (m)
+      max_range: 30.0                    # Maximum range (m)
       sonar_position: [0.0, 0.0, 0.0]    # Position relative to base_link (FRD)
-      sonar_tilt_deg: 45.0               # Tilt angle (degrees, downward)
+      sonar_tilt_deg: 10.0               # Tilt angle (degrees, downward)
