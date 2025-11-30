@@ -1,0 +1,13 @@
+# Sonar Hardware Configuration
+# BlueROV2 FLS (Forward Looking Sonar) - Stonefish simulation parameters
+slam_node:
+  ros__parameters:
+    sonar:
+      horizontal_fov: 130.0              # Horizontal field of view (degrees)
+      vertical_aperture: 20.0            # Vertical beam aperture (degrees)
+      image_width: 512                   # Number of bearings (horizontal beams)
+      image_height: 500                  # Number of range bins
+      min_range: 0.5                     # Minimum range (m)
+      max_range: 40.0                    # Maximum range (m)
+      sonar_position: [0.0, 0.0, 0.0]    # Position relative to base_link (FRD)
+      sonar_tilt_deg: 45.0               # Tilt angle (degrees, downward)

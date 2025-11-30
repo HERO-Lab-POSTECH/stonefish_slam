@@ -1,82 +1,17 @@
+# SLAM Integration Configuration
+# Contains: Module enable flags, ICP config path
+# NOTE: For module-specific parameters, see:
+#   - sonar.yaml: Sonar hardware parameters (shared with feature extraction)
+#   - localization.yaml: SLAM keyframes, noise models, SSM, NSSM, PCM, ICP
+#   - mapping.yaml: 2D/3D mapping parameters
 slam_node:
   ros__parameters:
-    # ==================== Sonar Hardware Configuration ====================
-    sonar:
-      max_range: 15.0           # Maximum sonar range (m) - UNIFIED
-      min_range: 0.5            # Minimum sonar range (m)
-      horizontal_fov: 130.0     # Horizontal field of view (degrees)
-      vertical_aperture: 20.0   # Vertical beam aperture (degrees)
-      image_width: 512          # Number of bearings
-      image_height: 500         # Number of range bins
-      sonar_position: [0.0, 0.0, 0.0]  # Sonar position relative to base_link (FRD)
-      sonar_tilt_deg: 45.0      # Sonar tilt angle (degrees, downward) - UNIFIED
-
-    # ==================== 2D Mapping Configuration ====================
-    mapping_2d:
-      map_2d_resolution: 0.1    # 2D occupancy grid resolution (meters/pixel)
-      map_size: [4000, 4000]    # [width, height] in pixels
-      map_update_interval: 1    # update every N keyframes
-      intensity_threshold: 10   # minimum intensity (0-255) for pixels
-
-    # ==================== 3D Mapping Configuration ====================
-    mapping_3d:
-      map_3d_voxel_size: 0.2    # 3D octree voxel size (meters) - Test 3: 0.3 → 0.2
-      min_probability: 0.6      # minimum probability for occupied voxel
-      log_odds_occupied: 2.0    # log-odds increment for occupied - Test 8: 2.0 → 3.5 (침식 방지)
-      log_odds_free: -3.0      # log-odds decrement for free space - Test 10: -3.0 → -4.0 (carving 강화)
-      log_odds_min: -30.0       # minimum log-odds (clamping) - Test 8: -15.0 → -12.0 (비대칭 완화)
-      log_odds_max: 20.0        # maximum log-odds (clamping) - Test 2: 10.0 → 20.0
-      adaptive_update: true     # enable adaptive Bayesian update
-      adaptive_threshold: 0.5   # probability threshold for protection - Test 9: 5.0 → 0.5 (원복, 동적 업데이트 허용)
-      adaptive_max_ratio: 0.3   # max update ratio for protected voxels - Test 9: 0.2 → 0.3 (원복, 완화)
-      use_range_weighting: true # use exponential range weighting
-      lambda_decay: 0.1         # decay factor for range weighting
-      use_cpp_backend: true     # Test 5: C++ backend 활성화 (DDA + OpenMP)
-      enable_propagation: false  # Test 7: Bearing propagation (ray 사이 보간)
-      propagation_radius: 2     # ±2 bearing 전파
-      propagation_sigma: 1.5    # Gaussian 가중치 표준편차
-
-    # ==================== SLAM Parameters ====================
-    # how often to add keyframes, this can be varied but between 1 and 4 meters is best
-    keyframe_duration: 1.0
-    keyframe_translation: 3.0
-    keyframe_rotation: 0.5236  # 30 degrees in radians
-
-    # SLAM enable flag
+    # ==================== Module Enable Flags ====================
     enable_slam: true
-
-    # SLAM noise models [x_sigma_m, y_sigma_m, theta_sigma_rad]
-    slam_prior_noise: [0.1, 0.1, 0.01]  # Initial pose uncertainty
-    slam_odom_noise: [0.2, 0.2, 0.02]   # Dead reckoning uncertainty
-    slam_icp_noise: [0.1, 0.1, 0.01]    # ICP measurement uncertainty
-
-    # pull in the ICP config (ROS2 - will be set from launch file)
-    # Leave empty here, will be provided as parameter from launch file
-    icp_config: '/workspace/colcon_ws/src/stonefish_slam/config/icp.yaml'
-
-    # Point cloud downsampling for ICP/publishing
-    point_downsample_resolution: 0.5  # Point cloud voxel leaf size (meters)
-
-    # Sequential scan matching (SSM)
-    ssm.enable: false  # is this module enabled?
-    ssm.min_points: 50  # the min number of points to try SSM
-    ssm.max_translation: 3.0  # the max translation allowed
-    ssm.max_rotation: 0.5236  # 30 degrees in radians
-    ssm.target_frames: 3  # the numeber of frames we compare the current frame to
-
-    # Non-sequential scan matching (Loop Closure)
-    nssm.enable: false  # is this module enabled?
-    nssm.min_st_sep: 15  # the size of the exclusion zone around the most recent keyframe (increased for true loops)
-    nssm.min_points: 150  # min number of points (increased to reduce noise)
-    nssm.max_translation: 5.0  # max translation allowed (decreased from 10.0 - stricter validation)
-    nssm.max_rotation: 0.5236  # 30 degrees in radians (decreased from 60° - stricter validation)
-    nssm.source_frames: 5  # the number of frames to aggratgate when trying a loop closure
-    nssm.cov_samples: 30
-
-    # the PCM params for rejecting outlier loop closures
-    pcm_queue_size: 5  # the sliding window size for PCM
-    min_pcm: 3  # the min number of pairwise consistent loop closures (increased from 2 - stronger outlier rejection)
-
-    # Mapping enable flags
     enable_2d_mapping: false
     enable_3d_mapping: true
+
+    # ==================== ICP Configuration ====================
+    # Pull in the ICP config (will be set from launch file)
+    # Leave empty here, will be provided as parameter from launch file
+    icp_config: '/workspace/colcon_ws/src/stonefish_slam/config/icp.yaml'

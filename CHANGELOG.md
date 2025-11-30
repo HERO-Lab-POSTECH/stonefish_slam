@@ -7,7 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **3가지 SLAM 운영 모드 지원** (2025-11-30)
+  - `slam`: 풀 SLAM 모드 (SSM + NSSM + 3D/2D Mapping)
+  - `localization-only`: 로컬라이제이션 전용 (SSM만, 루프 클로저/맵핑 제외)
+  - `mapping-only`: 맵핑 전용 (DR 포즈 기반 맵핑, SSM/NSSM 제외)
+  - 런치 파일: `localization.launch.py`, `mapping.launch.py`, `slam.launch.py` (mode 파라미터 추가)
+  - 핵심 구현: `core/slam.py`에 모드 파라미터 기반 조건부 모듈 인스턴스 생성
+  - **사용 예시**:
+    ```bash
+    # SLAM 모드 (기본)
+    ros2 launch stonefish_slam slam.launch.py
+
+    # 로컬라이제이션만
+    ros2 launch stonefish_slam localization.launch.py
+
+    # 맵핑만 (DR 포즈 사용)
+    ros2 launch stonefish_slam mapping.launch.py
+    ```
+  - **파일**:
+    - `stonefish_slam/core/slam.py`
+    - `stonefish_slam/launch/slam.launch.py`
+    - `stonefish_slam/launch/localization.launch.py` (신규)
+    - `stonefish_slam/launch/mapping.launch.py` (신규)
+
 ### Changed
+
+- **Feature Extraction 통합** (2025-11-30)
+  - feature_extraction_node를 slam_node 내부 모듈로 통합
+  - 별도 프로세스 제거로 inter-process 오버헤드 감소
+  - Topic synchronization 단순화 (3-way → 2-way)
+  - FeatureExtraction 클래스를 composition 패턴으로 리팩토링
+  - Config 파일 단순화:
+    - `feature.yaml`: feature_extraction_node → slam_node 섹션 변경
+    - `sonar.yaml`: YAML anchor 제거, 직관적인 flat 구조로 변경
+  - slam_node가 모든 feature extraction 파라미터 로드
+  - **파일**:
+    - `stonefish_slam/core/slam.py` (FeatureExtraction 내부 인스턴스화)
+    - `stonefish_slam/core/feature_extraction.py` (Node 상속 제거)
+    - `stonefish_slam/config/feature.yaml` (섹션 변경)
+    - `stonefish_slam/config/sonar.yaml` (anchor 제거)
+    - `stonefish_slam/launch/slam.launch.py` (feature_extraction_node 제거)
+    - `stonefish_slam/CMakeLists.txt` (entry point 제거)
+  - **삭제**:
+    - `stonefish_slam/nodes/feature_extraction_node.py`
 
 - **SLAM 아키텍처 모듈화 리팩토링** (2025-11-30)
   - **목표**: 단일 파일 SLAM 클래스 (1350줄)를 모듈식 아키텍처로 개선

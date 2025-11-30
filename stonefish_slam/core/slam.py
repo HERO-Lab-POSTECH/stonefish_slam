@@ -22,6 +22,7 @@ from stonefish_slam.core.localization import Localization
 from stonefish_slam.core.types import Keyframe, STATUS, ICPResult
 from stonefish_slam.core.mapping_2d import SonarMapping2D
 from stonefish_slam.core.mapping_3d import SonarMapping3D
+from stonefish_slam.core.feature_extraction import FeatureExtraction
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import *
 
@@ -87,9 +88,31 @@ class SLAMNode(Node):
         # Initialize ROS2 Node first
         Node.__init__(self, 'slam_node')
 
+        # Declare mode parameter BEFORE using it
+        self.declare_parameter('mode', 'slam')
+        self.mode = self.get_parameter('mode').value
+        self.get_logger().info(f"Operating mode: {self.mode}")
+
+        # Validate mode
+        valid_modes = ['slam', 'localization-only', 'mapping-only']
+        if self.mode not in valid_modes:
+            self.get_logger().error(f"Invalid mode '{self.mode}'. Must be one of {valid_modes}")
+            raise ValueError(f"Invalid mode: {self.mode}")
+
         # Initialize SLAM modules (composition instead of inheritance)
         self.fg = FactorGraph()
-        self.localization = Localization(self.fg)
+
+        # Conditional localization instantiation
+        if self.mode != 'mapping-only':
+            self.localization = Localization(self.fg)
+            self.get_logger().info("Localization module enabled")
+        else:
+            self.localization = None
+            self.get_logger().info("Localization module disabled (mapping-only mode)")
+
+        # Feature extraction module (integrated internally)
+        self.feature_extractor = FeatureExtraction(self)
+        self.get_logger().info("Feature extraction module integrated")
 
         # No lock needed (synchronous processing)
 
@@ -129,10 +152,11 @@ class SLAMNode(Node):
         keyframe_translation = self.get_parameter('keyframe_translation').value
         keyframe_rotation = self.get_parameter('keyframe_rotation').value
 
-        # Set keyframe criteria in localization module
-        self.localization.keyframe_duration = keyframe_duration
-        self.localization.keyframe_translation = keyframe_translation
-        self.localization.keyframe_rotation = keyframe_rotation
+        # Set keyframe criteria in localization module (skip if mapping-only mode)
+        if self.localization is not None:
+            self.localization.keyframe_duration = keyframe_duration
+            self.localization.keyframe_translation = keyframe_translation
+            self.localization.keyframe_rotation = keyframe_rotation
 
         # SLAM paramter, are we using SLAM or just dead reckoning
         self.declare_parameter('enable_slam', True)
@@ -153,14 +177,16 @@ class SLAMNode(Node):
         self.odom_sigmas = odom_sigmas
         self.icp_odom_sigmas = icp_odom_sigmas
 
-        # Set noise sigmas in localization module
-        self.localization.odom_sigmas = odom_sigmas
-        self.localization.icp_odom_sigmas = icp_odom_sigmas
+        # Set noise sigmas in localization module (skip if mapping-only mode)
+        if self.localization is not None:
+            self.localization.odom_sigmas = odom_sigmas
+            self.localization.icp_odom_sigmas = icp_odom_sigmas
 
         # resultion for map downsampling
         self.declare_parameter('point_downsample_resolution', 0.5)
         point_resolution = self.get_parameter('point_downsample_resolution').value
-        self.localization.point_resolution = point_resolution
+        if self.localization is not None:
+            self.localization.point_resolution = point_resolution
 
         # sequential scan matching parameters (SSM)
         self.declare_parameter('ssm.enable', True)
@@ -169,12 +195,17 @@ class SLAMNode(Node):
         self.declare_parameter('ssm.max_rotation', 0.5236)  # 30 degrees
         self.declare_parameter('ssm.target_frames', 3)
 
-        self.localization.ssm_params.enable = self.get_parameter('ssm.enable').value
-        self.localization.ssm_params.min_points = self.get_parameter('ssm.min_points').value
-        self.localization.ssm_params.max_translation = self.get_parameter('ssm.max_translation').value
-        self.localization.ssm_params.max_rotation = self.get_parameter('ssm.max_rotation').value
-        self.localization.ssm_params.target_frames = self.get_parameter('ssm.target_frames').value
-        self.get_logger().info(f"SSM: {self.localization.ssm_params.enable}")
+        if self.localization is not None:
+            # SSM is disabled in mapping-only mode
+            if self.mode == 'mapping-only':
+                self.localization.ssm_params.enable = False
+            else:
+                self.localization.ssm_params.enable = self.get_parameter('ssm.enable').value
+            self.localization.ssm_params.min_points = self.get_parameter('ssm.min_points').value
+            self.localization.ssm_params.max_translation = self.get_parameter('ssm.max_translation').value
+            self.localization.ssm_params.max_rotation = self.get_parameter('ssm.max_rotation').value
+            self.localization.ssm_params.target_frames = self.get_parameter('ssm.target_frames').value
+            self.get_logger().info(f"SSM: {self.localization.ssm_params.enable}")
 
         # non sequential scan matching parameters (NSSM) aka loop closures
         self.declare_parameter('nssm.enable', True)
@@ -185,14 +216,19 @@ class SLAMNode(Node):
         self.declare_parameter('nssm.source_frames', 5)
         self.declare_parameter('nssm.cov_samples', 30)
 
-        self.localization.nssm_params.enable = self.get_parameter('nssm.enable').value
-        self.localization.nssm_params.min_st_sep = self.get_parameter('nssm.min_st_sep').value
-        self.localization.nssm_params.min_points = self.get_parameter('nssm.min_points').value
-        self.localization.nssm_params.max_translation = self.get_parameter('nssm.max_translation').value
-        self.localization.nssm_params.max_rotation = self.get_parameter('nssm.max_rotation').value
-        self.localization.nssm_params.source_frames = self.get_parameter('nssm.source_frames').value
-        self.localization.nssm_params.cov_samples = self.get_parameter('nssm.cov_samples').value
-        self.get_logger().info(f"NSSM: {self.localization.nssm_params.enable}")
+        if self.localization is not None:
+            # NSSM is disabled in localization-only and mapping-only modes
+            if self.mode in ['localization-only', 'mapping-only']:
+                self.localization.nssm_params.enable = False
+            else:
+                self.localization.nssm_params.enable = self.get_parameter('nssm.enable').value
+            self.localization.nssm_params.min_st_sep = self.get_parameter('nssm.min_st_sep').value
+            self.localization.nssm_params.min_points = self.get_parameter('nssm.min_points').value
+            self.localization.nssm_params.max_translation = self.get_parameter('nssm.max_translation').value
+            self.localization.nssm_params.max_rotation = self.get_parameter('nssm.max_rotation').value
+            self.localization.nssm_params.source_frames = self.get_parameter('nssm.source_frames').value
+            self.localization.nssm_params.cov_samples = self.get_parameter('nssm.cov_samples').value
+            self.get_logger().info(f"NSSM: {self.localization.nssm_params.enable}")
 
         # pairwise consistency maximization parameters for loop closure
         # outliar rejection
@@ -365,36 +401,23 @@ class SLAMNode(Node):
             depth=10
         )
 
-        # define the subsrcibing topics
-        self.feature_sub = Subscriber(self, PointCloud2, SONAR_FEATURE_TOPIC, qos_profile=qos_sub_profile)
+        # Subscribe to sonar image and odometry
+        # NOTE: Feature extraction is now INTERNAL - no external feature topic subscription
+        self.sonar_sub = Subscriber(self, Image, '/bluerov2/fls/image', qos_profile=qos_sub_profile)
         self.odom_sub = Subscriber(self, Odometry, LOCALIZATION_ODOM_TOPIC, qos_profile=qos_sub_profile)
 
         # Add debug prints for topic names
-        self.get_logger().info(f"Subscribing to feature topic: {SONAR_FEATURE_TOPIC}")
+        self.get_logger().info(f"Subscribing to sonar image: /bluerov2/fls/image (internal feature extraction)")
         self.get_logger().info(f"Subscribing to odom topic: {LOCALIZATION_ODOM_TOPIC}")
 
-        # Sonar image subscriber for 2D/3D mapping
-        if self.enable_2d_mapping or self.enable_3d_mapping:
-            self.sonar_sub = Subscriber(self, Image, '/bluerov2/fls/image', qos_profile=qos_sub_profile)
-            self.get_logger().info("Subscribing to sonar image: /bluerov2/fls/image")
-
-        # define the sync policy
-        if self.enable_2d_mapping or self.enable_3d_mapping:
-            self.time_sync = ApproximateTimeSynchronizer(
-                [self.feature_sub, self.odom_sub, self.sonar_sub],
-                20,
-                self.feature_odom_sync_max_delay
-            )
-            self.time_sync.registerCallback(self.SLAM_callback_with_mapping)
-            self.get_logger().info("Using 3-way synchronizer (feature + odom + sonar)")
-        else:
-            self.time_sync = ApproximateTimeSynchronizer(
-                [self.feature_sub, self.odom_sub],
-                20,
-                self.feature_odom_sync_max_delay
-            )
-            self.time_sync.registerCallback(self.SLAM_callback)
-            self.get_logger().info("Using 2-way synchronizer (feature + odom)")
+        # Define sync policy: sonar image + odometry (2-way synchronization)
+        self.time_sync = ApproximateTimeSynchronizer(
+            [self.sonar_sub, self.odom_sub],
+            20,
+            self.feature_odom_sync_max_delay
+        )
+        self.time_sync.registerCallback(self.SLAM_callback_integrated)
+        self.get_logger().info("Using 2-way synchronizer (sonar + odom) with integrated feature extraction")
 
         self.get_logger().info(f"Created time synchronizer with max delay: {self.feature_odom_sync_max_delay}")
 
@@ -444,7 +467,7 @@ class SLAMNode(Node):
         # get the ICP configuration from the yaml file
         self.declare_parameter('icp_config', '')
         icp_config = self.get_parameter('icp_config').value
-        if icp_config:
+        if icp_config and self.localization is not None:
             self.localization.icp.loadFromYaml(icp_config)
 
         # Extract robot ID from odometry topic
@@ -477,6 +500,162 @@ class SLAMNode(Node):
         # Set noise models in factor graph
         self.fg.set_noise_models(prior_model, odom_model, icp_odom_model)
 
+    def SLAM_callback_integrated(self, sonar_msg: Image, odom_msg: Odometry) -> None:
+        """Integrated SLAM callback with internal feature extraction.
+
+        Replaces the old 3-way synchronization (feature + odom + sonar).
+        Now uses 2-way sync (sonar + odom) with internal feature extraction.
+
+        Args:
+            sonar_msg (Image): Sonar image message (polar coordinates)
+            odom_msg (Odometry): Dead reckoning odometry
+        """
+        self.get_logger().info("SLAM_callback_integrated", throttle_duration_sec=1.0)
+
+        # 1. Extract features internally using FeatureExtraction module
+        try:
+            points = self.feature_extractor.extract_features(sonar_msg)
+        except Exception as e:
+            self.get_logger().error(f"Feature extraction failed: {e}")
+            return
+
+        # 2. Convert sonar image for mapping
+        sonar_image = None
+        if self.enable_2d_mapping or self.enable_3d_mapping:
+            try:
+                sonar_image = self.bridge.imgmsg_to_cv2(sonar_msg, desired_encoding="mono8")
+            except Exception as e:
+                self.get_logger().error(f"Failed to convert sonar image: {e}")
+
+        # 3. Standard SLAM processing (unified for all modes)
+        time = sonar_msg.header.stamp
+        dr_pose3 = r2g(odom_msg.pose.pose)
+        frame = Keyframe(False, time, dr_pose3)
+
+        # Check if valid points (feature extraction may return empty on skip frames)
+        if len(points) == 0 or (len(points) > 0 and np.isnan(points[0, 0])):
+            frame.status = False
+        else:
+            if self.localization is not None:
+                frame.status = self.localization.is_keyframe(frame)
+            else:
+                # In mapping-only mode, use simple time-based keyframe decision
+                frame.status = True
+
+        # Set frame twist
+        frame.twist = odom_msg.twist.twist
+
+        # Update keyframe pose from dead reckoning
+        if self.fg.keyframes:
+            dr_odom = self.fg.current_keyframe.dr_pose.between(frame.dr_pose)
+            pose = self.fg.current_keyframe.pose.compose(dr_odom)
+            frame.update(pose)
+
+        # 4. Process keyframe
+        if frame.status:
+            # Add points
+            frame.points = points
+
+            # Add sonar image to frame
+            if sonar_image is not None:
+                frame.image = sonar_image
+                frame.sonar_time = sonar_msg.header.stamp
+
+            # Conditional localization processing
+            if self.mode != 'mapping-only':
+                # Sequential scan matching
+                if not self.fg.keyframes:
+                    self.fg.add_prior_factor(frame)
+                else:
+                    self.add_sequential_scan_matching(frame)
+
+                # Update factor graph
+                self.fg.update_graph(frame)
+                self.get_logger().info(
+                    f"Keyframe added: #{len(self.fg.keyframes)}, "
+                    f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f}), "
+                    f"points={len(points)}, has_image={frame.image is not None}"
+                )
+
+                # Loop closure (slam mode only)
+                if self.mode == 'slam' and self.localization.nssm_params.enable and self.add_nonsequential_scan_matching():
+                    self.fg.update_graph()
+            else:
+                # mapping-only mode: use DR pose directly
+                frame.pose = frame.dr_pose
+                self.fg.keyframes.append(frame)
+                self.get_logger().info(
+                    f"Keyframe added (mapping-only): #{len(self.fg.keyframes)}, "
+                    f"DR pose=({frame.dr_pose.x():.2f}, {frame.dr_pose.y():.2f}, {frame.dr_pose.theta():.3f}), "
+                    f"points={len(points)}, has_image={frame.image is not None}"
+                )
+
+            # 5. Update 2D/3D maps immediately (synchronous)
+            if (self.enable_2d_mapping or self.enable_3d_mapping) and (len(self.fg.keyframes) - self.last_map_update_kf >= self.map_update_interval):
+                new_keyframes = list(self.fg.keyframes[self.last_map_update_kf:])
+
+                if new_keyframes:
+                    try:
+                        # Update 2D map if enabled
+                        if self.enable_2d_mapping and self.mapper:
+                            source_frame = 'base_link_frd' if self.rov_id == "" else f"{self.rov_id}/base_link_frd"
+
+                            self.mapper.update_global_map_from_slam(
+                                new_keyframes,
+                                tf2_buffer=None,
+                                target_frame='world_ned',
+                                source_frame=source_frame,
+                                all_slam_keyframes=self.fg.keyframes
+                            )
+
+                            map_image = self.mapper.get_map_image()
+                            if map_image is not None and map_image.size > 0:
+                                image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
+                                image_msg.header.stamp = self.get_clock().now().to_msg()
+                                image_msg.header.frame_id = "map"
+                                self.map_2d_pub.publish(image_msg)
+                                self.get_logger().info(
+                                    f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
+                                    f"{len(new_keyframes)} new keyframes"
+                                )
+
+                        # Update 3D map if enabled
+                        if self.enable_3d_mapping and self.mapper_3d:
+                            try:
+                                self.mapper_3d.update_map_from_slam(
+                                    new_keyframes,
+                                    all_slam_keyframes=self.fg.keyframes
+                                )
+
+                                pc_msg = self.mapper_3d.get_pointcloud2_msg(
+                                    frame_id='world_ned',
+                                    stamp=self.get_clock().now().to_msg()
+                                )
+
+                                if pc_msg.width > 0:
+                                    self.map_3d_pub.publish(pc_msg)
+                                    self.get_logger().info(
+                                        f"Published 3D point cloud: {pc_msg.width} points"
+                                    )
+                            except Exception as e:
+                                import traceback
+                                self.get_logger().error(f"3D mapping update failed: {e}\n{traceback.format_exc()}")
+
+                        # Update counter AFTER both 2D and 3D mapping
+                        self.last_map_update_kf = len(self.fg.keyframes)
+
+                    except Exception as e:
+                        import traceback
+                        self.get_logger().error(f"Synchronous mapping failed: {e}\n{traceback.format_exc()}")
+
+            # Track keyframe count
+            self.mapping_stats['keyframes_total'] = len(self.fg.keyframes)
+
+        # Update current frame and publish
+        if self.localization is not None:
+            self.localization.current_frame = frame
+        self.publish_all()
+
     def SLAM_callback(self, feature_msg: PointCloud2, odom_msg: Odometry) -> None:
         """SLAM call back. Subscibes to the feature msg point cloud and odom msg
             Handles the whole SLAM system and publishes map, poses and constraints
@@ -506,7 +685,11 @@ class SLAMNode(Node):
         if len(points) and np.isnan(points[0, 0]):
             frame.status = False
         else:
-            frame.status = self.localization.is_keyframe(frame)
+            if self.localization is not None:
+                frame.status = self.localization.is_keyframe(frame)
+            else:
+                # In mapping-only mode, use simple time-based keyframe decision
+                frame.status = True
 
         # set the frames twist
         frame.twist = odom_msg.twist.twist
@@ -523,23 +706,31 @@ class SLAMNode(Node):
             # add the point cloud to the frame
             frame.points = points
 
-            # perform seqential scan matching
-            # if this is the first frame do not
-            if not self.fg.keyframes:
-                self.fg.add_prior_factor(frame)
+            # Conditional localization processing
+            if self.mode != 'mapping-only':
+                # perform seqential scan matching
+                # if this is the first frame do not
+                if not self.fg.keyframes:
+                    self.fg.add_prior_factor(frame)
+                else:
+                    self.add_sequential_scan_matching(frame)
+
+                # update the factor graph with the new frame
+                self.fg.update_graph(frame)
+
+                # if loop closures are enabled (slam mode only)
+                # nonsequential scan matching is True (a loop closure occured) update graph again
+                if self.mode == 'slam' and self.localization.nssm_params.enable and self.add_nonsequential_scan_matching():
+                    self.fg.update_graph()
             else:
-                self.add_sequential_scan_matching(frame)
-
-            # update the factor graph with the new frame
-            self.fg.update_graph(frame)
-
-            # if loop closures are enabled
-            # nonsequential scan matching is True (a loop closure occured) update graph again
-            if self.localization.nssm_params.enable and self.add_nonsequential_scan_matching():
-                self.fg.update_graph()
+                # mapping-only mode: use DR pose directly (no localization)
+                # Just add frame to keyframes list for mapping
+                frame.pose = frame.dr_pose  # Use DR pose as-is
+                self.fg.keyframes.append(frame)
 
         # update current time step and publish the topics
-        self.localization.current_frame = frame
+        if self.localization is not None:
+            self.localization.current_frame = frame
         self.publish_all()
 
     def SLAM_callback_with_mapping(self, feature_msg: PointCloud2, odom_msg: Odometry, sonar_msg: Image) -> None:
@@ -573,7 +764,11 @@ class SLAMNode(Node):
         if len(points) and np.isnan(points[0, 0]):
             frame.status = False
         else:
-            frame.status = self.localization.is_keyframe(frame)
+            if self.localization is not None:
+                frame.status = self.localization.is_keyframe(frame)
+            else:
+                # In mapping-only mode, use simple time-based keyframe decision
+                frame.status = True
 
         # Set frame twist
         frame.twist = odom_msg.twist.twist
@@ -594,23 +789,34 @@ class SLAMNode(Node):
                 frame.image = sonar_image
                 frame.sonar_time = sonar_msg.header.stamp  # Store sonar acquisition time for mapping
 
-            # Sequential scan matching
-            if not self.fg.keyframes:
-                self.fg.add_prior_factor(frame)
+            # Conditional localization processing
+            if self.mode != 'mapping-only':
+                # Sequential scan matching
+                if not self.fg.keyframes:
+                    self.fg.add_prior_factor(frame)
+                else:
+                    self.add_sequential_scan_matching(frame)
+
+                # Update factor graph
+                self.fg.update_graph(frame)
+                self.get_logger().info(
+                    f"Keyframe added: #{len(self.fg.keyframes)}, "
+                    f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f}), "
+                    f"has_image={frame.image is not None}"
+                )
+
+                # Loop closure (slam mode only)
+                if self.mode == 'slam' and self.localization.nssm_params.enable and self.add_nonsequential_scan_matching():
+                    self.fg.update_graph()
             else:
-                self.add_sequential_scan_matching(frame)
-
-            # Update factor graph
-            self.fg.update_graph(frame)
-            self.get_logger().info(
-                f"Keyframe added: #{len(self.fg.keyframes)}, "
-                f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f}), "
-                f"has_image={frame.image is not None}"
-            )
-
-            # Loop closure
-            if self.localization.nssm_params.enable and self.add_nonsequential_scan_matching():
-                self.fg.update_graph()
+                # mapping-only mode: use DR pose directly
+                frame.pose = frame.dr_pose
+                self.fg.keyframes.append(frame)
+                self.get_logger().info(
+                    f"Keyframe added (mapping-only): #{len(self.fg.keyframes)}, "
+                    f"DR pose=({frame.dr_pose.x():.2f}, {frame.dr_pose.y():.2f}, {frame.dr_pose.theta():.3f}), "
+                    f"has_image={frame.image is not None}"
+                )
 
             # 4. Update 2D/3D maps immediately (synchronous)
             if (self.enable_2d_mapping or self.enable_3d_mapping) and (len(self.fg.keyframes) - self.last_map_update_kf >= self.map_update_interval):
@@ -703,7 +909,8 @@ class SLAMNode(Node):
             self.mapping_stats['keyframes_total'] = len(self.fg.keyframes)
 
         # Update current frame and publish
-        self.localization.current_frame = frame
+        if self.localization is not None:
+            self.localization.current_frame = frame
         self.publish_all()
 
     def publish_all(self) -> None:
@@ -714,7 +921,15 @@ class SLAMNode(Node):
             return
 
         self.publish_pose()
-        if self.localization.current_frame.status:
+
+        # Get current frame status
+        if self.localization is not None:
+            current_frame_status = self.localization.current_frame.status
+        else:
+            # mapping-only mode: use last keyframe status
+            current_frame_status = self.fg.keyframes[-1].status if self.fg.keyframes else False
+
+        if current_frame_status:
             self.publish_trajectory()
             self.publish_constraint()
             self.publish_point_cloud()
@@ -722,23 +937,32 @@ class SLAMNode(Node):
     def publish_pose(self) -> None:
         """Append dead reckoning from Localization to SLAM estimate to achieve realtime TF.
         """
+        # Get current frame (either from localization or factor graph)
+        if self.localization is not None:
+            current_frame = self.localization.current_frame
+        else:
+            # mapping-only mode: use last keyframe
+            if not self.fg.keyframes:
+                return
+            current_frame = self.fg.keyframes[-1]
 
         # define a pose with covariance message
         pose_msg = PoseWithCovarianceStamped()
-        pose_msg.header.stamp = self.localization.current_frame.time
+        pose_msg.header.stamp = current_frame.time
         if self.rov_id == "":
             pose_msg.header.frame_id = "map"
         else:
             pose_msg.header.frame_id = self.rov_id + "_map"
-        pose_msg.pose.pose = g2r(self.localization.current_frame.pose3)
+        pose_msg.pose.pose = g2r(current_frame.pose3)
 
         cov = 1e-4 * np.identity(6, np.float32)
         # FIXME Use cov in current_frame
-        cov[np.ix_((0, 1, 5), (0, 1, 5))] = self.fg.current_keyframe.transf_cov
+        if self.fg.current_keyframe is not None:
+            cov[np.ix_((0, 1, 5), (0, 1, 5))] = self.fg.current_keyframe.transf_cov
         pose_msg.pose.covariance = cov.ravel().tolist()
         self.pose_pub.publish(pose_msg)
 
-        o2m = self.localization.current_frame.pose3.compose(self.localization.current_frame.dr_pose3.inverse())
+        o2m = current_frame.pose3.compose(current_frame.dr_pose3.inverse())
         o2m = g2r(o2m)
         p = o2m.position
         q = o2m.orientation
@@ -746,7 +970,7 @@ class SLAMNode(Node):
         # ROS2 TF2 broadcast
         from geometry_msgs.msg import TransformStamped
         t = TransformStamped()
-        t.header.stamp = self.localization.current_frame.time
+        t.header.stamp = current_frame.time
         if self.rov_id == "":
             t.header.frame_id = "map"
             t.child_frame_id = "odom"
@@ -769,7 +993,7 @@ class SLAMNode(Node):
             odom_msg.child_frame_id = "base_link"
         else:
             odom_msg.child_frame_id = self.rov_id + "_base_link"
-        odom_msg.twist.twist = self.localization.current_frame.twist
+        odom_msg.twist.twist = current_frame.twist
         self.odom_pub.publish(odom_msg)
 
     def publish_constraint(self) -> None:
@@ -847,7 +1071,10 @@ class SLAMNode(Node):
         all_keys = np.concatenate(all_keys)
 
         # 4. Downsample point cloud using PCL
-        point_resolution = self.localization.point_resolution
+        if self.localization is not None:
+            point_resolution = self.localization.point_resolution
+        else:
+            point_resolution = 0.5  # Default resolution for mapping-only mode
         sampled_points, sampled_keys = pcl.downsample(
             all_points, all_keys, point_resolution
         )

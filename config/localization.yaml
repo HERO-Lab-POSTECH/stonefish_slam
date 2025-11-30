@@ -1,0 +1,40 @@
+# Localization Module Configuration
+# Contains: SLAM keyframe selection, noise models, SSM, NSSM, PCM, ICP settings
+slam_node:
+  ros__parameters:
+    # ==================== Keyframe Selection for SLAM ====================
+    # How often to add keyframes (between 1 and 4 meters is best)
+    keyframe_duration: 1.0
+    keyframe_translation: 3.0
+    keyframe_rotation: 0.5236  # 30 degrees in radians
+
+    # ==================== SLAM Noise Models ====================
+    # [x_sigma_m, y_sigma_m, theta_sigma_rad]
+    slam_prior_noise: [0.1, 0.1, 0.01]  # Initial pose uncertainty
+    slam_odom_noise: [0.2, 0.2, 0.02]   # Dead reckoning uncertainty
+    slam_icp_noise: [0.1, 0.1, 0.01]    # ICP measurement uncertainty
+
+    # ==================== Point Cloud Processing ====================
+    # Point cloud downsampling for ICP/publishing
+    point_downsample_resolution: 0.5  # Point cloud voxel leaf size (meters)
+
+    # ==================== Sequential Scan Matching (SSM) ====================
+    ssm.enable: false  # is this module enabled?
+    ssm.min_points: 50  # the min number of points to try SSM
+    ssm.max_translation: 3.0  # the max translation allowed
+    ssm.max_rotation: 0.5236  # 30 degrees in radians
+    ssm.target_frames: 3  # the numeber of frames we compare the current frame to
+
+    # ==================== Non-Sequential Scan Matching (Loop Closure) ====================
+    nssm.enable: false  # is this module enabled?
+    nssm.min_st_sep: 15  # the size of the exclusion zone around the most recent keyframe (increased for true loops)
+    nssm.min_points: 150  # min number of points (increased to reduce noise)
+    nssm.max_translation: 5.0  # max translation allowed (decreased from 10.0 - stricter validation)
+    nssm.max_rotation: 0.5236  # 30 degrees in radians (decreased from 60° - stricter validation)
+    nssm.source_frames: 5  # the number of frames to aggratgate when trying a loop closure
+    nssm.cov_samples: 30
+
+    # ==================== Pairwise Consistency Maximization (PCM) ====================
+    # PCM params for rejecting outlier loop closures
+    pcm_queue_size: 5  # the sliding window size for PCM
+    min_pcm: 3  # the min number of pairwise consistent loop closures (increased from 2 - stronger outlier rejection)

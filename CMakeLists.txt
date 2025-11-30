@@ -74,11 +74,8 @@ install(PROGRAMS
   RENAME dead_reckoning_node
 )
 
-install(PROGRAMS
-  stonefish_slam/nodes/feature_extraction_node.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME feature_extraction_node
-)
+# NOTE: feature_extraction_node is now INTERNAL to slam_node
+# Removed standalone entry point
 
 install(PROGRAMS
   stonefish_slam/nodes/slam_node.py

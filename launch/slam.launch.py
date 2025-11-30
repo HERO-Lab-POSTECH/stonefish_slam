@@ -39,38 +39,57 @@ def generate_launch_description():
         description='Vehicle name for topic namespacing'
     )
 
+    mode_arg = DeclareLaunchArgument(
+        'mode',
+        default_value='slam',
+        description='Operating mode: slam, localization-only, mapping-only'
+    )
+
+    enable_2d_mapping_arg = DeclareLaunchArgument(
+        'enable_2d_mapping',
+        default_value='true',
+        description='Enable 2D mapping'
+    )
+
+    enable_3d_mapping_arg = DeclareLaunchArgument(
+        'enable_3d_mapping',
+        default_value='false',
+        description='Enable 3D mapping'
+    )
+
     # Get package directories
     pkg_share = get_package_share_directory('stonefish_slam')
 
-    # Config files
+    # Config files (modular structure)
+    # NOTE: Load order matters - base configs first, module overrides last
+    sonar_config = os.path.join(pkg_share, 'config', 'sonar.yaml')
     feature_config = os.path.join(pkg_share, 'config', 'feature.yaml')
+    localization_config = os.path.join(pkg_share, 'config', 'localization.yaml')
+    mapping_config = os.path.join(pkg_share, 'config', 'mapping.yaml')
     slam_config = os.path.join(pkg_share, 'config', 'slam.yaml')
     icp_config = os.path.join(pkg_share, 'config', 'icp.yaml')
     rviz_config = os.path.join(pkg_share, 'rviz', 'slam.rviz')
 
-    # Feature extraction node
-    feature_extraction_node = Node(
-        package='stonefish_slam',
-        executable='feature_extraction_node',
-        name='feature_extraction_node',  # Must match the name in feature.yaml
-        output='screen',
-        parameters=[
-            feature_config,
-            {'vehicle_name': LaunchConfiguration('vehicle_name')}
-        ]
-    )
-
-    # SLAM node
+    # SLAM node with integrated feature extraction
+    # NOTE: Feature extraction is now INTERNAL to slam_node
     slam_node = Node(
         package='stonefish_slam',
         executable='slam_node',
         name='slam_node',
         output='screen',
         parameters=[
-            slam_config,
+            sonar_config,         # Sonar hardware parameters (loaded first)
+            feature_config,       # Feature extraction params (CFAR, filters)
+            localization_config,  # SLAM keyframes, noise models, SSM, NSSM, PCM
+            mapping_config,       # 2D/3D mapping parameters
+            slam_config,          # Integration settings (enable flags)
             {
                 'enable_slam': LaunchConfiguration('enable_slam'),
                 'icp_config': icp_config,
+                'mode': LaunchConfiguration('mode'),
+                'enable_2d_mapping': LaunchConfiguration('enable_2d_mapping'),
+                'enable_3d_mapping': LaunchConfiguration('enable_3d_mapping'),
+                'vehicle_name': LaunchConfiguration('vehicle_name')
             }
         ]
     )
@@ -105,9 +124,11 @@ def generate_launch_description():
         rviz_arg,
         enable_slam_arg,
         vehicle_name_arg,
+        mode_arg,
+        enable_2d_mapping_arg,
+        enable_3d_mapping_arg,
 
         # Nodes
-        feature_extraction_node,
         slam_node,
         world_ned_to_map_tf,
         # rviz_node,  # Uncomment when RViz config is ready
