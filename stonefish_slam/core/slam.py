@@ -103,7 +103,7 @@ class SLAMNode(Node):
 
         # Sonar parameters (sonar.yaml)
         self.declare_parameter('vehicle_name', 'bluerov2')
-        self.declare_parameter('sonar_image_topic', '/bluerov2/fls/image')
+        # Note: sonar_image_topic is constructed from vehicle_name
         self.declare_parameter('sonar.horizontal_fov', 130.0)
         self.declare_parameter('sonar.vertical_aperture', 20.0)
         self.declare_parameter('sonar.image_width', 512)
@@ -425,13 +425,15 @@ class SLAMNode(Node):
 
         # Subscribe to sonar image and odometry
         # NOTE: Feature extraction is now INTERNAL - no external feature topic subscription
-        sonar_image_topic = self.get_parameter('sonar_image_topic').value
+        vehicle_name = self.get_parameter('vehicle_name').value
+        sonar_image_topic = f'/{vehicle_name}/fls/image'
+        odom_topic = f'/{vehicle_name}/odometry'
         self.sonar_sub = Subscriber(self, Image, sonar_image_topic, qos_profile=qos_sub_profile)
-        self.odom_sub = Subscriber(self, Odometry, LOCALIZATION_ODOM_TOPIC, qos_profile=qos_sub_profile)
+        self.odom_sub = Subscriber(self, Odometry, odom_topic, qos_profile=qos_sub_profile)
 
         # Add debug prints for topic names
         self.get_logger().info(f"Subscribing to sonar image: {sonar_image_topic} (internal feature extraction)")
-        self.get_logger().info(f"Subscribing to odom topic: {LOCALIZATION_ODOM_TOPIC}")
+        self.get_logger().info(f"Subscribing to odom topic: {odom_topic}")
 
         # Define sync policy: sonar image + odometry (2-way synchronization)
         self.time_sync = ApproximateTimeSynchronizer(

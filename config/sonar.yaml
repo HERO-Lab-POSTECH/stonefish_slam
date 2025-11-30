@@ -6,8 +6,7 @@ slam_node:
     # Vehicle name
     vehicle_name: 'bluerov2'
 
-    # Sonar image topic
-    sonar_image_topic: '/bluerov2/fls/image'
+    # Note: sonar_image_topic is constructed dynamically as '/{vehicle_name}/fls/image'
 
     # ==================== Sonar Hardware ====================
     sonar:
