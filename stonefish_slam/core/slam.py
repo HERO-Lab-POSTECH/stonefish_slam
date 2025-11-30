@@ -1014,31 +1014,9 @@ class SLAMNode(Node):
         pose_msg.pose.covariance = cov.ravel().tolist()
         self.pose_pub.publish(pose_msg)
 
-        # Calculate map → odom transform
-        o2m = current_frame.pose3.compose(current_frame.dr_pose3.inverse())
-        o2m = g2r(o2m)
-        p = o2m.position
-        q = o2m.orientation
-
-        # ROS2 TF2 broadcast (map → odom only)
-        # Simulator already publishes world_ned → base_link_frd
-        from geometry_msgs.msg import TransformStamped
-        t = TransformStamped()
-        t.header.stamp = current_frame.time
-        if self.rov_id == "":
-            t.header.frame_id = "map"
-            t.child_frame_id = "odom"
-        else:
-            t.header.frame_id = self.rov_id + "_map"
-            t.child_frame_id = self.rov_id + "_odom"
-        t.transform.translation.x = p.x
-        t.transform.translation.y = p.y
-        t.transform.translation.z = p.z
-        t.transform.rotation.x = q.x
-        t.transform.rotation.y = q.y
-        t.transform.rotation.z = q.z
-        t.transform.rotation.w = q.w
-        self.tf.sendTransform(t)
+        # Note: TF broadcast removed (not used in SLAM calculations)
+        # Simulator provides world_ned → base_link_frd directly
+        # If navigation stack integration needed, re-add map → odom TF
 
         odom_msg = Odometry()
         odom_msg.header = pose_msg.header

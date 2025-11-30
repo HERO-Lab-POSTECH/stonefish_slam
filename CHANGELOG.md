@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **map→odom TF 발행 제거** (2025-12-01)
+  - `bluerov2_map → bluerov2_odom` TF 발행 코드 제거
+  - 이유: SLAM 내부 계산에 사용하지 않음 (시각화 전용)
+  - Simulator가 `world_ned → base_link_frd` 직접 제공으로 충분
+  - Navigation stack 통합 필요 시 재추가 가능
+  - **파일**: `stonefish_slam/core/slam.py:1017-1041` (22줄 제거)
+
 ### Fixed
 
 - **Sonar 파라미터 초기화 누락 수정** (2025-12-01)
