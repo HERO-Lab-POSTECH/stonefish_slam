@@ -142,11 +142,7 @@ class SLAMNode(Node):
         Args:
             ns (str, optional): The namespace of the node. Defaults to "~".
         """
-        # keyframe paramters, how often to add them
-        self.declare_parameter('keyframe_duration', 1.0)
-        self.declare_parameter('keyframe_translation', 3.0)
-        self.declare_parameter('keyframe_rotation', 0.5236)  # 30 degrees in radians
-
+        # keyframe paramters, how often to add them (loaded from localization.yaml)
         keyframe_duration_sec = self.get_parameter('keyframe_duration').value
         keyframe_duration = Duration(seconds=keyframe_duration_sec)
         keyframe_translation = self.get_parameter('keyframe_translation').value
@@ -158,16 +154,11 @@ class SLAMNode(Node):
             self.localization.keyframe_translation = keyframe_translation
             self.localization.keyframe_rotation = keyframe_rotation
 
-        # SLAM paramter, are we using SLAM or just dead reckoning
-        self.declare_parameter('enable_slam', True)
+        # SLAM paramter, are we using SLAM or just dead reckoning (loaded from slam.yaml)
         self.enable_slam = self.get_parameter('enable_slam').value
         self.get_logger().info(f"SLAM STATUS: {self.enable_slam}")
 
-        # noise models
-        self.declare_parameter('slam_prior_noise', [0.1, 0.1, 0.01])
-        self.declare_parameter('slam_odom_noise', [0.2, 0.2, 0.02])
-        self.declare_parameter('slam_icp_noise', [0.1, 0.1, 0.01])
-
+        # noise models (loaded from localization.yaml)
         prior_sigmas = self.get_parameter('slam_prior_noise').value
         odom_sigmas = self.get_parameter('slam_odom_noise').value
         icp_odom_sigmas = self.get_parameter('slam_icp_noise').value
@@ -182,19 +173,12 @@ class SLAMNode(Node):
             self.localization.odom_sigmas = odom_sigmas
             self.localization.icp_odom_sigmas = icp_odom_sigmas
 
-        # resultion for map downsampling
-        self.declare_parameter('point_downsample_resolution', 0.5)
+        # resultion for map downsampling (loaded from localization.yaml)
         point_resolution = self.get_parameter('point_downsample_resolution').value
         if self.localization is not None:
             self.localization.point_resolution = point_resolution
 
-        # sequential scan matching parameters (SSM)
-        self.declare_parameter('ssm.enable', True)
-        self.declare_parameter('ssm.min_points', 50)
-        self.declare_parameter('ssm.max_translation', 3.0)
-        self.declare_parameter('ssm.max_rotation', 0.5236)  # 30 degrees
-        self.declare_parameter('ssm.target_frames', 3)
-
+        # sequential scan matching parameters (SSM) (loaded from localization.yaml)
         if self.localization is not None:
             # SSM is disabled in mapping-only mode
             if self.mode == 'mapping-only':
@@ -207,15 +191,7 @@ class SLAMNode(Node):
             self.localization.ssm_params.target_frames = self.get_parameter('ssm.target_frames').value
             self.get_logger().info(f"SSM: {self.localization.ssm_params.enable}")
 
-        # non sequential scan matching parameters (NSSM) aka loop closures
-        self.declare_parameter('nssm.enable', True)
-        self.declare_parameter('nssm.min_st_sep', 8)
-        self.declare_parameter('nssm.min_points', 50)
-        self.declare_parameter('nssm.max_translation', 10.0)
-        self.declare_parameter('nssm.max_rotation', 1.0472)  # 60 degrees
-        self.declare_parameter('nssm.source_frames', 5)
-        self.declare_parameter('nssm.cov_samples', 30)
-
+        # non sequential scan matching parameters (NSSM) aka loop closures (loaded from localization.yaml)
         if self.localization is not None:
             # NSSM is disabled in localization-only and mapping-only modes
             if self.mode in ['localization-only', 'mapping-only']:
@@ -230,51 +206,14 @@ class SLAMNode(Node):
             self.localization.nssm_params.cov_samples = self.get_parameter('nssm.cov_samples').value
             self.get_logger().info(f"NSSM: {self.localization.nssm_params.enable}")
 
-        # pairwise consistency maximization parameters for loop closure
-        # outliar rejection
-        self.declare_parameter('pcm_queue_size', 5)
-        self.declare_parameter('min_pcm', 2)
-
+        # pairwise consistency maximization parameters for loop closure (loaded from localization.yaml)
         self.fg.pcm_queue_size = self.get_parameter('pcm_queue_size').value
         self.fg.min_pcm = self.get_parameter('min_pcm').value
 
-        # ===== Sonar Hardware Parameters =====
-        self.declare_parameter('sonar.max_range', 40.0)
-        self.declare_parameter('sonar.min_range', 0.5)
-        self.declare_parameter('sonar.horizontal_fov', 130.0)
-        self.declare_parameter('sonar.vertical_aperture', 20.0)
-        self.declare_parameter('sonar.image_width', 918)
-        self.declare_parameter('sonar.image_height', 512)
-        self.declare_parameter('sonar.sonar_position', [0.25, 0.0, 0.08])
-        self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
-
-        # ===== 2D Mapping Parameters =====
-        self.declare_parameter('mapping_2d.map_2d_resolution', 0.1)
-        self.declare_parameter('mapping_2d.map_size', [4000, 4000])
-        self.declare_parameter('mapping_2d.map_update_interval', 1)
-        self.declare_parameter('mapping_2d.intensity_threshold', 50)
-
-        # ===== 3D Mapping Parameters =====
-        self.declare_parameter('mapping_3d.map_3d_voxel_size', 0.1)
-        self.declare_parameter('mapping_3d.min_probability', 0.6)
-        self.declare_parameter('mapping_3d.log_odds_occupied', 1.5)
-        self.declare_parameter('mapping_3d.log_odds_free', -2.0)
-        self.declare_parameter('mapping_3d.log_odds_min', -10.0)
-        self.declare_parameter('mapping_3d.log_odds_max', 10.0)
-        self.declare_parameter('mapping_3d.adaptive_update', True)
-        self.declare_parameter('mapping_3d.adaptive_threshold', 0.5)
-        self.declare_parameter('mapping_3d.adaptive_max_ratio', 0.5)
-        self.declare_parameter('mapping_3d.use_cpp_backend', True)
-        self.declare_parameter('mapping_3d.enable_propagation', False)
-        self.declare_parameter('mapping_3d.use_range_weighting', True)
-        self.declare_parameter('mapping_3d.lambda_decay', 0.1)
-        self.declare_parameter('mapping_3d.enable_gaussian_weighting', False)
-        self.declare_parameter('mapping_3d.use_dda_traversal', True)
-        self.declare_parameter('mapping_3d.bearing_step', 2)
-
-        # ===== Mapping Enable Flags =====
-        self.declare_parameter('enable_2d_mapping', True)
-        self.declare_parameter('enable_3d_mapping', True)
+        # ===== Sonar Hardware Parameters ===== (loaded from sonar.yaml)
+        # ===== 2D Mapping Parameters ===== (loaded from mapping.yaml)
+        # ===== 3D Mapping Parameters ===== (loaded from mapping.yaml)
+        # ===== Mapping Enable Flags ===== (loaded from slam.yaml)
 
         self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
         self.map_update_interval = self.get_parameter('mapping_2d.map_update_interval').value
@@ -403,11 +342,12 @@ class SLAMNode(Node):
 
         # Subscribe to sonar image and odometry
         # NOTE: Feature extraction is now INTERNAL - no external feature topic subscription
-        self.sonar_sub = Subscriber(self, Image, '/bluerov2/fls/image', qos_profile=qos_sub_profile)
+        sonar_image_topic = self.get_parameter('sonar_image_topic').value
+        self.sonar_sub = Subscriber(self, Image, sonar_image_topic, qos_profile=qos_sub_profile)
         self.odom_sub = Subscriber(self, Odometry, LOCALIZATION_ODOM_TOPIC, qos_profile=qos_sub_profile)
 
         # Add debug prints for topic names
-        self.get_logger().info(f"Subscribing to sonar image: /bluerov2/fls/image (internal feature extraction)")
+        self.get_logger().info(f"Subscribing to sonar image: {sonar_image_topic} (internal feature extraction)")
         self.get_logger().info(f"Subscribing to odom topic: {LOCALIZATION_ODOM_TOPIC}")
 
         # Define sync policy: sonar image + odometry (2-way synchronization)
@@ -464,8 +404,7 @@ class SLAMNode(Node):
         # cv bridge object
         self.CVbridge = cv_bridge.CvBridge()
 
-        # get the ICP configuration from the yaml file
-        self.declare_parameter('icp_config', '')
+        # get the ICP configuration from the yaml file (loaded from slam.yaml)
         icp_config = self.get_parameter('icp_config').value
         if icp_config and self.localization is not None:
             self.localization.icp.loadFromYaml(icp_config)
