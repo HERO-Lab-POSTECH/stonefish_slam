@@ -75,39 +75,9 @@ class FeatureExtraction:
         self.detector = CFAR(self.Ntc, self.Ngc, self.Pfa, self.rank)
 
     def init_params(self):
-        """Initialize parameters from parent node (no subscribers/publishers)"""
+        """Initialize parameters from parent node (parameters must be already declared by parent)"""
 
-        # Declare parameters with default values (parent node must have these)
-        self.node.declare_parameter('vehicle_name', 'bluerov2')
-
-        # CFAR parameters
-        self.node.declare_parameter('CFAR.Ntc', 20)
-        self.node.declare_parameter('CFAR.Ngc', 10)
-        self.node.declare_parameter('CFAR.Pfa', 1e-2)
-        self.node.declare_parameter('CFAR.rank', 10)
-        self.node.declare_parameter('CFAR.alg', 'SOCA')
-
-        # Filter parameters
-        self.node.declare_parameter('filter.threshold', 0)
-        self.node.declare_parameter('filter.resolution', 0.5)
-        self.node.declare_parameter('filter.radius', 1.0)
-        self.node.declare_parameter('filter.min_points', 5)
-        self.node.declare_parameter('filter.skip', 5)
-
-        # Visualization parameters
-        self.node.declare_parameter('visualization.coordinates', 'cartesian')
-        self.node.declare_parameter('visualization.radius', 0.1)
-        self.node.declare_parameter('visualization.color', 'green')
-
-        # Sonar parameters (Stonefish FLS)
-        self.node.declare_parameter('sonar.horizontal_fov', 130.0)
-        self.node.declare_parameter('sonar.vertical_fov', 20.0)
-        self.node.declare_parameter('sonar.num_beams', 512)
-        self.node.declare_parameter('sonar.num_bins', 500)
-        self.node.declare_parameter('sonar.min_range', 0.5)
-        self.node.declare_parameter('sonar.max_range', 40.0)
-
-        # Get parameters
+        # Get parameters (parent node MUST have declared these already)
         self.vehicle_name = self.node.get_parameter('vehicle_name').get_parameter_value().string_value
 
         # CFAR parameters
