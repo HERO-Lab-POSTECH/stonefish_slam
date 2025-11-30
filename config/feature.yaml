@@ -1,15 +1,10 @@
 # Feature Extraction Configuration for ROS2
-# NOTE: Sonar hardware parameters are loaded from sonar.yaml
+# NOTE: Sonar hardware parameters (vehicle_name, sonar_image_topic) are loaded from sonar.yaml
 #       This file only contains CFAR and filtering parameters
 # NOTE: Feature extraction is now INTERNAL to slam_node (no separate process)
 slam_node:
   ros__parameters:
-    # Vehicle name
-    vehicle_name: 'bluerov2'
-
-    # Sonar image topic
-    sonar_image_topic: '/bluerov2/fls/image'
-
+    # ==================== CFAR Feature Extraction ====================
     # Constant false alarm rate (CFAR) params for feature extraction
     CFAR:
       Ntc: 20  # number of training cells (reduced for simulator)

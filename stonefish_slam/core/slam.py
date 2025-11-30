@@ -154,10 +154,6 @@ class SLAMNode(Node):
             self.localization.keyframe_translation = keyframe_translation
             self.localization.keyframe_rotation = keyframe_rotation
 
-        # SLAM paramter, are we using SLAM or just dead reckoning (loaded from slam.yaml)
-        self.enable_slam = self.get_parameter('enable_slam').value
-        self.get_logger().info(f"SLAM STATUS: {self.enable_slam}")
-
         # noise models (loaded from localization.yaml)
         prior_sigmas = self.get_parameter('slam_prior_noise').value
         odom_sigmas = self.get_parameter('slam_odom_noise').value

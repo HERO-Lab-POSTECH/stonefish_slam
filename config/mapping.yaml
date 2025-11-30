@@ -26,3 +26,5 @@ slam_node:
       enable_propagation: false  # Test 7: Bearing propagation (ray 사이 보간)
       propagation_radius: 2     # ±2 bearing 전파
       propagation_sigma: 1.5    # Gaussian 가중치 표준편차
+      enable_gaussian_weighting: false  # Enable Gaussian weighting for bearing-based updates
+      bearing_step: 1           # Process every Nth bearing (1 = all bearings)

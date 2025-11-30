@@ -2,6 +2,14 @@
 # BlueROV2 FLS (Forward Looking Sonar) - Stonefish simulation parameters
 slam_node:
   ros__parameters:
+    # ==================== Common Parameters ====================
+    # Vehicle name
+    vehicle_name: 'bluerov2'
+
+    # Sonar image topic
+    sonar_image_topic: '/bluerov2/fls/image'
+
+    # ==================== Sonar Hardware ====================
     sonar:
       horizontal_fov: 130.0              # Horizontal field of view (degrees)
       vertical_aperture: 20.0            # Vertical beam aperture (degrees)

@@ -1,0 +1,17 @@
+# Factor Graph Configuration
+# Loop closure (NSSM) and consistency verification (PCM) parameters
+slam_node:
+  ros__parameters:
+    # ==================== Non-Sequential Scan Matching (Loop Closure) ====================
+    nssm.enable: false  # is this module enabled?
+    nssm.min_st_sep: 15  # the size of the exclusion zone around the most recent keyframe (increased for true loops)
+    nssm.min_points: 150  # min number of points (increased to reduce noise)
+    nssm.max_translation: 5.0  # max translation allowed (decreased from 10.0 - stricter validation)
+    nssm.max_rotation: 0.5236  # 30 degrees in radians (decreased from 60° - stricter validation)
+    nssm.source_frames: 5  # the number of frames to aggratgate when trying a loop closure
+    nssm.cov_samples: 30
+
+    # ==================== Pairwise Consistency Maximization (PCM) ====================
+    # PCM params for rejecting outlier loop closures
+    pcm_queue_size: 5  # the sliding window size for PCM
+    min_pcm: 3  # the min number of pairwise consistent loop closures (increased from 2 - stronger outlier rejection)

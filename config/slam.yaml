@@ -1,17 +1,13 @@
 # SLAM Integration Configuration
-# Contains: Module enable flags, ICP config path
+# Contains: Module enable flags
 # NOTE: For module-specific parameters, see:
 #   - sonar.yaml: Sonar hardware parameters (shared with feature extraction)
-#   - localization.yaml: SLAM keyframes, noise models, SSM, NSSM, PCM, ICP
+#   - feature.yaml: CFAR and filtering parameters
+#   - localization.yaml: SLAM keyframes, noise models, SSM, ICP config path
+#   - factor_graph.yaml: Loop closure (NSSM) and consistency verification (PCM)
 #   - mapping.yaml: 2D/3D mapping parameters
 slam_node:
   ros__parameters:
     # ==================== Module Enable Flags ====================
-    enable_slam: true
     enable_2d_mapping: false
     enable_3d_mapping: true
-
-    # ==================== ICP Configuration ====================
-    # Pull in the ICP config (will be set from launch file)
-    # Leave empty here, will be provided as parameter from launch file
-    icp_config: '/workspace/colcon_ws/src/stonefish_slam/config/icp.yaml'

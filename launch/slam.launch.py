@@ -27,12 +27,6 @@ def generate_launch_description():
         description='Launch RViz for visualization'
     )
 
-    enable_slam_arg = DeclareLaunchArgument(
-        'enable_slam',
-        default_value='true',
-        description='Enable SLAM processing'
-    )
-
     vehicle_name_arg = DeclareLaunchArgument(
         'vehicle_name',
         default_value='bluerov2',
@@ -65,6 +59,7 @@ def generate_launch_description():
     sonar_config = os.path.join(pkg_share, 'config', 'sonar.yaml')
     feature_config = os.path.join(pkg_share, 'config', 'feature.yaml')
     localization_config = os.path.join(pkg_share, 'config', 'localization.yaml')
+    factor_graph_config = os.path.join(pkg_share, 'config', 'factor_graph.yaml')
     mapping_config = os.path.join(pkg_share, 'config', 'mapping.yaml')
     slam_config = os.path.join(pkg_share, 'config', 'slam.yaml')
     icp_config = os.path.join(pkg_share, 'config', 'icp.yaml')
@@ -78,13 +73,13 @@ def generate_launch_description():
         name='slam_node',
         output='screen',
         parameters=[
-            sonar_config,         # Sonar hardware parameters (loaded first)
+            sonar_config,         # Sonar hardware + common parameters (vehicle_name, topic)
             feature_config,       # Feature extraction params (CFAR, filters)
-            localization_config,  # SLAM keyframes, noise models, SSM, NSSM, PCM
+            localization_config,  # SLAM keyframes, noise models, SSM, ICP config path
+            factor_graph_config,  # Loop closure (NSSM) and consistency verification (PCM)
             mapping_config,       # 2D/3D mapping parameters
             slam_config,          # Integration settings (enable flags)
             {
-                'enable_slam': LaunchConfiguration('enable_slam'),
                 'icp_config': icp_config,
                 'mode': LaunchConfiguration('mode'),
                 'enable_2d_mapping': LaunchConfiguration('enable_2d_mapping'),
@@ -122,7 +117,6 @@ def generate_launch_description():
     return LaunchDescription([
         # Arguments
         rviz_arg,
-        enable_slam_arg,
         vehicle_name_arg,
         mode_arg,
         enable_2d_mapping_arg,
