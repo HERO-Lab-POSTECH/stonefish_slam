@@ -34,6 +34,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Config 파일 8-파일 시스템 재구성** (2025-11-30)
+  - 논리적 카테고리별 파라미터 분류:
+    - `sonar.yaml`: 공통 파라미터 (vehicle_name, sonar_image_topic) + 하드웨어
+    - `feature.yaml`: CFAR 특징 추출
+    - `localization.yaml`: SSM + ICP (icp_config 추가)
+    - `factor_graph.yaml`: NSSM + PCM (신규)
+    - `mapping.yaml`: 2D/3D 매핑
+    - `slam.yaml`: 통합 제어 (ssm.enable, nssm.enable 추가)
+  - enable_slam 파라미터 제거 (중복, 사용 안 함)
+  - 누락 파라미터 추가 (enable_gaussian_weighting, bearing_step, use_dda_traversal)
+
+- **파라미터 관리 개선** (2025-11-30)
+  - slam.py에 78개 declare_parameter() 호출 추가
+  - ParameterNotDeclaredException 에러 해결
+  - feature_extraction.py 중복 선언 제거
+
+- **Enable 플래그 중앙화** (2025-11-30)
+  - ssm.enable, nssm.enable을 slam.yaml로 이동
+  - 각 모드별 launch 파일에서 오버라이드
+  - localization.launch.py: ssm=true, nssm=false
+  - mapping.launch.py: ssm=false, nssm=false
+
+- **로그 메시지 개선** (2025-11-30)
+  - SLAM_callback_integrated → "Callback: extracted N features"
+  - Feature extraction 결과 가시성 향상
+
 - **Feature Extraction 통합** (2025-11-30)
   - feature_extraction_node를 slam_node 내부 모듈로 통합
   - 별도 프로세스 제거로 inter-process 오버헤드 감소
