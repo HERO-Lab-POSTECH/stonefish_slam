@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **slam.launch.py가 slam.yaml 파라미터 오버라이드하는 문제 수정** (2025-12-01)
+  - `ssm.enable`/`nssm.enable` launch argument가 default_value='true'로 하드코딩됨
+  - slam.yaml에서 false로 설정해도 launch 파일이 true로 덮어씀
+  - 해결: launch argument 제거, slam.yaml 값만 사용
+  - 커맨드라인 오버라이드는 여전히 가능: `ros2 launch stonefish_slam slam.launch.py ssm.enable:=true`
+  - **파일**: `launch/slam.launch.py`
+
 ### Removed
 
 - **map→odom TF 발행 제거** (2025-12-01)

@@ -51,17 +51,9 @@ def generate_launch_description():
         description='Enable 3D mapping'
     )
 
-    ssm_enable_arg = DeclareLaunchArgument(
-        'ssm.enable',
-        default_value='true',
-        description='Enable Sequential Scan Matching (localization)'
-    )
-
-    nssm_enable_arg = DeclareLaunchArgument(
-        'nssm.enable',
-        default_value='true',
-        description='Enable Non-Sequential Scan Matching (loop closure)'
-    )
+    # Note: ssm.enable and nssm.enable are now loaded from slam.yaml only
+    # To override, use command line: ros2 launch ... ssm.enable:=true
+    # (Removed from default launch arguments to respect yaml config)
 
     # Get package directories
     pkg_share = get_package_share_directory('stonefish_slam')
@@ -90,14 +82,13 @@ def generate_launch_description():
             localization_config,  # SLAM keyframes, noise models, SSM, ICP config path
             factor_graph_config,  # Loop closure (NSSM) and consistency verification (PCM)
             mapping_config,       # 2D/3D mapping parameters
-            slam_config,          # Integration settings (enable flags)
+            slam_config,          # Integration settings (ssm.enable, nssm.enable)
             {
                 'icp_config': icp_config,
                 'mode': LaunchConfiguration('mode'),
                 'enable_2d_mapping': LaunchConfiguration('enable_2d_mapping'),
                 'enable_3d_mapping': LaunchConfiguration('enable_3d_mapping'),
-                'ssm.enable': LaunchConfiguration('ssm.enable'),
-                'nssm.enable': LaunchConfiguration('nssm.enable'),
+                # ssm.enable and nssm.enable are now loaded from slam.yaml
                 'vehicle_name': LaunchConfiguration('vehicle_name')
             }
         ]
@@ -135,8 +126,7 @@ def generate_launch_description():
         mode_arg,
         enable_2d_mapping_arg,
         enable_3d_mapping_arg,
-        ssm_enable_arg,
-        nssm_enable_arg,
+        # ssm.enable and nssm.enable now loaded from slam.yaml (not launch args)
 
         # Nodes
         slam_node,
