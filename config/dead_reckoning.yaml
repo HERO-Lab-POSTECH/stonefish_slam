@@ -1,4 +1,7 @@
-# Dead Reckoning node configuration for ROS2
+# Dead Reckoning Node Configuration for ROS2
+# NOTE: This module uses different keyframe parameters than SLAM
+#   - keyframe_translation: 4.0m (DR) vs 3.0m (SLAM in localization.yaml)
+#   - Reason: Dead reckoning uses larger spacing to reduce drift accumulation
 dead_reckoning_node:
   ros__parameters:
     # Localization node

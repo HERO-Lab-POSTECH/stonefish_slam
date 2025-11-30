@@ -27,50 +27,69 @@ def generate_launch_description():
         description='Launch RViz for visualization'
     )
 
-    enable_slam_arg = DeclareLaunchArgument(
-        'enable_slam',
-        default_value='true',
-        description='Enable SLAM processing'
-    )
-
     vehicle_name_arg = DeclareLaunchArgument(
         'vehicle_name',
         default_value='bluerov2',
         description='Vehicle name for topic namespacing'
     )
 
+    mode_arg = DeclareLaunchArgument(
+        'mode',
+        default_value='slam',
+        description='Operating mode: slam, localization-only, mapping-only'
+    )
+
+    enable_2d_mapping_arg = DeclareLaunchArgument(
+        'enable_2d_mapping',
+        default_value='true',
+        description='Enable 2D mapping'
+    )
+
+    enable_3d_mapping_arg = DeclareLaunchArgument(
+        'enable_3d_mapping',
+        default_value='false',
+        description='Enable 3D mapping'
+    )
+
+    # Note: ssm.enable and nssm.enable are now loaded from slam.yaml only
+    # To override, use command line: ros2 launch ... ssm.enable:=true
+    # (Removed from default launch arguments to respect yaml config)
+
     # Get package directories
     pkg_share = get_package_share_directory('stonefish_slam')
 
-    # Config files
+    # Config files (modular structure)
+    # NOTE: Load order matters - base configs first, module overrides last
+    sonar_config = os.path.join(pkg_share, 'config', 'sonar.yaml')
     feature_config = os.path.join(pkg_share, 'config', 'feature.yaml')
+    localization_config = os.path.join(pkg_share, 'config', 'localization.yaml')
+    factor_graph_config = os.path.join(pkg_share, 'config', 'factor_graph.yaml')
+    mapping_config = os.path.join(pkg_share, 'config', 'mapping.yaml')
     slam_config = os.path.join(pkg_share, 'config', 'slam.yaml')
     icp_config = os.path.join(pkg_share, 'config', 'icp.yaml')
     rviz_config = os.path.join(pkg_share, 'rviz', 'slam.rviz')
 
-    # Feature extraction node
-    feature_extraction_node = Node(
-        package='stonefish_slam',
-        executable='feature_extraction_node',
-        name='feature_extraction_node',  # Must match the name in feature.yaml
-        output='screen',
-        parameters=[
-            feature_config,
-            {'vehicle_name': LaunchConfiguration('vehicle_name')}
-        ]
-    )
-
-    # SLAM node
+    # SLAM node with integrated feature extraction
+    # NOTE: Feature extraction is now INTERNAL to slam_node
     slam_node = Node(
         package='stonefish_slam',
         executable='slam_node',
         name='slam_node',
         output='screen',
         parameters=[
-            slam_config,
+            sonar_config,         # Sonar hardware + common parameters (vehicle_name, topic)
+            feature_config,       # Feature extraction params (CFAR, filters)
+            localization_config,  # SLAM keyframes, noise models, SSM, ICP config path
+            factor_graph_config,  # Loop closure (NSSM) and consistency verification (PCM)
+            mapping_config,       # 2D/3D mapping parameters
+            slam_config,          # Integration settings (ssm.enable, nssm.enable)
             {
-                'enable_slam': LaunchConfiguration('enable_slam'),
                 'icp_config': icp_config,
+                'mode': LaunchConfiguration('mode'),
+                'enable_2d_mapping': LaunchConfiguration('enable_2d_mapping'),
+                'enable_3d_mapping': LaunchConfiguration('enable_3d_mapping'),
+                # ssm.enable and nssm.enable are now loaded from slam.yaml
+                'vehicle_name': LaunchConfiguration('vehicle_name')
             }
         ]
     )
@@ -103,11 +122,13 @@ def generate_launch_description():
     return LaunchDescription([
         # Arguments
         rviz_arg,
-        enable_slam_arg,
         vehicle_name_arg,
+        mode_arg,
+        enable_2d_mapping_arg,
+        enable_3d_mapping_arg,
+        # ssm.enable and nssm.enable now loaded from slam.yaml (not launch args)
 
         # Nodes
-        feature_extraction_node,
         slam_node,
         world_ned_to_map_tf,
         # rviz_node,  # Uncomment when RViz config is ready

@@ -1,12 +1,10 @@
-# Feature Extraction configuration for ROS2
-feature_extraction_node:
+# Feature Extraction Configuration for ROS2
+# NOTE: Sonar hardware parameters (vehicle_name, sonar_image_topic) are loaded from sonar.yaml
+#       This file only contains CFAR and filtering parameters
+# NOTE: Feature extraction is now INTERNAL to slam_node (no separate process)
+slam_node:
   ros__parameters:
-    # Vehicle name
-    vehicle_name: 'bluerov2'
-
-    # Sonar image topic
-    sonar_image_topic: '/bluerov2/fls/image'
-
+    # ==================== CFAR Feature Extraction ====================
     # Constant false alarm rate (CFAR) params for feature extraction
     CFAR:
       Ntc: 20  # number of training cells (reduced for simulator)
@@ -28,12 +26,3 @@ feature_extraction_node:
       coordinates: 'cartesian'
       radius: 2.0
       color: 'green'
-
-    # Sonar parameters (Stonefish FLS from bluerov2.scn)
-    sonar:
-      horizontal_fov: 130.0  # degrees (total horizontal field of view)
-      vertical_fov: 20.0  # degrees
-      num_beams: 512  # number of beams (image width)
-      num_bins: 500  # number of range bins (image height)
-      min_range: 0.5  # minimum range in meters
-      max_range: 40.0  # maximum range in meters

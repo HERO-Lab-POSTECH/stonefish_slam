@@ -11,7 +11,7 @@ def generate_launch_description():
     mapping_2d_node = Node(
         package='stonefish_slam',
         executable='mapping_2d_standalone',
-        name='mapping_2d_standalone_node',
+        name='mapping_2d_node',
         parameters=[
             str(config_dir / 'slam.yaml'),
             {

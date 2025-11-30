@@ -9,6 +9,145 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **slam.launch.py가 slam.yaml 파라미터 오버라이드하는 문제 수정** (2025-12-01)
+  - `ssm.enable`/`nssm.enable` launch argument가 default_value='true'로 하드코딩됨
+  - slam.yaml에서 false로 설정해도 launch 파일이 true로 덮어씀
+  - 해결: launch argument 제거, slam.yaml 값만 사용
+  - 커맨드라인 오버라이드는 여전히 가능: `ros2 launch stonefish_slam slam.launch.py ssm.enable:=true`
+  - **파일**: `launch/slam.launch.py`
+
+### Removed
+
+- **map→odom TF 발행 제거** (2025-12-01)
+  - `bluerov2_map → bluerov2_odom` TF 발행 코드 제거
+  - 이유: SLAM 내부 계산에 사용하지 않음 (시각화 전용)
+  - Simulator가 `world_ned → base_link_frd` 직접 제공으로 충분
+  - Navigation stack 통합 필요 시 재추가 가능
+  - **파일**: `stonefish_slam/core/slam.py:1017-1041` (22줄 제거)
+
+### Fixed
+
+- **Sonar 파라미터 초기화 누락 수정** (2025-12-01)
+  - `localization.oculus.max_range` 초기화 누락으로 NSSM 계산 시 TypeError 발생
+  - `init_node()`에서 sonar.yaml 파라미터를 읽어 OculusProperty 객체 설정
+  - 설정 항목: max_range, range_resolution, num_ranges, horizontal_aperture, vertical_aperture, num_bearings, angular_resolution
+  - 리팩토링 이전에는 ping 메시지로 자동 설정되었으나, 현재는 ROS2 파라미터 기반으로 수동 설정 필요
+  - **파일**: `stonefish_slam/core/slam.py:264-288`
+
+### Added
+
+- **3가지 SLAM 운영 모드 지원** (2025-11-30)
+  - `slam`: 풀 SLAM 모드 (SSM + NSSM + 3D/2D Mapping)
+  - `localization-only`: 로컬라이제이션 전용 (SSM만, 루프 클로저/맵핑 제외)
+  - `mapping-only`: 맵핑 전용 (DR 포즈 기반 맵핑, SSM/NSSM 제외)
+  - 런치 파일: `localization.launch.py`, `mapping.launch.py`, `slam.launch.py` (mode 파라미터 추가)
+  - 핵심 구현: `core/slam.py`에 모드 파라미터 기반 조건부 모듈 인스턴스 생성
+  - **사용 예시**:
+    ```bash
+    # SLAM 모드 (기본)
+    ros2 launch stonefish_slam slam.launch.py
+
+    # 로컬라이제이션만
+    ros2 launch stonefish_slam localization.launch.py
+
+    # 맵핑만 (DR 포즈 사용)
+    ros2 launch stonefish_slam mapping.launch.py
+    ```
+  - **파일**:
+    - `stonefish_slam/core/slam.py`
+    - `stonefish_slam/launch/slam.launch.py`
+    - `stonefish_slam/launch/localization.launch.py` (신규)
+    - `stonefish_slam/launch/mapping.launch.py` (신규)
+
+### Changed
+
+- **Config 파일 8-파일 시스템 재구성** (2025-11-30)
+  - 논리적 카테고리별 파라미터 분류:
+    - `sonar.yaml`: 공통 파라미터 (vehicle_name, sonar_image_topic) + 하드웨어
+    - `feature.yaml`: CFAR 특징 추출
+    - `localization.yaml`: SSM + ICP (icp_config 추가)
+    - `factor_graph.yaml`: NSSM + PCM (신규)
+    - `mapping.yaml`: 2D/3D 매핑
+    - `slam.yaml`: 통합 제어 (ssm.enable, nssm.enable 추가)
+  - enable_slam 파라미터 제거 (중복, 사용 안 함)
+  - 누락 파라미터 추가 (enable_gaussian_weighting, bearing_step, use_dda_traversal)
+
+- **파라미터 관리 개선** (2025-11-30)
+  - slam.py에 78개 declare_parameter() 호출 추가
+  - ParameterNotDeclaredException 에러 해결
+  - feature_extraction.py 중복 선언 제거
+
+- **Enable 플래그 중앙화** (2025-11-30)
+  - ssm.enable, nssm.enable을 slam.yaml로 이동
+  - 각 모드별 launch 파일에서 오버라이드
+  - localization.launch.py: ssm=true, nssm=false
+  - mapping.launch.py: ssm=false, nssm=false
+
+- **로그 메시지 개선** (2025-11-30)
+  - SLAM_callback_integrated → "Callback: extracted N features"
+  - Feature extraction 결과 가시성 향상
+
+- **Feature Extraction 통합** (2025-11-30)
+  - feature_extraction_node를 slam_node 내부 모듈로 통합
+  - 별도 프로세스 제거로 inter-process 오버헤드 감소
+  - Topic synchronization 단순화 (3-way → 2-way)
+  - FeatureExtraction 클래스를 composition 패턴으로 리팩토링
+  - Config 파일 단순화:
+    - `feature.yaml`: feature_extraction_node → slam_node 섹션 변경
+    - `sonar.yaml`: YAML anchor 제거, 직관적인 flat 구조로 변경
+  - slam_node가 모든 feature extraction 파라미터 로드
+  - **파일**:
+    - `stonefish_slam/core/slam.py` (FeatureExtraction 내부 인스턴스화)
+    - `stonefish_slam/core/feature_extraction.py` (Node 상속 제거)
+    - `stonefish_slam/config/feature.yaml` (섹션 변경)
+    - `stonefish_slam/config/sonar.yaml` (anchor 제거)
+    - `stonefish_slam/launch/slam.launch.py` (feature_extraction_node 제거)
+    - `stonefish_slam/CMakeLists.txt` (entry point 제거)
+  - **삭제**:
+    - `stonefish_slam/nodes/feature_extraction_node.py`
+
+- **SLAM 아키텍처 모듈화 리팩토링** (2025-11-30)
+  - **목표**: 단일 파일 SLAM 클래스 (1350줄)를 모듈식 아키텍처로 개선
+  - **새 파일 생성**:
+    - `core/factor_graph.py` - GTSAM 팩터 그래프 관리 (313줄)
+      - GTSAM factor graph 초기화 및 업데이트
+      - Keyframe 저장소 및 메타데이터 관리
+      - Loop closure 후 최적화 처리
+    - `core/localization.py` - Sequential Scan Matching (420줄)
+      - SSM (Sequential Scan Matching) 및 ICP 정렬
+      - Keyframe 감지 (거리/회전 기준)
+      - Scan-to-map 정합
+  - **파일 이름 변경**:
+    - `slam_objects.py` → `types.py` (데이터 클래스 통합)
+    - `slam_ros.py` → `slam.py` (ROS2 통합 노드)
+    - `slam.py` → `slam_legacy.py` (원본 백업)
+  - **아키텍처 개선**:
+    - 상속 기반 단일 클래스 → 조합 기반 모듈식 설계로 전환
+    - Front-end/Back-end 분리 (Localization/FactorGraph)
+    - 의존성 주입 패턴으로 테스트 용이성 향상
+    - 향후 FFT 기반 localization 추가 시 확장 용이
+  - **기능 보존**:
+    - ICP, PCM 검증, NSSM 알고리즘 변경 없음
+    - ROS2 토픽 및 서비스 동일 (API 호환성 100%)
+    - Launch 파일 수정 불필요
+  - **코드 품질**:
+    - 순환 의존성 제거 (types.py는 순수 데이터 클래스)
+    - 각 모듈이 독립적으로 테스트 가능
+    - 주석 및 docstring 추가로 가독성 향상
+  - **파일**:
+    - `stonefish_slam/core/factor_graph.py`
+    - `stonefish_slam/core/localization.py`
+    - `stonefish_slam/core/types.py` (rename)
+    - `stonefish_slam/core/slam.py` (rename)
+    - `stonefish_slam/core/slam_legacy.py` (backup)
+    - Import 경로 업데이트: `core/feature_extraction.py`, `core/mapping_3d.py`, `nodes/slam.py`
+  - **빌드 검증**:
+    - colcon build 성공 (0 errors, 0 warnings)
+    - 모든 Python 모듈 로드 가능
+    - 런타임 메모리 누수 없음
+
+### Fixed
+
 - **Shadow Validation Bearing Width 수정** (2025-11-26)
   - **문제**: 그림자 영역이 다시 관측해도 채워지지 않음 (바닥에 구멍)
   - **원인**: `bearing_half_width`가 0.176° (horizontal resolution)으로 설정되어 FLS vertical aperture (±10°)의 1%만 커버

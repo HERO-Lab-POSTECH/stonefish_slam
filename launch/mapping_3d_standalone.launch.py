@@ -16,7 +16,7 @@ def generate_launch_description():
         Node(
             package='stonefish_slam',
             executable='mapping_3d_standalone',
-            name='slam_node',  # Match namespace in slam.yaml
+            name='mapping_3d_node',
             output='screen',
             parameters=[
                 str(config_dir / 'slam.yaml'),  # Load slam.yaml for all params
