@@ -9,7 +9,7 @@
 slam_node:
   ros__parameters:
     # ==================== Module Enable Flags ====================
-    enable_2d_mapping: true
+    enable_2d_mapping: false
     enable_3d_mapping: true
 
     # Localization modules

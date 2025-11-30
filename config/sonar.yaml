@@ -17,4 +17,4 @@ slam_node:
       min_range: 0.5                     # Minimum range (m)
       max_range: 30.0                    # Maximum range (m)
       sonar_position: [0.0, 0.0, 0.0]    # Position relative to base_link (FRD)
-      sonar_tilt_deg: 10.0               # Tilt angle (degrees, downward)
+      sonar_tilt_deg: 30.0               # Tilt angle (degrees, downward)
