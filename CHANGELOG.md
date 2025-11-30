@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SLAM TF tree 수정** (2025-12-01)
+  - `odom → base_link` TF 발행 추가 (dead_reckoning node 역할 대체)
+  - 완전한 TF tree 구성: `world_ned → map → odom → base_link`
+  - `bluerov2_odom` frame이 로봇 위치에 정상적으로 생성
+  - **파일**: `stonefish_slam/core/slam.py:1015-1035`
+
 ### Added
 
 - **3가지 SLAM 운영 모드 지원** (2025-11-30)

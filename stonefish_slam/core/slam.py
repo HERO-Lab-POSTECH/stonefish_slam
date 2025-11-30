@@ -1012,6 +1012,28 @@ class SLAMNode(Node):
         t.transform.rotation.w = q.w
         self.tf.sendTransform(t)
 
+        # Also broadcast odom → base_link transform (replaces dead_reckoning node)
+        # Since we use simulator odometry directly (world_ned absolute coords),
+        # odom frame == world_ned frame, so dr_pose3 can be used directly
+        t_odom = TransformStamped()
+        t_odom.header.stamp = current_frame.time
+        if self.rov_id == "":
+            t_odom.header.frame_id = "odom"
+            t_odom.child_frame_id = "base_link"
+        else:
+            t_odom.header.frame_id = self.rov_id + "_odom"
+            t_odom.child_frame_id = self.rov_id + "/base_link"
+
+        dr_pose = g2r(current_frame.dr_pose3)
+        t_odom.transform.translation.x = dr_pose.position.x
+        t_odom.transform.translation.y = dr_pose.position.y
+        t_odom.transform.translation.z = dr_pose.position.z
+        t_odom.transform.rotation.x = dr_pose.orientation.x
+        t_odom.transform.rotation.y = dr_pose.orientation.y
+        t_odom.transform.rotation.z = dr_pose.orientation.z
+        t_odom.transform.rotation.w = dr_pose.orientation.w
+        self.tf.sendTransform(t_odom)
+
         odom_msg = Odometry()
         odom_msg.header = pose_msg.header
         odom_msg.pose.pose = pose_msg.pose.pose
