@@ -1,0 +1,2 @@
+/usr/bin/ar qc liboctree_mapping_core.a CMakeFiles/octree_mapping_core.dir/stonefish_slam/cpp/octree_mapping.cpp.o
+/usr/bin/ranlib liboctree_mapping_core.a

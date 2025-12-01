@@ -1,0 +1,23 @@
+failed to create symbolic link '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam/ament_cmake_python/stonefish_slam/stonefish_slam' because existing path cannot be removed: Is a directory
+gmake[2]: *** [CMakeFiles/ament_cmake_python_symlink_stonefish_slam.dir/build.make:70: CMakeFiles/ament_cmake_python_symlink_stonefish_slam] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:151: CMakeFiles/ament_cmake_python_symlink_stonefish_slam.dir/all] Error 2
+gmake[1]: *** Waiting for unfinished jobs....
+/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp: In function ‘MatrixXb os(const MatrixXf&, int, int, int, double)’:
+/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp:99:13: warning: unused variable ‘leading_sum’ [-Wunused-variable]
+   99 |       float leading_sum = 0.0, lagging_sum = 0.0;
+      |             ^~~~~~~~~~~
+/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp:99:32: warning: unused variable ‘lagging_sum’ [-Wunused-variable]
+   99 |       float leading_sum = 0.0, lagging_sum = 0.0;
+      |                                ^~~~~~~~~~~
+/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp: In function ‘std::pair<Eigen::Matrix<unsigned char, -1, -1>, Eigen::Matrix<float, -1, -1> > os2(const MatrixXf&, int, int, int, double)’:
+/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp:194:13: warning: unused variable ‘leading_sum’ [-Wunused-variable]
+  194 |       float leading_sum = 0.0, lagging_sum = 0.0;
+      |             ^~~~~~~~~~~
+/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp:194:32: warning: unused variable ‘lagging_sum’ [-Wunused-variable]
+  194 |       float leading_sum = 0.0, lagging_sum = 0.0;
+      |                                ^~~~~~~~~~~
+lto-wrapper: warning: using serial compilation of 2 LTRANS jobs
+lto-wrapper: warning: using serial compilation of 3 LTRANS jobs
+lto-wrapper: warning: using serial compilation of 4 LTRANS jobs
+lto-wrapper: warning: using serial compilation of 5 LTRANS jobs
+gmake: *** [Makefile:146: all] Error 2

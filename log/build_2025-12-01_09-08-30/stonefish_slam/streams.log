@@ -1,0 +1,494 @@
+[0.005s] Invoking command in '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspace/colcon_ws/install/stonefish_trajectory_manager:/workspace/colcon_ws/install/stonefish_thruster_manager:/workspace/colcon_ws/install/stonefish_control_utils:/workspace/colcon_ws/install/stonefish_control:/opt/ros/humble /usr/bin/cmake --build /workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam -- -j28 -l28
+[0.032s] [ 16%] Built target cfar
+[0.032s] [ 41%] Built target octree_mapping
+[0.032s] [ 50%] Built target octree_mapping_core
+[0.033s] [ 66%] Built target dda_traversal
+[0.033s] [ 66%] Built target ament_cmake_python_symlink_stonefish_slam
+[0.033s] [ 66%] Built target ament_cmake_python_symlink_stonefish_slam_setup
+[0.035s] [ 83%] Built target pcl_module
+[0.042s] [100%] Built target ray_processor
+[0.129s] running egg_info
+[0.134s] writing stonefish_slam.egg-info/PKG-INFO
+[0.135s] writing dependency_links to stonefish_slam.egg-info/dependency_links.txt
+[0.135s] writing top-level names to stonefish_slam.egg-info/top_level.txt
+[0.153s] reading manifest file 'stonefish_slam.egg-info/SOURCES.txt'
+[0.154s] writing manifest file 'stonefish_slam.egg-info/SOURCES.txt'
+[0.167s] [100%] Built target ament_cmake_python_build_stonefish_slam_egg
+[0.171s] Invoked command in '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspace/colcon_ws/install/stonefish_trajectory_manager:/workspace/colcon_ws/install/stonefish_thruster_manager:/workspace/colcon_ws/install/stonefish_control_utils:/workspace/colcon_ws/install/stonefish_control:/opt/ros/humble /usr/bin/cmake --build /workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam -- -j28 -l28
+[0.175s] Invoking command in '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspace/colcon_ws/install/stonefish_trajectory_manager:/workspace/colcon_ws/install/stonefish_thruster_manager:/workspace/colcon_ws/install/stonefish_control_utils:/workspace/colcon_ws/install/stonefish_control:/opt/ros/humble /usr/bin/cmake --install /workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam
+[0.178s] -- Install configuration: ""
+[0.178s] -- Execute custom install script
+[0.178s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/environment/pythonpath.sh
+[0.179s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/environment/pythonpath.dsv
+[0.179s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam-0.1.0-py3.10.egg-info/PKG-INFO
+[0.179s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam-0.1.0-py3.10.egg-info/SOURCES.txt
+[0.179s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam-0.1.0-py3.10.egg-info/dependency_links.txt
+[0.179s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam-0.1.0-py3.10.egg-info/top_level.txt
+[0.182s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/__init__.py
+[0.182s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/__init__.py
+[0.182s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/cfar.py
+[0.182s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/dead_reckoning.py
+[0.182s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/factor_graph.py
+[0.182s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/feature_extraction.py
+[0.182s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/kalman.py
+[0.183s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/localization.py
+[0.183s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/mapping_2d.py
+[0.183s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/mapping_3d.py
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/octree.py
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/slam.py
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/slam_legacy.py
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/types.py
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/__init__.py
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/cfar.cpp
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/dda_traversal.cpp
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/dda_traversal.h
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/octree_mapping.cpp
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/octree_mapping.h
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pcl.cpp
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pcl.py
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.appveyor.yml
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.clang-format
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.clang-tidy
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.cmake-format.yaml
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.codespell-ignore-lines
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.gitattributes
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/CODEOWNERS
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/CONTRIBUTING.md
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/ISSUE_TEMPLATE/bug-report.yml
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/ISSUE_TEMPLATE/config.yml
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/dependabot.yml
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/labeler.yml
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/labeler_merged.yml
+[0.184s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/matchers/pylint.json
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/pull_request_template.md
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows/ci.yml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows/configure.yml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows/docs-link.yml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows/emscripten.yaml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows/format.yml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows/labeler.yml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows/nightlies.yml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows/pip.yml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows/upstream.yml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.gitignore
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.pre-commit-config.yaml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.readthedocs.yml
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/CMakeLists.txt
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/CMakePresets.json
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/LICENSE
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/README.rst
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/SECURITY.md
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/Doxyfile
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/Makefile
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/_static/css/custom.css
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/cast/chrono.rst
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/cast/custom.rst
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/cast/eigen.rst
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/cast/functional.rst
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/cast/index.rst
+[0.185s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/cast/overview.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/cast/stl.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/cast/strings.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/classes.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/deadlock.md
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/deprecated.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/embedding.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/exceptions.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/functions.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/misc.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/pycpp/index.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/pycpp/numpy.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/pycpp/object.rst
+[0.186s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/pycpp/utilities.rst
+[0.187s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/smart_ptrs.rst
+[0.187s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/basics.rst
+[0.187s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/benchmark.py
+[0.188s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/benchmark.rst
+[0.188s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/changelog.md
+[0.188s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/classes.rst
+[0.189s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/cmake/index.rst
+[0.189s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/compiling.rst
+[0.189s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/conf.py
+[0.189s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/faq.rst
+[0.190s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/index.rst
+[0.190s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/installing.rst
+[0.190s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/limitations.rst
+[0.191s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/pybind11-logo.png
+[0.191s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/pybind11_vs_boost_python1.png
+[0.191s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/pybind11_vs_boost_python1.svg
+[0.191s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/pybind11_vs_boost_python2.png
+[0.192s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/pybind11_vs_boost_python2.svg
+[0.192s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/reference.rst
+[0.192s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/release.rst
+[0.193s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/requirements.in
+[0.193s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/requirements.txt
+[0.193s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/upgrade.rst
+[0.194s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/attr.h
+[0.194s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/buffer_info.h
+[0.194s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/cast.h
+[0.195s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/chrono.h
+[0.195s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/common.h
+[0.195s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/complex.h
+[0.195s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/conduit/README.txt
+[0.195s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/conduit/pybind11_conduit_v1.h
+[0.196s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/conduit/pybind11_platform_abi_id.h
+[0.196s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/conduit/wrap_include_python_h.h
+[0.196s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/critical_section.h
+[0.196s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/class.h
+[0.196s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/common.h
+[0.197s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/cpp_conduit.h
+[0.197s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/descr.h
+[0.197s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/dynamic_raw_ptr_cast_if_possible.h
+[0.197s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/exception_translation.h
+[0.197s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/function_record_pyobject.h
+[0.197s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/init.h
+[0.198s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/internals.h
+[0.198s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/native_enum_data.h
+[0.198s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/pybind11_namespace_macros.h
+[0.198s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/struct_smart_holder.h
+[0.198s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/type_caster_base.h
+[0.198s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/typeid.h
+[0.198s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/using_smart_holder.h
+[0.198s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail/value_and_holder.h
+[0.198s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/eigen.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/eigen/common.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/eigen/matrix.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/eigen/tensor.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/embed.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/eval.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/functional.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/gil.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/gil_safe_call_once.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/gil_simple.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/iostream.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/native_enum.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/numpy.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/operators.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/options.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/pybind11.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/pytypes.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/stl.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/stl/filesystem.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/stl_bind.h
+[0.199s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/subinterpreter.h
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/trampoline_self_life_support.h
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/type_caster_pyobject_ptr.h
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/typing.h
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/warnings.h
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/noxfile.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/pybind11/__init__.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/pybind11/__main__.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/pybind11/_version.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/pybind11/commands.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/pybind11/py.typed
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/pybind11/setup_helpers.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/pyproject.toml
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/CMakeLists.txt
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/conftest.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/constructor_stats.h
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/cross_module_gil_utils.cpp
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/cross_module_interleaved_error_already_set.cpp
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/custom_exceptions.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/eigen_tensor_avoid_stl_array.cpp
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/env.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/exo_planet_c_api.cpp
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/exo_planet_pybind11.cpp
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/extra_python_package/pytest.ini
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/extra_python_package/test_files.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/extra_setuptools/pytest.ini
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/extra_setuptools/test_setuphelper.py
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/home_planet_very_lonely_traveler.cpp
+[0.200s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/local_bindings.h
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/mod_per_interpreter_gil.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/mod_shared_interpreter_gil.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/object.h
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/pure_cpp/CMakeLists.txt
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/pure_cpp/smart_holder_poc.h
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/pure_cpp/smart_holder_poc_test.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/pybind11_cross_module_tests.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/pybind11_tests.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/pybind11_tests.h
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/pyproject.toml
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/pytest.ini
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/requirements.txt
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_async.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_async.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_buffers.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_buffers.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_builtin_casters.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_builtin_casters.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_call_policies.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_call_policies.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_callbacks.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_callbacks.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_chrono.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_chrono.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_release_gil_before_calling_cpp_dtor.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_release_gil_before_calling_cpp_dtor.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_basic.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_basic.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_disowning.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_disowning.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_disowning_mi.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_disowning_mi.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_factory_constructors.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_factory_constructors.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_inheritance.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_inheritance.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_mi_thunks.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_mi_thunks.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_property.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_property.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_property_non_owning.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_property_non_owning.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_shared_ptr_copy_move.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_shared_ptr_copy_move.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_basic.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_basic.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_self_life_support.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_self_life_support.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_shared_from_this.cpp
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_shared_from_this.py
+[0.201s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_shared_ptr_cpp_arg.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_shared_ptr_cpp_arg.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_unique_ptr.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_trampoline_unique_ptr.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_unique_ptr_custom_deleter.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_unique_ptr_custom_deleter.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_unique_ptr_member.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_unique_ptr_member.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_virtual_py_cpp_mix.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_class_sh_virtual_py_cpp_mix.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/CMakeLists.txt
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/embed.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/installed_embed/CMakeLists.txt
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/installed_function/CMakeLists.txt
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/installed_target/CMakeLists.txt
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/main.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/subdirectory_embed/CMakeLists.txt
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/subdirectory_function/CMakeLists.txt
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/subdirectory_target/CMakeLists.txt
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/test.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_const_name.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_const_name.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_constants_and_functions.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_constants_and_functions.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_copy_move.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_copy_move.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cpp_conduit.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cpp_conduit.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cpp_conduit_traveler_bindings.h
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cpp_conduit_traveler_types.h
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_custom_type_casters.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_custom_type_casters.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_custom_type_setup.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_custom_type_setup.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_docs_advanced_cast_custom.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_docs_advanced_cast_custom.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_docstring_options.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_docstring_options.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_eigen_matrix.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_eigen_matrix.py
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_eigen_tensor.cpp
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_eigen_tensor.inl
+[0.202s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_eigen_tensor.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_embed/CMakeLists.txt
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_embed/catch.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_embed/external_module.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_embed/test_interpreter.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_embed/test_interpreter.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_embed/test_subinterpreter.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_embed/test_trampoline.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_enum.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_enum.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_eval.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_eval.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_eval_call.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_exceptions.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_exceptions.h
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_exceptions.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_factory_constructors.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_factory_constructors.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_gil_scoped.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_gil_scoped.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_iostream.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_iostream.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_kwargs_and_defaults.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_kwargs_and_defaults.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_local_bindings.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_local_bindings.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_methods_and_attributes.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_methods_and_attributes.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_modules.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_modules.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_multiple_inheritance.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_multiple_inheritance.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_multiple_interpreters.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_native_enum.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_native_enum.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_numpy_array.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_numpy_array.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_numpy_dtypes.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_numpy_dtypes.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_numpy_vectorize.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_numpy_vectorize.py
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_opaque_types.cpp
+[0.203s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_opaque_types.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_operator_overloading.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_operator_overloading.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_pickling.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_pickling.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_potentially_slicing_weak_ptr.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_potentially_slicing_weak_ptr.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_python_multiple_inheritance.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_python_multiple_inheritance.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_pytypes.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_pytypes.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_sequences_and_iterators.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_sequences_and_iterators.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_smart_ptr.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_smart_ptr.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_stl.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_stl.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_stl_binders.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_stl_binders.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_tagbased_polymorphic.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_tagbased_polymorphic.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_thread.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_thread.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_type_caster_pyobject_ptr.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_type_caster_pyobject_ptr.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_type_caster_std_function_specializations.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_type_caster_std_function_specializations.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_union.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_union.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_unnamed_namespace_a.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_unnamed_namespace_a.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_unnamed_namespace_b.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_unnamed_namespace_b.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_vector_unique_ptr_member.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_vector_unique_ptr_member.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_virtual_functions.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_virtual_functions.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_warnings.cpp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_warnings.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/valgrind-numpy-scipy.supp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/valgrind-python.supp
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/FindCatch.cmake
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/FindEigen3.cmake
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/FindPythonLibsNew.cmake
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/JoinPaths.cmake
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/check-style.sh
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/cmake_uninstall.cmake.in
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/codespell_ignore_lines_from_errors.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/libsize.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/make_changelog.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/make_global.py
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/pybind11.pc.in
+[0.204s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/pybind11Common.cmake
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/pybind11Config.cmake.in
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/pybind11GuessPythonExtSuffix.cmake
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/pybind11NewTools.cmake
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/pybind11Tools.cmake
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools/test-pybind11GuessPythonExtSuffix.cmake
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/ray_processor.cpp
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/ray_processor.h
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/nodes/__init__.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/nodes/dead_reckoning_node.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/nodes/kalman_node.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/nodes/mapping_2d_standalone_node.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/nodes/mapping_3d_standalone_node.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/nodes/slam_node.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/utils/__init__.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/utils/conversions.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/utils/fusion.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/utils/io.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/utils/profiler.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/utils/sonar.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/utils/topics.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/utils/visualization.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cfar.cpython-310-x86_64-linux-gnu.so
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/dda_traversal.cpython-310-x86_64-linux-gnu.so
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/octree_mapping.cpython-310-x86_64-linux-gnu.so
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/ray_processor.cpython-310-x86_64-linux-gnu.so
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pcl.so
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/config/dead_reckoning.yaml
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/config/factor_graph.yaml
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/config/feature.yaml
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/config/icp.yaml
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/config/localization.yaml
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/config/mapping.yaml
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/config/slam.yaml
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/config/sonar.yaml
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/launch/dead_reckoning.launch.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/launch/localization.launch.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/launch/mapping.launch.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/launch/mapping_2d_standalone.launch.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/launch/mapping_3d_standalone.launch.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/launch/slam.launch.py
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/rviz/stonefish_slam.rviz
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/ament_index/resource_index/package_run_dependencies/stonefish_slam
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/ament_index/resource_index/parent_prefix_path/stonefish_slam
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/environment/ament_prefix_path.sh
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/environment/ament_prefix_path.dsv
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/environment/path.sh
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/environment/path.dsv
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/local_setup.bash
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/local_setup.sh
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/local_setup.zsh
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/local_setup.dsv
+[0.205s] -- Symlinking: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/package.dsv
+[0.205s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/ament_index/resource_index/packages/stonefish_slam
+[0.206s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/cmake/stonefish_slamConfig.cmake
+[0.206s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/cmake/stonefish_slamConfig-version.cmake
+[0.206s] -- Up-to-date symlink: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/share/stonefish_slam/package.xml
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core'...
+[0.233s] Compiling '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/feature_extraction.py'...
+[0.233s] Compiling '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/mapping_3d.py'...
+[0.233s] Compiling '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/core/slam.py'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/ISSUE_TEMPLATE'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/matchers'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/.github/workflows'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/_static'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/_static/css'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/cast'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/advanced/pycpp'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/docs/cmake'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/conduit'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/detail'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/eigen'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/include/pybind11/stl'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/pybind11'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/extra_python_package'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/extra_setuptools'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/pure_cpp'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/installed_embed'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/installed_function'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/installed_target'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/subdirectory_embed'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/subdirectory_function'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_cmake_build/subdirectory_target'...
+[0.233s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tests/test_embed'...
+[0.234s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/cpp/pybind11/tools'...
+[0.234s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/nodes'...
+[0.234s] Compiling '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/nodes/mapping_2d_standalone_node.py'...
+[0.234s] Compiling '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/nodes/mapping_3d_standalone_node.py'...
+[0.234s] Listing '/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/local/lib/python3.10/dist-packages/stonefish_slam/utils'...
+[0.235s] -- Up-to-date: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/dead_reckoning_node
+[0.235s] -- Up-to-date: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/slam_node
+[0.235s] -- Up-to-date: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/kalman_node
+[0.235s] -- Installing: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/mapping_3d_standalone
+[0.235s] -- Installing: /workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/mapping_2d_standalone
+[0.236s] Invoked command in '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspace/colcon_ws/install/stonefish_trajectory_manager:/workspace/colcon_ws/install/stonefish_thruster_manager:/workspace/colcon_ws/install/stonefish_control_utils:/workspace/colcon_ws/install/stonefish_control:/opt/ros/humble /usr/bin/cmake --install /workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam

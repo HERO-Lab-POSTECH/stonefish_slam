@@ -1,0 +1,1 @@
+/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/nodes/mapping_3d_standalone_node.py

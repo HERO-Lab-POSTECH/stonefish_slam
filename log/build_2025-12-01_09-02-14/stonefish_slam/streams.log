@@ -1,0 +1,130 @@
+[0.005s] Invoking command in '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspace/colcon_ws/install/stonefish_trajectory_manager:/workspace/colcon_ws/install/stonefish_thruster_manager:/workspace/colcon_ws/install/stonefish_control_utils:/workspace/colcon_ws/install/stonefish_control:/opt/ros/humble /usr/bin/cmake /workspace/colcon_ws/src/stonefish_slam -DAMENT_CMAKE_SYMLINK_INSTALL=1 -DCMAKE_INSTALL_PREFIX=/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam
+[0.031s] -- The C compiler identification is GNU 11.4.0
+[0.061s] -- The CXX compiler identification is GNU 11.4.0
+[0.066s] -- Detecting C compiler ABI info
+[0.096s] -- Detecting C compiler ABI info - done
+[0.099s] -- Check for working C compiler: /usr/lib/ccache/cc - skipped
+[0.099s] -- Detecting C compile features
+[0.099s] -- Detecting C compile features - done
+[0.101s] -- Detecting CXX compiler ABI info
+[0.134s] -- Detecting CXX compiler ABI info - done
+[0.138s] -- Check for working CXX compiler: /usr/lib/ccache/c++ - skipped
+[0.138s] -- Detecting CXX compile features
+[0.138s] -- Detecting CXX compile features - done
+[0.140s] -- Found ament_cmake: 1.3.12 (/opt/ros/humble/share/ament_cmake/cmake)
+[0.327s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[0.360s] -- Override CMake install command with custom implementation using symlinks instead of copying resources
+[0.379s] -- Found rclcpp: 16.0.15 (/opt/ros/humble/share/rclcpp/cmake)
+[0.404s] -- Found rosidl_generator_c: 3.1.7 (/opt/ros/humble/share/rosidl_generator_c/cmake)
+[0.407s] -- Found rosidl_adapter: 3.1.7 (/opt/ros/humble/share/rosidl_adapter/cmake)
+[0.412s] -- Found rosidl_generator_cpp: 3.1.7 (/opt/ros/humble/share/rosidl_generator_cpp/cmake)
+[0.419s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[0.428s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[0.454s] -- Found rmw_implementation_cmake: 6.1.2 (/opt/ros/humble/share/rmw_implementation_cmake/cmake)
+[0.455s] -- Found rmw_fastrtps_cpp: 6.2.8 (/opt/ros/humble/share/rmw_fastrtps_cpp/cmake)
+[0.496s] -- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found version "3.0.2")  
+[0.514s] -- Found FastRTPS: /opt/ros/humble/include  
+[0.540s] -- Using RMW implementation 'rmw_fastrtps_cpp' as default
+[0.545s] -- Looking for pthread.h
+[0.574s] -- Looking for pthread.h - found
+[0.574s] -- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+[0.600s] -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+[0.600s] -- Found Threads: TRUE  
+[0.627s] -- Found rclpy: 3.3.17 (/opt/ros/humble/share/rclpy/cmake)
+[0.628s] -- Found sensor_msgs: 4.9.0 (/opt/ros/humble/share/sensor_msgs/cmake)
+[0.644s] -- Found nav_msgs: 4.9.0 (/opt/ros/humble/share/nav_msgs/cmake)
+[0.653s] -- Found visualization_msgs: 4.9.0 (/opt/ros/humble/share/visualization_msgs/cmake)
+[0.663s] -- Found tf2_ros: 0.25.16 (/opt/ros/humble/share/tf2_ros/cmake)
+[0.718s] -- Found tf2_geometry_msgs: 0.25.16 (/opt/ros/humble/share/tf2_geometry_msgs/cmake)
+[0.727s] -- Found eigen3_cmake_module: 0.1.1 (/opt/ros/humble/share/eigen3_cmake_module/cmake)
+[0.728s] -- Found Eigen3: TRUE (found version "3.4.0") 
+[0.728s] -- Ensuring Eigen3 include directory is part of orocos-kdl CMake target
+[0.754s] -- Performing Test HAS_FLTO
+[0.806s] -- Performing Test HAS_FLTO - Success
+[0.806s] -- Found pybind11: /usr/include (found version "2.9.1")
+[0.925s] -- Found OpenMP_C: -fopenmp (found version "4.5") 
+[0.956s] -- Found OpenMP_CXX: -fopenmp (found version "4.5") 
+[0.956s] -- Found OpenMP: TRUE (found version "4.5")  
+[0.975s] -- Found Boost: /usr/lib/x86_64-linux-gnu/cmake/Boost-1.74.0/BoostConfig.cmake (found version "1.74.0") found components: thread filesystem system program_options date_time 
+[0.980s] -- Found Boost: /usr/lib/x86_64-linux-gnu/cmake/Boost-1.74.0/BoostConfig.cmake (found version "1.74.0") found components: thread filesystem system program_options date_time chrono 
+[0.987s] -- Checking for module 'eigen3'
+[0.992s] --   Found eigen3, version 3.4.0
+[1.003s] -- Found Eigen: /usr/include/eigen3 (Required is at least version "3.1") 
+[1.003s] -- Eigen found (include: /usr/include/eigen3, version: 3.4.0)
+[1.020s] -- Checking for module 'flann'
+[1.028s] --   Found flann, version 1.9.1
+[1.042s] -- Found FLANN: /usr/lib/x86_64-linux-gnu/libflann_cpp.so  
+[1.042s] -- FLANN found (include: /usr/include, lib: /usr/lib/x86_64-linux-gnu/libflann_cpp.so)
+[1.043s] -- Found PCL_COMMON: /usr/lib/x86_64-linux-gnu/libpcl_common.so  
+[1.044s] -- Found PCL_KDTREE: /usr/lib/x86_64-linux-gnu/libpcl_kdtree.so  
+[1.044s] -- Found PCL_OCTREE: /usr/lib/x86_64-linux-gnu/libpcl_octree.so  
+[1.044s] -- Found PCL_SEARCH: /usr/lib/x86_64-linux-gnu/libpcl_search.so  
+[1.045s] -- Found PCL_SAMPLE_CONSENSUS: /usr/lib/x86_64-linux-gnu/libpcl_sample_consensus.so  
+[1.045s] -- Found PCL_FILTERS: /usr/lib/x86_64-linux-gnu/libpcl_filters.so  
+[1.397s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter Development Development.Module Development.Embed 
+[1.397s] -- CFAR module will be built with Python 3.10.12
+[1.429s] -- DDA Traversal module will be built with Python 3.10.12
+[1.460s] -- Octree Mapping: OpenMP enabled for parallel ray processing
+[1.460s] -- Octree Mapping module will be built with OctoMap and Python 3.10.12
+[1.492s] -- Ray Processor: OpenMP enabled for parallel bearing processing
+[1.492s] -- Ray Processor module will be built with Eigen, OctoMap and Python 3.10.12
+[1.492s] -- Building PCL module with libpointmatcher and PCL
+[1.523s] -- PCL module will be built with libpointmatcher and PCL 1.12.1
+[1.524s] -- Found ament_lint_auto: 0.12.14 (/opt/ros/humble/share/ament_lint_auto/cmake)
+[1.582s] -- Added test 'copyright' to check source files copyright and LICENSE
+[1.635s] -- Added test 'cppcheck' to perform static code analysis on C / C++ code
+[1.635s] -- Configured cppcheck include dirs: /workspace/colcon_ws/src/stonefish_slam/include;/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp
+[1.635s] -- Configured cppcheck exclude dirs and/or files: 
+[1.693s] -- Added test 'cpplint' to check C / C++ code against the Google style
+[1.693s] -- Configured cpplint exclude dirs and/or files: 
+[1.702s] -- Added test 'flake8' to check Python code syntax and style conventions
+[1.720s] -- Added test 'lint_cmake' to check CMake code style
+[1.729s] -- Added test 'pep257' to check Python code against some of the docstring style conventions in PEP 257
+[1.802s] -- Added test 'uncrustify' to check C / C++ code style
+[1.802s] -- Configured uncrustify additional arguments: 
+[1.813s] -- Added test 'xmllint' to check XML markup files
+[1.814s] -- Configuring done
+[1.825s] -- Generating done
+[1.828s] -- Build files have been written to: /workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam
+[1.835s] Invoked command in '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspace/colcon_ws/install/stonefish_trajectory_manager:/workspace/colcon_ws/install/stonefish_thruster_manager:/workspace/colcon_ws/install/stonefish_control_utils:/workspace/colcon_ws/install/stonefish_control:/opt/ros/humble /usr/bin/cmake /workspace/colcon_ws/src/stonefish_slam -DAMENT_CMAKE_SYMLINK_INSTALL=1 -DCMAKE_INSTALL_PREFIX=/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam
+[1.836s] Invoking command in '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspace/colcon_ws/install/stonefish_trajectory_manager:/workspace/colcon_ws/install/stonefish_thruster_manager:/workspace/colcon_ws/install/stonefish_control_utils:/workspace/colcon_ws/install/stonefish_control:/opt/ros/humble /usr/bin/cmake --build /workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam -- -j28 -l28
+[1.859s] failed to create symbolic link '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam/ament_cmake_python/stonefish_slam/stonefish_slam' because existing path cannot be removed: Is a directory
+[1.859s] [  8%] Building CXX object CMakeFiles/cfar.dir/stonefish_slam/cpp/cfar.cpp.o
+[1.859s] [ 16%] Building CXX object CMakeFiles/dda_traversal.dir/stonefish_slam/cpp/dda_traversal.cpp.o
+[1.859s] [ 25%] Building CXX object CMakeFiles/octree_mapping.dir/stonefish_slam/cpp/octree_mapping.cpp.o
+[1.859s] gmake[2]: *** [CMakeFiles/ament_cmake_python_symlink_stonefish_slam.dir/build.make:70: CMakeFiles/ament_cmake_python_symlink_stonefish_slam] Error 1
+[1.859s] gmake[1]: *** [CMakeFiles/Makefile2:151: CMakeFiles/ament_cmake_python_symlink_stonefish_slam.dir/all] Error 2
+[1.859s] gmake[1]: *** Waiting for unfinished jobs....
+[1.862s] [ 25%] Built target ament_cmake_python_symlink_stonefish_slam_setup
+[1.862s] [ 33%] Building CXX object CMakeFiles/octree_mapping_core.dir/stonefish_slam/cpp/octree_mapping.cpp.o
+[1.862s] [ 41%] Building CXX object CMakeFiles/pcl_module.dir/stonefish_slam/cpp/pcl.cpp.o
+[1.865s] /workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp: In function ‘MatrixXb os(const MatrixXf&, int, int, int, double)’:
+[1.865s] /workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp:99:13: warning: unused variable ‘leading_sum’ [-Wunused-variable]
+[1.865s]    99 |       float leading_sum = 0.0, lagging_sum = 0.0;
+[1.865s]       |             ^~~~~~~~~~~
+[1.866s] /workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp:99:32: warning: unused variable ‘lagging_sum’ [-Wunused-variable]
+[1.866s]    99 |       float leading_sum = 0.0, lagging_sum = 0.0;
+[1.866s]       |                                ^~~~~~~~~~~
+[1.866s] /workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp: In function ‘std::pair<Eigen::Matrix<unsigned char, -1, -1>, Eigen::Matrix<float, -1, -1> > os2(const MatrixXf&, int, int, int, double)’:
+[1.866s] /workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp:194:13: warning: unused variable ‘leading_sum’ [-Wunused-variable]
+[1.866s]   194 |       float leading_sum = 0.0, lagging_sum = 0.0;
+[1.866s]       |             ^~~~~~~~~~~
+[1.866s] /workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/cfar.cpp:194:32: warning: unused variable ‘lagging_sum’ [-Wunused-variable]
+[1.866s]   194 |       float leading_sum = 0.0, lagging_sum = 0.0;
+[1.866s]       |                                ^~~~~~~~~~~
+[1.870s] [ 58%] Linking CXX shared module dda_traversal.cpython-310-x86_64-linux-gnu.so
+[1.870s] [ 58%] Linking CXX shared module cfar.cpython-310-x86_64-linux-gnu.so
+[1.870s] [ 66%] Linking CXX shared module octree_mapping.cpython-310-x86_64-linux-gnu.so
+[1.873s] [ 75%] Linking CXX static library liboctree_mapping_core.a
+[1.889s] [ 75%] Built target octree_mapping_core
+[1.893s] [ 83%] Linking CXX shared module pcl.so
+[1.923s] lto-wrapper: warning: using serial compilation of 2 LTRANS jobs
+[1.944s] lto-wrapper: warning: using serial compilation of 3 LTRANS jobs
+[1.949s] lto-wrapper: warning: using serial compilation of 4 LTRANS jobs
+[2.138s] lto-wrapper: warning: using serial compilation of 5 LTRANS jobs
+[3.805s] [ 83%] Built target cfar
+[4.673s] [ 83%] Built target octree_mapping
+[4.691s] [ 83%] Built target dda_traversal
+[5.515s] [ 83%] Built target pcl_module
+[5.515s] gmake: *** [Makefile:146: all] Error 2
+[5.516s] Invoked command in '/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam' returned '2': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/workspace/colcon_ws/install/stonefish_trajectory_manager:/workspace/colcon_ws/install/stonefish_thruster_manager:/workspace/colcon_ws/install/stonefish_control_utils:/workspace/colcon_ws/install/stonefish_control:/opt/ros/humble /usr/bin/cmake --build /workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam -- -j28 -l28

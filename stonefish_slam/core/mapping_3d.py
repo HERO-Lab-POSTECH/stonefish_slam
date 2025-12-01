@@ -49,12 +49,12 @@ class SonarMapping3D:
 
         # Store parameters
         self.horizontal_fov = np.radians(config['horizontal_fov'])
-        self.vertical_aperture = np.radians(config['vertical_aperture'])
+        self.vertical_aperture = np.radians(config['vertical_fov'])
         self.max_range = config['max_range']
         self.min_range = config['min_range']
         self.intensity_threshold = config['intensity_threshold']
-        self.image_width = config['image_width']
-        self.image_height = config['image_height']
+        self.num_beams = config['num_beams']
+        self.num_bins = config['num_bins']
         self.voxel_resolution = config['voxel_resolution']
         self.min_probability = config['min_probability']
         self.max_frames = config['max_frames']
@@ -74,11 +74,11 @@ class SonarMapping3D:
         self.bearing_angles = np.linspace(
             -self.horizontal_fov/2,
             self.horizontal_fov/2,
-            self.image_width
+            self.num_beams
         )
 
         # Range resolution (bin size in meters)
-        self.range_resolution = (self.max_range - self.min_range) / self.image_height
+        self.range_resolution = (self.max_range - self.min_range) / self.num_bins
 
         # Get adaptive update settings from config
         self.adaptive_update = config['adaptive_update']
@@ -847,7 +847,7 @@ class SonarMapping3D:
                 bearing_bins
             )
 
-        if range_bins != self.image_height:
+        if range_bins != self.num_bins:
             # Update range resolution if needed
             self.range_resolution = (self.max_range - self.min_range) / range_bins
 

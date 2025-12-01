@@ -49,13 +49,15 @@ class FeatureExtraction:
         self.outlier_filter_min_points = 5
         self.skip = 5
 
-        # Stonefish FLS sonar parameters (from bluerov2.scn)
-        self.horizontal_fov = 130.0  # degrees
-        self.vertical_fov = 20.0  # degrees
-        self.num_beams = 512  # number of beams (columns)
-        self.num_bins = 500  # number of range bins (rows)
-        self.range_min = 0.5  # meters
-        self.range_max = 20.0  # meters
+        # Stonefish FLS sonar parameters (loaded from YAML)
+        self.horizontal_fov = None
+        self.vertical_fov = None
+        self.num_beams = None  # number of beams (columns)
+        self.num_bins = None  # number of range bins (rows)
+        self.range_min = None
+        self.range_max = None
+        self.sonar_tilt_deg = None
+        self.sonar_tilt_rad = None
 
         # Frame counter for skip
         self.frame_count = 0
@@ -106,8 +108,10 @@ class FeatureExtraction:
         self.num_bins = self.node.get_parameter('sonar.num_bins').get_parameter_value().integer_value
         self.range_min = self.node.get_parameter('sonar.min_range').get_parameter_value().double_value
         self.range_max = self.node.get_parameter('sonar.max_range').get_parameter_value().double_value
+        self.sonar_tilt_deg = self.node.get_parameter('sonar.sonar_tilt_deg').get_parameter_value().double_value
+        self.sonar_tilt_rad = np.radians(self.sonar_tilt_deg)
 
-        self.node.get_logger().info(f'FLS Parameters: {self.num_bins}x{self.num_beams}, FOV={self.horizontal_fov}°, Range={self.range_min}-{self.range_max}m')
+        self.node.get_logger().info(f'FLS Parameters: {self.num_bins}x{self.num_beams}, FOV={self.horizontal_fov}°, Range={self.range_min}-{self.range_max}m, Tilt={self.sonar_tilt_deg}°')
 
         # Configure CFAR
         self.configure()

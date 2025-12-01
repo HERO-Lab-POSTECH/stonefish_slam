@@ -11,9 +11,9 @@ slam_node:
     # ==================== Sonar Hardware ====================
     sonar:
       horizontal_fov: 130.0              # Horizontal field of view (degrees)
-      vertical_aperture: 20.0            # Vertical beam aperture (degrees)
-      image_width: 512                   # Number of bearings (horizontal beams)
-      image_height: 500                  # Number of range bins
+      vertical_fov: 20.0                 # Vertical beam aperture (degrees)
+      num_beams: 512                     # Number of bearings (horizontal beams)
+      num_bins: 500                      # Number of range bins
       min_range: 0.5                     # Minimum range (m)
       max_range: 30.0                    # Maximum range (m)
       sonar_position: [0.0, 0.0, 0.0]    # Position relative to base_link (FRD)

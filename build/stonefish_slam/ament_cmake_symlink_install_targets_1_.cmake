@@ -1,0 +1,1 @@
+ament_cmake_symlink_install_targets("TARGET_FILES" "/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam/dda_traversal.cpython-310-x86_64-linux-gnu.so" "TARGETS" "dda_traversal" "LIBRARY_DESTINATION" "local/lib/python3.10/dist-packages/stonefish_slam")

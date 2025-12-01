@@ -105,17 +105,13 @@ class SLAMNode(Node):
         self.declare_parameter('vehicle_name', 'bluerov2')
         # Note: sonar_image_topic is constructed from vehicle_name
         self.declare_parameter('sonar.horizontal_fov', 130.0)
-        self.declare_parameter('sonar.vertical_aperture', 20.0)
-        self.declare_parameter('sonar.image_width', 512)
-        self.declare_parameter('sonar.image_height', 500)
-        self.declare_parameter('sonar.min_range', 0.5)
-        self.declare_parameter('sonar.max_range', 40.0)
-        self.declare_parameter('sonar.sonar_position', [0.0, 0.0, 0.0])
-        self.declare_parameter('sonar.sonar_tilt_deg', 45.0)
-        # Legacy sonar parameters used by feature_extraction
         self.declare_parameter('sonar.vertical_fov', 20.0)
         self.declare_parameter('sonar.num_beams', 512)
         self.declare_parameter('sonar.num_bins', 500)
+        self.declare_parameter('sonar.min_range', 0.5)
+        self.declare_parameter('sonar.max_range', 30.0)
+        self.declare_parameter('sonar.sonar_position', [0.0, 0.0, 0.0])
+        self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
 
         # Feature extraction parameters (feature.yaml)
         self.declare_parameter('CFAR.Ntc', 20)
@@ -269,10 +265,10 @@ class SLAMNode(Node):
             sonar_max_range = self.get_parameter('sonar.max_range').value
             sonar_min_range = self.get_parameter('sonar.min_range').value
             sonar_horizontal_fov = self.get_parameter('sonar.horizontal_fov').value
-            sonar_vertical_fov = self.get_parameter('sonar.vertical_aperture').value
-            # Use image_width/height from sonar.yaml (corresponds to num_beams/num_bins)
-            sonar_num_bins = self.get_parameter('sonar.image_height').value
-            sonar_num_beams = self.get_parameter('sonar.image_width').value
+            sonar_vertical_fov = self.get_parameter('sonar.vertical_fov').value
+            # Get sonar dimensions from sonar.yaml
+            sonar_num_bins = self.get_parameter('sonar.num_bins').value
+            sonar_num_beams = self.get_parameter('sonar.num_beams').value
 
             # Set critical parameters manually (configure() requires ping message)
             self.localization.oculus.max_range = sonar_max_range
@@ -332,9 +328,9 @@ class SLAMNode(Node):
             'max_range': self.get_parameter('sonar.max_range').value,
             'min_range': self.get_parameter('sonar.min_range').value,
             'horizontal_fov': self.get_parameter('sonar.horizontal_fov').value,
-            'vertical_aperture': self.get_parameter('sonar.vertical_aperture').value,
-            'image_width': self.get_parameter('sonar.image_width').value,
-            'image_height': self.get_parameter('sonar.image_height').value,
+            'vertical_fov': self.get_parameter('sonar.vertical_fov').value,
+            'num_beams': self.get_parameter('sonar.num_beams').value,
+            'num_bins': self.get_parameter('sonar.num_bins').value,
             'sonar_position': self.get_parameter('sonar.sonar_position').value,
             'sonar_tilt_deg': self.get_parameter('sonar.sonar_tilt_deg').value,
         }
@@ -381,9 +377,9 @@ class SLAMNode(Node):
                 'max_range': sonar_config['max_range'],
                 'min_range': sonar_config['min_range'],
                 'horizontal_fov': sonar_config['horizontal_fov'],
-                'vertical_aperture': sonar_config['vertical_aperture'],
-                'image_width': sonar_config['image_width'],
-                'image_height': sonar_config['image_height'],
+                'vertical_fov': sonar_config['vertical_fov'],
+                'num_beams': sonar_config['num_beams'],
+                'num_bins': sonar_config['num_bins'],
                 'sonar_position': sonar_config['sonar_position'],
                 'sonar_tilt_deg': sonar_config['sonar_tilt_deg'],
                 'intensity_threshold': self.intensity_threshold,
