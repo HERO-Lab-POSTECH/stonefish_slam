@@ -1207,6 +1207,10 @@ class SLAMNode(Node):
             ret2.inserted = True
         else:
             # Fall back to odometry
+            self.get_logger().warn(
+                f"[SSM] ICP failed ({ret2.status.description}), using odometry instead. "
+                f"DR delta: tx={ret.initial_transform.x():.2f}m, ty={ret.initial_transform.y():.2f}m, rot={np.degrees(ret.initial_transform.theta()):.1f}deg"
+            )
             self.fg.add_odometry_factor(keyframe)
 
     def add_nonsequential_scan_matching(self) -> bool:
