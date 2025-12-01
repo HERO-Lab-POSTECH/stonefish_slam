@@ -442,8 +442,11 @@ class FFTLocalizer:
         row_offset, col_offset, peak_value = self.detect_peak(pcm)
 
         # Convert column offset to rotation angle
-        # Positive col_offset = robot rotated CW
-        rotation_deg = col_offset * np.rad2deg(self.oculus.angular_resolution)
+        # Phase correlation: col_offset > 0 = image2 shifts right = features moved left
+        # Robot rotates CW → world rotates CCW → features move left (negative col_offset)
+        # Therefore: col_offset > 0 = robot rotated CCW (yaw decrease)
+        # NED: yaw increase = CW, so rotation = -col_offset
+        rotation_deg = -col_offset * np.rad2deg(self.oculus.angular_resolution)
 
         if self.verbose:
             print(f"Rotation: {rotation_deg:.2f}° (peak={peak_value:.4f})")
