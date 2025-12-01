@@ -10,6 +10,7 @@ Completely independent module - no ROS2 or ICP dependencies.
 
 import numpy as np
 from scipy import ndimage
+from scipy.interpolate import interp1d
 from typing import Tuple, Dict, Any, Optional
 import warnings
 
@@ -67,10 +68,8 @@ class FFTLocalizer:
         # Maximum expected rotation for padding calculation
         self.max_expected_rotation = max_expected_rotation
 
-        # Pre-computed mapping tables for polar to Cartesian conversion
-        self.map_x = None
-        self.map_y = None
-        self.valid_mask = None
+        # Cache for polar_to_cartesian conversion (performance optimization)
+        self.p2c_cache = None
 
     def apply_range_min_mask(self, img_polar: np.ndarray) -> np.ndarray:
         """
@@ -141,84 +140,112 @@ class FFTLocalizer:
 
     def polar_to_cartesian(self, polar_image: np.ndarray) -> np.ndarray:
         """
-        Convert polar sonar image to fan-shaped Cartesian image.
-        Uses cv2.remap for efficient conversion with pre-computed mapping tables.
+        Convert Stonefish FLS polar image to cartesian coordinates
+        Based on Oculus sonar polar-to-cartesian conversion methodology
 
-        Args:
-            polar_image: Input in polar coordinates (range × angle)
+        Reference: Oculus SDK and similar FLS processing pipelines
 
-        Returns:
-            Fan-shaped Cartesian image
+        Coordinate System (ROS REP-103 convention):
+            - X-axis: forward (range direction, 0 to range_max)
+            - Y-axis: lateral/port-starboard (negative=left/port, positive=right/starboard)
+            - Z-axis: up (not used for 2D FLS)
+            - bearing angle: measured from X-axis, counterclockwise positive
+
+        Input: polar_image (num_bins × num_beams)
+            - Rows: range bins (row=0 → range_max FAR, row=max → range_min NEAR)
+            - Cols: bearing bins (col=0 → -FOV/2 left, col=max → +FOV/2 right)
+
+        Output: cartesian image with proper x,y coordinates
+            - X: forward (range direction)
+            - Y: lateral (left-right direction)
         """
         import cv2
-        from scipy.interpolate import interp1d
 
-        # Initialize mapping if not done yet
-        if not hasattr(self, 'map_x') or self.map_x is None:
-            polar_height, polar_width = polar_image.shape
+        rows = polar_image.shape[0]  # num_bins
+        cols = polar_image.shape[1]  # num_beams
 
-            # Calculate Cartesian dimensions
-            cartesian_height = polar_height
-
-            # Width = 2 * height * sin(FOV/2)
-            fov_rad = self.oculus.horizontal_fov
-            cartesian_width = int(2 * polar_height * np.sin(fov_rad / 2))
-
+        # Build or use cached transformation maps (performance optimization)
+        if self.p2c_cache is None:
             if self.verbose:
-                print(f"Polar to Cartesian: {polar_image.shape} -> ({cartesian_height}, {cartesian_width})")
+                print("Building polar-to-cartesian transformation maps (one-time setup)...")
 
-            # Create mesh grid
-            XX, YY = np.meshgrid(range(cartesian_width), range(cartesian_height))
+            # Calculate range resolution
+            range_resolution = (self.oculus.max_range - self.range_min) / rows
 
-            # Convert to normalized coordinates (origin at top center for Stonefish)
-            x_norm = YY / cartesian_height  # 0 to 1 from top to bottom (far to near for Stonefish)
-            y_norm = (XX - cartesian_width / 2.0) / cartesian_height  # Centered
+            # Maximum lateral extent based on FOV
+            horizontal_fov_deg = np.rad2deg(self.oculus.horizontal_fov)
+            max_lateral = self.oculus.max_range * np.sin(np.radians(horizontal_fov_deg / 2.0))
 
-            # Convert to polar coordinates
-            r_norm = np.sqrt(x_norm**2 + y_norm**2)  # Normalized range
-            b = np.arctan2(y_norm, x_norm)  # Bearing angle
+            # Cartesian image dimensions (same resolution as range)
+            cart_width = int(np.ceil(2 * max_lateral / range_resolution))
+            cart_height = rows
 
-            # Create bearing interpolation function
-            bearings = np.linspace(-fov_rad/2, fov_rad/2, polar_width)
+            # Create bearing angle array for each column
+            # col=0 → -FOV/2 (left), col=num_beams-1 → +FOV/2 (right)
+            bearing_angles = np.radians(
+                np.linspace(-horizontal_fov_deg / 2.0,
+                           horizontal_fov_deg / 2.0,
+                           cols)
+            )
+
+            # Create interpolation function: bearing → column index
             f_bearings = interp1d(
-                bearings,
-                range(polar_width),
+                bearing_angles,
+                range(cols),
                 kind='linear',
                 bounds_error=False,
                 fill_value=-1,
                 assume_sorted=True
             )
 
-            # Map to polar image coordinates
-            self.map_y = r_norm * (polar_height - 1)
-            self.map_x = f_bearings(b)
+            # Build cartesian meshgrid (pixel indices)
+            XX, YY = np.meshgrid(range(cart_width), range(cart_height))
 
-            # Clip to valid range
-            self.map_y = np.clip(self.map_y, -1, polar_height - 1)
+            # Convert pixel indices to metric coordinates
+            # IMPORTANT: Stonefish FLS row convention is OPPOSITE of Oculus
+            # Stonefish: row=0 (top) is FAR range, row=max (bottom) is NEAR range
+            # Cartesian: YY=0 (top) should be FAR, YY=max (bottom) should be NEAR
+            x_meters = self.oculus.max_range - range_resolution * YY
 
-            # Create valid region mask
-            angle_valid = np.abs(b) <= fov_rad/2
-            range_valid = (r_norm >= 0) & (r_norm <= 1)
-            forward_valid = x_norm >= 0  # Forward looking only
+            # Y: lateral distance - centered at 0
+            y_meters = range_resolution * (-cart_width / 2.0 + XX + 0.5)
 
-            self.valid_mask = angle_valid & range_valid & forward_valid
+            # Convert cartesian (x, y) to polar (r, bearing)
+            r_polar = np.sqrt(np.square(x_meters) + np.square(y_meters))
+            bearing_polar = np.arctan2(y_meters, x_meters)
 
-            # Set invalid regions to -1
-            self.map_x[~self.valid_mask] = -1
-            self.map_y[~self.valid_mask] = -1
+            # Map polar coordinates to image indices
+            # Range to row index (distance in meters to pixel row)
+            # STONEFISH: row=0 is FAR (range_max), row=rows-1 is NEAR (range_min)
+            map_y = np.asarray((self.oculus.max_range - r_polar) / range_resolution, dtype=np.float32)
 
-            # Convert to float32 for cv2.remap
-            self.map_x = self.map_x.astype(np.float32)
-            self.map_y = self.map_y.astype(np.float32)
+            # Bearing to column index (using interpolation)
+            map_x = np.asarray(f_bearings(bearing_polar), dtype=np.float32)
 
-        # Apply remapping
-        cartesian_image = cv2.remap(polar_image, self.map_x, self.map_y,
-                                    interpolation=cv2.INTER_LINEAR,
-                                    borderMode=cv2.BORDER_CONSTANT,
-                                    borderValue=0)
+            # Create valid region mask (where both map_x and map_y are valid)
+            valid_mask = (map_x >= 0) & (map_x < cols - 1) & (map_y >= 0) & (map_y < rows - 1)
 
-        # Zero out regions outside FOV
-        cartesian_image[~self.valid_mask] = 0
+            # Cache the transformation maps
+            self.p2c_cache = {
+                'map_x': map_x,
+                'map_y': map_y,
+                'cart_height': cart_height,
+                'cart_width': cart_width,
+                'valid_mask': valid_mask.astype(np.uint8) * 255  # Cache valid region mask
+            }
+
+            if self.verbose:
+                print(f"Transformation maps built: {cart_height}x{cart_width} cartesian image")
+
+        # Use cached maps for fast remapping
+        cartesian_image = cv2.remap(
+            polar_image,
+            self.p2c_cache['map_x'],
+            self.p2c_cache['map_y'],
+            cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0  # Black border instead of white
+        )
 
         return cartesian_image
 
