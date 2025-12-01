@@ -10,8 +10,8 @@ slam_node:
   ros__parameters:
     # ==================== Module Enable Flags ====================
     enable_2d_mapping: false
-    enable_3d_mapping: true
+    enable_3d_mapping: false
 
     # Localization modules
-    ssm.enable: false   # Sequential Scan Matching (for localization)
-    nssm.enable: false  # Non-Sequential Scan Matching (loop closure)
+    ssm.enable: true   # Sequential Scan Matching (for localization)
+    nssm.enable: true  # Non-Sequential Scan Matching (loop closure)

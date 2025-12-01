@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **FFT 기반 로컬라이제이션 모듈 추가** (2025-12-01)
+  - 독립적인 sonar image registration 모듈 (`core/localization_fft.py`)
+  - Polar domain phase correlation을 이용한 회전(rotation) 추정
+  - Cartesian domain phase correlation을 이용한 병진(translation) 추정
+  - ICP 코드 수정 없이 완전 독립 모듈로 구현
+  - OculusProperty 통합으로 파라미터 일관성 유지
+  - 입력: 두 개의 polar sonar image
+  - 출력: `{'rotation': degrees, 'translation': [tx, ty], 'success': bool}`
+  - **파일**: `stonefish_slam/core/localization_fft.py`
+
 - **3가지 SLAM 운영 모드 지원** (2025-11-30)
   - `slam`: 풀 SLAM 모드 (SSM + NSSM + 3D/2D Mapping)
   - `localization-only`: 로컬라이제이션 전용 (SSM만, 루프 클로저/맵핑 제외)
