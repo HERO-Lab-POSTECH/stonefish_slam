@@ -169,8 +169,8 @@ class FFTLocalizer:
             # Create mesh grid
             XX, YY = np.meshgrid(range(cartesian_width), range(cartesian_height))
 
-            # Convert to normalized coordinates (origin at bottom center)
-            x_norm = (cartesian_height - YY) / cartesian_height  # 0 to 1 from bottom to top
+            # Convert to normalized coordinates (origin at top center for Stonefish)
+            x_norm = YY / cartesian_height  # 0 to 1 from top to bottom (far to near for Stonefish)
             y_norm = (XX - cartesian_width / 2.0) / cartesian_height  # Centered
 
             # Convert to polar coordinates
@@ -491,8 +491,8 @@ class FFTLocalizer:
         img1_padded = self._apply_cartesian_padding(img1_masked, pad_size)
         img2_padded = self._apply_cartesian_padding(img2_masked, pad_size)
 
-        # Calculate rotation center (bottom center, accounting for padding)
-        center_row_padded = h - 1 + pad_size
+        # Calculate rotation center (top center for Stonefish, accounting for padding)
+        center_row_padded = pad_size
         center_col_padded = w // 2 + pad_size
 
         # Apply rotation compensation
@@ -514,9 +514,9 @@ class FFTLocalizer:
         row_offset, col_offset, peak_value = self.detect_peak(pcm)
 
         # Convert to meters (NED coordinate frame)
-        # Negative row_offset = forward motion
+        # For Stonefish (top origin): positive row_offset = forward motion
         # col_offset = left/right motion
-        tx = -row_offset * self.oculus.range_resolution  # Forward (meters)
+        tx = row_offset * self.oculus.range_resolution  # Forward (meters)
         ty = col_offset * self.oculus.range_resolution   # Left (meters)
 
         if self.verbose:
