@@ -1284,7 +1284,7 @@ class SLAMNode(Node):
         else:
             # Fall back to odometry
             self.get_logger().warn(
-                f"[SSM] ICP failed ({ret2.status.description}), using odometry instead. "
+                f"[SSM] Localization failed ({ret2.status.description}), using odometry instead. "
                 f"DR delta: tx={ret2.initial_transform.x():.2f}m, ty={ret2.initial_transform.y():.2f}m, rot={np.degrees(ret2.initial_transform.theta()):.1f}deg"
             )
             self.fg.add_odometry_factor(keyframe)
