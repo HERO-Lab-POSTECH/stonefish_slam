@@ -23,6 +23,7 @@ from stonefish_slam.core.types import Keyframe, STATUS, ICPResult
 from stonefish_slam.core.mapping_2d import SonarMapping2D
 from stonefish_slam.core.mapping_3d import SonarMapping3D
 from stonefish_slam.core.feature_extraction import FeatureExtraction
+from stonefish_slam.core.localization_fft import FFTLocalizer
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import *
 
@@ -108,8 +109,8 @@ class SLAMNode(Node):
         self.declare_parameter('sonar.vertical_fov', 20.0)
         self.declare_parameter('sonar.num_beams', 512)
         self.declare_parameter('sonar.num_bins', 500)
-        self.declare_parameter('sonar.min_range', 0.5)
-        self.declare_parameter('sonar.max_range', 30.0)
+        self.declare_parameter('sonar.range_min', 0.5)
+        self.declare_parameter('sonar.range_max', 30.0)
         self.declare_parameter('sonar.sonar_position', [0.0, 0.0, 0.0])
         self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
 
@@ -181,6 +182,10 @@ class SLAMNode(Node):
         # SLAM integration parameters (slam.yaml)
         self.declare_parameter('enable_2d_mapping', False)
         self.declare_parameter('enable_3d_mapping', True)
+
+        # FFT localization parameters
+        self.declare_parameter('fft_localization.enable', False)
+        self.declare_parameter('fft_localization.range_min', 0.5)
 
         # Initialize SLAM modules (composition instead of inheritance)
         self.fg = FactorGraph()
@@ -262,8 +267,8 @@ class SLAMNode(Node):
             # Configure oculus object with parameters from sonar.yaml
             # Note: In original code, this was done via oculus.configure(ping) message callback
             # Now we use ROS2 parameters instead
-            sonar_max_range = self.get_parameter('sonar.max_range').value
-            sonar_min_range = self.get_parameter('sonar.min_range').value
+            sonar_range_max = self.get_parameter('sonar.range_max').value
+            sonar_range_min = self.get_parameter('sonar.range_min').value
             sonar_horizontal_fov = self.get_parameter('sonar.horizontal_fov').value
             sonar_vertical_fov = self.get_parameter('sonar.vertical_fov').value
             # Get sonar dimensions from sonar.yaml
@@ -271,15 +276,15 @@ class SLAMNode(Node):
             sonar_num_beams = self.get_parameter('sonar.num_beams').value
 
             # Set critical parameters manually (configure() requires ping message)
-            self.localization.oculus.max_range = sonar_max_range
-            self.localization.oculus.range_resolution = sonar_max_range / sonar_num_bins
+            self.localization.oculus.range_max = sonar_range_max
+            self.localization.oculus.range_resolution = sonar_range_max / sonar_num_bins
             self.localization.oculus.num_ranges = sonar_num_bins
-            self.localization.oculus.horizontal_aperture = np.radians(sonar_horizontal_fov)
-            self.localization.oculus.vertical_aperture = np.radians(sonar_vertical_fov)
-            self.localization.oculus.num_bearings = sonar_num_beams
+            self.localization.oculus.horizontal_fov = np.radians(sonar_horizontal_fov)
+            self.localization.oculus.vertical_fov = np.radians(sonar_vertical_fov)
+            self.localization.oculus.num_beams = sonar_num_beams
             self.localization.oculus.angular_resolution = np.radians(sonar_horizontal_fov) / sonar_num_beams
 
-            self.get_logger().info(f"Sonar configured: max_range={sonar_max_range}m, "
+            self.get_logger().info(f"Sonar configured: range_max={sonar_range_max}m, "
                                    f"resolution={self.localization.oculus.range_resolution:.3f}m, "
                                    f"FOV={sonar_horizontal_fov}deg")
 
@@ -325,8 +330,8 @@ class SLAMNode(Node):
 
         # Build sonar config dict (unified for 2D and 3D)
         sonar_config = {
-            'max_range': self.get_parameter('sonar.max_range').value,
-            'min_range': self.get_parameter('sonar.min_range').value,
+            'range_max': self.get_parameter('sonar.range_max').value,
+            'range_min': self.get_parameter('sonar.range_min').value,
             'horizontal_fov': self.get_parameter('sonar.horizontal_fov').value,
             'vertical_fov': self.get_parameter('sonar.vertical_fov').value,
             'num_beams': self.get_parameter('sonar.num_beams').value,
@@ -347,20 +352,20 @@ class SLAMNode(Node):
             self.mapper = SonarMapping2D(
                 map_resolution=map_resolution,
                 map_size=map_size,
-                sonar_range=sonar_config['max_range'],
+                sonar_range=sonar_config['range_max'],
                 sonar_fov=sonar_config['horizontal_fov'],
                 sonar_tilt_deg=sonar_config['sonar_tilt_deg'],
                 intensity_threshold=intensity_threshold
             )
             self.get_logger().info(
                 f"2D Mapping enabled: resolution={map_resolution}m/px, "
-                f"max_range={sonar_config['max_range']}m, tilt={sonar_config['sonar_tilt_deg']}°, "
+                f"range_max={sonar_config['range_max']}m, tilt={sonar_config['sonar_tilt_deg']}°, "
                 f"intensity_threshold={intensity_threshold}"
             )
 
         # Store sonar parameters for compatibility
         self.sonar_fov = sonar_config['horizontal_fov']
-        self.sonar_range = sonar_config['max_range']
+        self.sonar_range = sonar_config['range_max']
         self.intensity_threshold = self.get_parameter('mapping_2d.intensity_threshold').value
 
         # Initialize 3D mapper
@@ -374,8 +379,8 @@ class SLAMNode(Node):
             # Build 3D mapping config dict (includes sonar + 3D-specific params)
             mapping_3d_config = {
                 # Sonar parameters (shared from sonar_config)
-                'max_range': sonar_config['max_range'],
-                'min_range': sonar_config['min_range'],
+                'range_max': sonar_config['range_max'],
+                'range_min': sonar_config['range_min'],
                 'horizontal_fov': sonar_config['horizontal_fov'],
                 'vertical_fov': sonar_config['vertical_fov'],
                 'num_beams': sonar_config['num_beams'],
@@ -411,8 +416,29 @@ class SLAMNode(Node):
             self.mapper_3d = SonarMapping3D(config=mapping_3d_config)
             self.get_logger().info(
                 f"3D Mapper initialized: resolution={mapping_3d_config['voxel_resolution']}m, "
-                f"max_range={mapping_3d_config['max_range']}m, tilt={mapping_3d_config['sonar_tilt_deg']}°"
+                f"range_max={mapping_3d_config['range_max']}m, tilt={mapping_3d_config['sonar_tilt_deg']}°"
             )
+
+        # FFT localizer initialization (optional)
+        self.fft_enable = self.get_parameter('fft_localization.enable').value
+        if self.fft_enable:
+            if self.localization is not None:
+                fft_range_min = self.get_parameter('fft_localization.range_min').value
+                self.fft_localizer = FFTLocalizer(
+                    oculus=self.localization.oculus,
+                    range_min=fft_range_min
+                )
+                self.get_logger().info("FFT localization enabled")
+
+                # Previous polar sonar image storage
+                self.prev_polar_sonar = None
+            else:
+                self.get_logger().warn("FFT localization disabled: requires localization module (not available in mapping-only mode)")
+                self.fft_enable = False
+                self.fft_localizer = None
+        else:
+            self.fft_localizer = None
+            self.get_logger().info("FFT localization disabled")
 
         # max delay between an incoming point cloud and dead reckoning
         self.feature_odom_sync_max_delay = 0.5
@@ -567,11 +593,45 @@ class SLAMNode(Node):
             self.get_logger().error(f"Feature extraction failed: {e}")
             return
 
-        # 2. Convert sonar image for mapping
+        # 2. Convert sonar image for mapping and FFT localization
         sonar_image = None
-        if self.enable_2d_mapping or self.enable_3d_mapping:
+        polar_sonar = None
+        if self.enable_2d_mapping or self.enable_3d_mapping or self.fft_enable:
             try:
                 sonar_image = self.bridge.imgmsg_to_cv2(sonar_msg, desired_encoding="mono8")
+
+                # FFT localization (polar sonar image 필요)
+                if self.fft_enable:
+                    # Polar image는 sonar_msg.data를 직접 변환
+                    polar_sonar = np.frombuffer(sonar_msg.data, dtype=np.uint8).reshape(
+                        sonar_msg.height, sonar_msg.width
+                    )
+
+                    # FFT 실행 (이전 프레임과 비교)
+                    if self.prev_polar_sonar is not None:
+                        try:
+                            # 깊은 복사로 ICP와 완전 분리
+                            polar_prev = self.prev_polar_sonar.copy()
+                            polar_curr = polar_sonar.copy()
+
+                            fft_result = self.fft_localizer.estimate_transform(polar_prev, polar_curr)
+
+                            if fft_result['success']:
+                                self.get_logger().info(
+                                    f"FFT: rotation={fft_result['rotation']:.2f}deg, "
+                                    f"translation=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m",
+                                    throttle_duration_sec=1.0
+                                )
+                                # TODO: FFT 결과를 어디에 저장/사용할지는 추후 결정
+                            else:
+                                self.get_logger().warn("FFT localization failed", throttle_duration_sec=2.0)
+
+                        except Exception as e:
+                            self.get_logger().error(f"FFT localization error: {e}")
+
+                    # 현재 polar image 저장 (다음 프레임용)
+                    self.prev_polar_sonar = polar_sonar.copy()
+
             except Exception as e:
                 self.get_logger().error(f"Failed to convert sonar image: {e}")
 

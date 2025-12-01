@@ -26,7 +26,7 @@ class FFTLocalizer:
 
     def __init__(self,
                  oculus: OculusProperty,
-                 min_range: float = 0.5,
+                 range_min: float = 0.5,
                  rot_erosion_iterations: int = 1,
                  rot_gaussian_sigma: float = 4.0,
                  rot_gaussian_truncate: float = 2.0,
@@ -40,7 +40,7 @@ class FFTLocalizer:
 
         Args:
             oculus: OculusProperty instance (sonar configuration)
-            min_range: Minimum reliable range in meters (default: 0.5)
+            range_min: Minimum reliable range in meters (default: 0.5)
             rot_erosion_iterations: Erosion iterations for rotation mask
             rot_gaussian_sigma: Gaussian sigma for rotation mask smoothing
             rot_gaussian_truncate: Gaussian truncate factor for rotation mask
@@ -51,7 +51,7 @@ class FFTLocalizer:
             verbose: Enable debug output
         """
         self.oculus = oculus
-        self.min_range = min_range
+        self.range_min = range_min
         self.verbose = verbose
 
         # Rotation erosion mask parameters
@@ -75,7 +75,7 @@ class FFTLocalizer:
     def apply_range_min_mask(self, img_polar: np.ndarray) -> np.ndarray:
         """
         Apply minimum range mask to polar sonar image.
-        Masks out unreliable near-field data below min_range.
+        Masks out unreliable near-field data below range_min.
 
         Args:
             img_polar: Polar sonar image (range × angle)
@@ -83,14 +83,14 @@ class FFTLocalizer:
         Returns:
             Masked image with near-field data set to zero
         """
-        if self.min_range <= 0:
+        if self.range_min <= 0:
             return img_polar
 
         masked_img = img_polar.copy()
         range_bins, _ = img_polar.shape
 
         # Calculate number of range bins to mask
-        range_min_bins = int(self.min_range / self.oculus.max_range * range_bins)
+        range_min_bins = int(self.range_min / self.oculus.range_max * range_bins)
 
         # Mask the top rows (closest range data)
         if range_min_bins > 0:
@@ -160,7 +160,7 @@ class FFTLocalizer:
             cartesian_height = polar_height
 
             # Width = 2 * height * sin(FOV/2)
-            fov_rad = self.oculus.horizontal_aperture
+            fov_rad = self.oculus.horizontal_fov
             cartesian_width = int(2 * polar_height * np.sin(fov_rad / 2))
 
             if self.verbose:

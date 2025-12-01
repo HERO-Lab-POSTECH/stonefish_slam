@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **FFT 기반 로컬라이제이션 SLAM 노드 통합** (2025-12-01)
+  - FFTLocalizer를 SLAM_callback_integrated에 통합
+  - Polar sonar image로부터 rotation/translation 추정
+  - `fft_localization.enable`, `fft_localization.range_min` 파라미터 추가
+  - ICP 코드 경로와 완전 독립적 (데이터 경로 분리, `.copy()` 사용)
+  - 기본값: `enable=false` (기존 ICP 기반 SLAM 동작 보장)
+  - 영향 파일: `stonefish_slam/core/slam.py`, `config/slam.yaml`
+
+### Changed
+
+- **FFT localization을 SLAM callback에 통합** (2025-12-01)
+  - FFT 실행이 SLAM_callback_integrated에서 병렬로 수행됨
+  - Polar sonar image 변환 및 FFT 기반 위치 추정 실행
+  - ICP와 완전 분리된 데이터 경로 (`.copy()` 사용)
+  - 회전/병진 추정 결과는 로그 출력 (향후 factor graph 통합 가능)
+  - 파일: `stonefish_slam/core/slam.py`
+
 ### Fixed
 
 - **slam.launch.py가 slam.yaml 파라미터 오버라이드하는 문제 수정** (2025-12-01)
@@ -28,9 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Sonar 파라미터 초기화 누락 수정** (2025-12-01)
-  - `localization.oculus.max_range` 초기화 누락으로 NSSM 계산 시 TypeError 발생
+  - `localization.oculus.range_max` 초기화 누락으로 NSSM 계산 시 TypeError 발생
   - `init_node()`에서 sonar.yaml 파라미터를 읽어 OculusProperty 객체 설정
-  - 설정 항목: max_range, range_resolution, num_ranges, horizontal_aperture, vertical_aperture, num_bearings, angular_resolution
+  - 설정 항목: range_max, range_resolution, num_ranges, horizontal_fov, vertical_fov, num_beams, angular_resolution
   - 리팩토링 이전에는 ping 메시지로 자동 설정되었으나, 현재는 ROS2 파라미터 기반으로 수동 설정 필요
   - **파일**: `stonefish_slam/core/slam.py:264-288`
 
@@ -161,7 +180,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Shadow Validation Bearing Width 수정** (2025-11-26)
   - **문제**: 그림자 영역이 다시 관측해도 채워지지 않음 (바닥에 구멍)
   - **원인**: `bearing_half_width`가 0.176° (horizontal resolution)으로 설정되어 FLS vertical aperture (±10°)의 1%만 커버
-  - **해결**: `bearing_half_width = vertical_aperture / 2 = 10°`로 변경
+  - **해결**: `bearing_half_width = vertical_fov / 2 = 10°`로 변경
   - **결과**:
     - Shadow validation skip rate: 2% → 15.86% (정상 범위)
     - 바닥 구멍 문제 해결
@@ -288,7 +307,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - 결과: Vertical 방향 떨어진 occupied voxel이 shadow로 오판되어 skip
   - **근본 원인**:
     - `_voxel_to_sonar_coords()`: `range_m = sqrt(x^2 + y^2 + z^2)` (3D range)
-    - `_compute_first_hit_map()`: `range = max_range - r_idx * resolution` (horizontal range)
+    - `_compute_first_hit_map()`: `range = range_max - r_idx * resolution` (horizontal range)
     - Range 계산 방식 불일치로 shadow 검증 기준 다름
   - **수정 사항** (`ray_processor.cpp`):
     - Line 416-417: 3D range → horizontal range로 변경
@@ -324,14 +343,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - 반사가 없는 ray (first_hit_idx < 0)는 맵 업데이트하지 않음
     - 빈 공간 정보 누락으로 occupancy map 품질 저하
   - **근본 원인**:
-    - intensity_profile은 0~max_range 측정 결과이므로 반사 없음 = free space 확실
+    - intensity_profile은 0~range_max 측정 결과이므로 반사 없음 = free space 확실
     - No-hit 처리를 생략하여 unknown 상태로 유지되는 논리적 오류
   - **수정 사항** (`ray_processor.cpp`):
     - `process_sonar_ray()`: first_hit_idx < 0일 때 -1 대신 len(intensity_profile) 사용
     - 반사 없는 ray도 전체 range를 free space로 업데이트
     - Log-odds 계산에 포함
   - **효과**:
-    - No-hit ray가 0~max_range를 올바른 free space로 분류
+    - No-hit ray가 0~range_max를 올바른 free space로 분류
     - 더 정확한 occupancy map 생성
     - 맵의 신뢰도 향상
   - **파일**: `/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/ray_processor.cpp`
@@ -362,7 +381,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - 반사가 없는 ray (first_hit_idx < 0)는 맵 업데이트를 하지 않음
     - 빈 공간에 대한 정보가 누락되어 carving 성능 저하
   - **수정 사항** (`ray_processor.cpp`):
-    - Line 260-275: No hit일 때 `range_to_first_hit = config_.max_range` 설정
+    - Line 260-275: No hit일 때 `range_to_first_hit = config_.range_max` 설정
     - Free space 처리 if문 제거 (항상 실행되도록 변경)
     - Occupied 처리는 `first_hit_idx >= 0`일 때만 실행
   - **효과**:
@@ -521,7 +540,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       - `map_resolution` → `map_2d_resolution` (2D 그리드)
       - `voxel_resolution` → `map_3d_voxel_size` (3D 복셀)
       - `point_resolution` → `point_downsample_resolution` (포인트클라우드)
-    - Sonar 파라미터 통일: `range_min/max` → `min_range/max_range`
+    - Sonar 파라미터 통일: `range_min/max` → `range_min/range_max`
   - **Phase 4: Launch 및 노드 업데이트**
     - Core 모듈: slam_ros.py, feature_extraction_sim.py
     - 노드: mapping_2d_standalone, mapping_3d_standalone
@@ -873,7 +892,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Range weighting 파라미터 간소화** (`mapping_3d.py`)
   - `max_effective_range` 파라미터 제거 (불필요)
-  - `max_range` (30m) 직접 사용으로 변경
+  - `range_max` (30m) 직접 사용으로 변경
   - `lambda_decay`: 0.3 → 0.1 (30m 범위에 맞춘 완만한 감쇠)
   - Hard cutoff 제거 (모든 범위에서 smooth decay)
 
@@ -914,8 +933,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 예상 성능 개선: 1-2 Hz → 10-15 Hz (10배 향상)
 
 - **3D 맵핑 포인트 클라우드 empty 문제 해결** (`mapping_3d.py`)
-  - 원인: `max_effective_range=15m`가 `max_range=30m`보다 작아서 15~30m 타겟이 weight=0 받음
-  - 해결: `max_range` 직접 사용으로 모든 범위 커버
+  - 원인: `max_effective_range=15m`가 `range_max=30m`보다 작아서 15~30m 타겟이 weight=0 받음
+  - 해결: `range_max` 직접 사용으로 모든 범위 커버
   - 결과: 0~30m 전 범위에서 exponential decay (0.90~1.0)
 
 ### Technical

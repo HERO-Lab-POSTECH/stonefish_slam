@@ -131,7 +131,7 @@ if(pybind11_FOUND AND EIGEN3_FOUND)
 
   # Install to Python package directory
   install(TARGETS cfar
-    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}
+    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
   )
 
   message(STATUS "CFAR module will be built with Python ${Python3_VERSION}")
@@ -168,7 +168,7 @@ if(pybind11_FOUND AND EIGEN3_FOUND)
 
   # Install to Python package directory
   install(TARGETS dda_traversal
-    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}
+    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
   )
 
   message(STATUS "DDA Traversal module will be built with Python ${Python3_VERSION}")
@@ -238,7 +238,7 @@ if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND)
 
   # Install to Python package directory
   install(TARGETS octree_mapping
-    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}
+    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
   )
 
   message(STATUS "Octree Mapping module will be built with OctoMap and Python ${Python3_VERSION}")
@@ -287,7 +287,7 @@ if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND AND TARGET octree_mapping_c
 
   # Install to Python package directory
   install(TARGETS ray_processor
-    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}
+    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
   )
 
   message(STATUS "Ray Processor module will be built with Eigen, OctoMap and Python ${Python3_VERSION}")
