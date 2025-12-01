@@ -685,36 +685,7 @@ class SLAMNode(Node):
                 if not self.fg.keyframes:
                     self.fg.add_prior_factor(frame)
                 else:
-                    if self.fft_enable and hasattr(frame, 'fft_success') and frame.fft_success:
-                        # FFT-based localization
-                        prev_key = self.fg.current_keyframe.key
-                        curr_key = frame.key
-
-                        # Add FFT factor with temporary covariance
-                        # TODO: Tune covariance based on FFT confidence
-                        fft_cov = np.diag([0.1, 0.1, 0.01])  # [tx, ty, rotation]
-                        self.fg.add_icp_factor(prev_key, curr_key, frame.fft_transform, fft_cov)
-
-                        # Add initial pose estimate
-                        target_pose = self.fg.current_keyframe.pose
-                        self.fg.values.insert(
-                            X(curr_key), target_pose.compose(frame.fft_transform)
-                        )
-
-                        self.get_logger().info(
-                            f"Keyframe added (FFT): #{len(self.fg.keyframes)}, "
-                            f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f})",
-                            throttle_duration_sec=1.0
-                        )
-                    else:
-                        # ICP-based localization (existing method)
-                        self.add_sequential_scan_matching(frame)
-
-                        self.get_logger().info(
-                            f"Keyframe added (ICP): #{len(self.fg.keyframes)}, "
-                            f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f}), "
-                            f"points={len(points)}, has_image={frame.image is not None}"
-                        )
+                    self.add_sequential_scan_matching(frame)
 
                 # Update factor graph
                 self.fg.update_graph(frame)
@@ -1234,34 +1205,45 @@ class SLAMNode(Node):
         # Create ICP result
         ret2 = ICPResult(ret, self.localization.ssm_params.cov_samples > 0)
 
-        # Compute ICP
-        with CodeTimer("SLAM - sequential scan matching - ICP"):
-            if self.localization.ssm_params.initialization and self.localization.ssm_params.cov_samples > 0:
-                message, odom, cov, sample_transforms = self.localization.compute_icp_with_cov(
-                    ret2.source_points,
-                    ret2.target_points,
-                    ret2.initial_transforms[: self.localization.ssm_params.cov_samples],
-                )
+        # Compute transform (FFT or ICP)
+        if self.fft_enable and hasattr(keyframe, 'fft_success') and keyframe.fft_success:
+            # Use FFT transform instead of ICP
+            ret2.estimated_transform = keyframe.fft_transform
+            ret2.status.description = "FFT"
+            self.get_logger().info(
+                f"Using FFT transform: tx={ret2.estimated_transform.x():.2f}m, "
+                f"ty={ret2.estimated_transform.y():.2f}m, "
+                f"rot={np.degrees(ret2.estimated_transform.theta()):.1f}deg"
+            )
+        else:
+            # Compute ICP
+            with CodeTimer("SLAM - sequential scan matching - ICP"):
+                if self.localization.ssm_params.initialization and self.localization.ssm_params.cov_samples > 0:
+                    message, odom, cov, sample_transforms = self.localization.compute_icp_with_cov(
+                        ret2.source_points,
+                        ret2.target_points,
+                        ret2.initial_transforms[: self.localization.ssm_params.cov_samples],
+                    )
 
-                if message != "success":
-                    ret2.status = STATUS.NOT_CONVERGED
-                    ret2.status.description = message
+                    if message != "success":
+                        ret2.status = STATUS.NOT_CONVERGED
+                        ret2.status.description = message
+                    else:
+                        ret2.estimated_transform = odom
+                        ret2.cov = cov
+                        ret2.sample_transforms = sample_transforms
+                        ret2.status.description = f"{len(ret2.sample_transforms)} samples"
                 else:
-                    ret2.estimated_transform = odom
-                    ret2.cov = cov
-                    ret2.sample_transforms = sample_transforms
-                    ret2.status.description = f"{len(ret2.sample_transforms)} samples"
-            else:
-                message, odom = self.localization.compute_icp(
-                    ret2.source_points, ret2.target_points, ret2.initial_transform
-                )
+                    message, odom = self.localization.compute_icp(
+                        ret2.source_points, ret2.target_points, ret2.initial_transform
+                    )
 
-                if message != "success":
-                    ret2.status = STATUS.NOT_CONVERGED
-                    ret2.status.description = message
-                else:
-                    ret2.estimated_transform = odom
-                    ret2.status.description = ""
+                    if message != "success":
+                        ret2.status = STATUS.NOT_CONVERGED
+                        ret2.status.description = message
+                    else:
+                        ret2.estimated_transform = odom
+                        ret2.status.description = ""
 
         # Verify transform is reasonable
         if ret2.status:
