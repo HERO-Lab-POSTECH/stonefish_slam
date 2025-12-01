@@ -35,6 +35,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 해결: 불필요한 마스크 제거로 최적화
   - **파일**: `stonefish_slam/core/localization_fft.py`
 
+- **FFT 로컬라이제이션 - Rotation 부호 수정 (CRITICAL)** (2025-12-01)
+  - **문제**: Line 481에서 회전 각도를 음수로 변환 (`-col_offset * ...`)하여 회전 방향 반대로 출력
+  - **수정**: 음수 부호 제거 (`col_offset * ...`)하여 올바른 회전 방향 반영
+  - **근거**: Polar image의 column offset 기반 회전 추정 (col_offset > 0 = 시계방향)
+  - **파일**: `stonefish_slam/core/localization_fft.py:481`
+
+- **FFT 로컬라이제이션 - Erosion 파라미터 재조정** (2025-12-01)
+  - **변경**: `rot_erosion_iterations` 3 → 1, `rot_gaussian_truncate` 4.0 → 2.0
+  - **근거**: Reference 구현(krit_fft)과 일치시켜 rotation 추정 안정성 향상
+  - **영향**: Phase correlation peak 검출 정확도 개선
+  - **파일**: `stonefish_slam/core/localization_fft.py:31,33`
+
 - **AttributeError 수정** (2025-12-01)
   - Line 1272: `ret.initial_transform` → `ret2.initial_transform`
   - `ret`는 `InitializationResult` (속성 없음), `ret2`는 `ICPResult` (속성 있음)
