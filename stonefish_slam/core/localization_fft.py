@@ -514,9 +514,10 @@ class FFTLocalizer:
         row_offset, col_offset, peak_value = self.detect_peak(pcm)
 
         # Convert to meters (NED coordinate frame)
-        # For Stonefish (top origin): positive row_offset = forward motion
-        # col_offset = left/right motion
-        tx = row_offset * self.oculus.range_resolution  # Forward (meters)
+        # Phase correlation: row_offset > 0 = image2 shifts down = object farther = robot backward
+        # Stonefish polar: Row 0 = far (top), Row N-1 = near (bottom)
+        # Therefore: tx = -row_offset (negative sign needed)
+        tx = -row_offset * self.oculus.range_resolution  # Forward (meters)
         ty = col_offset * self.oculus.range_resolution   # Left (meters)
 
         if self.verbose:
