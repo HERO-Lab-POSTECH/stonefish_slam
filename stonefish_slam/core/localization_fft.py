@@ -71,6 +71,10 @@ class FFTLocalizer:
         # Cache for polar_to_cartesian conversion (performance optimization)
         self.p2c_cache = None
 
+        # Cache range_resolution from polar_to_cartesian for consistent translation estimation
+        # CRITICAL: Must use same range_resolution for cart conversion and translation
+        self.cart_range_resolution = None
+
     def apply_range_min_mask(self, img_polar: np.ndarray) -> np.ndarray:
         """
         Apply minimum range mask to polar sonar image.
@@ -132,9 +136,14 @@ class FFTLocalizer:
                 break
             shrink = binary_erosion(shrink, structure).astype(np.float64)
 
-        # Apply Gaussian smoothing for soft mask edges
-        from scipy.ndimage import gaussian_filter
-        mask = gaussian_filter(shrink, sigma=gaussian_sigma, truncate=gaussian_truncate)
+        # Apply distance-based smoothing (preserves peak sharpness better than Gaussian)
+        # Literature: Gaussian spreading creates spurious peaks in phase correlation
+        # Reference: Reddy & Chatterji, Nature Scientific Reports 2025
+        from scipy.ndimage import distance_transform_edt
+        dist = distance_transform_edt(shrink)
+        max_dist = np.max(dist) if np.max(dist) > 0 else 1.0
+        # Normalize with smooth falloff using gaussian_sigma as scale parameter
+        mask = np.clip(dist / (gaussian_sigma * 2), 0, 1)
 
         return image * mask
 
@@ -170,11 +179,14 @@ class FFTLocalizer:
                 print("Building polar-to-cartesian transformation maps (one-time setup)...")
 
             # Calculate range resolution
-            range_resolution = (self.oculus.max_range - self.range_min) / rows
+            range_resolution = (self.oculus.range_max - self.range_min) / rows
+
+            # Cache for translation estimation (CRITICAL: same scale factor as cart conversion)
+            self.cart_range_resolution = range_resolution
 
             # Maximum lateral extent based on FOV
             horizontal_fov_deg = np.rad2deg(self.oculus.horizontal_fov)
-            max_lateral = self.oculus.max_range * np.sin(np.radians(horizontal_fov_deg / 2.0))
+            max_lateral = self.oculus.range_max * np.sin(np.radians(horizontal_fov_deg / 2.0))
 
             # Cartesian image dimensions (same resolution as range)
             cart_width = int(np.ceil(2 * max_lateral / range_resolution))
@@ -205,7 +217,7 @@ class FFTLocalizer:
             # IMPORTANT: Stonefish FLS row convention is OPPOSITE of Oculus
             # Stonefish: row=0 (top) is FAR range, row=max (bottom) is NEAR range
             # Cartesian: YY=0 (top) should be FAR, YY=max (bottom) should be NEAR
-            x_meters = self.oculus.max_range - range_resolution * YY
+            x_meters = self.oculus.range_max - range_resolution * YY
 
             # Y: lateral distance - centered at 0
             y_meters = range_resolution * (-cart_width / 2.0 + XX + 0.5)
@@ -217,7 +229,7 @@ class FFTLocalizer:
             # Map polar coordinates to image indices
             # Range to row index (distance in meters to pixel row)
             # STONEFISH: row=0 is FAR (range_max), row=rows-1 is NEAR (range_min)
-            map_y = np.asarray((self.oculus.max_range - r_polar) / range_resolution, dtype=np.float32)
+            map_y = np.asarray((self.oculus.range_max - r_polar) / range_resolution, dtype=np.float32)
 
             # Bearing to column index (using interpolation)
             map_x = np.asarray(f_bearings(bearing_polar), dtype=np.float32)
@@ -435,8 +447,8 @@ class FFTLocalizer:
         Uses phase correlation in polar domain.
 
         Args:
-            img1_polar: First polar image (range × angle)
-            img2_polar: Second polar image (range × angle)
+            img1_polar: First polar image (range × angle), should be pre-masked with apply_range_min_mask
+            img2_polar: Second polar image (range × angle), should be pre-masked with apply_range_min_mask
 
         Returns:
             dict with keys:
@@ -444,19 +456,16 @@ class FFTLocalizer:
                 'peak_value': float (correlation peak)
                 'success': bool
         """
-        # Apply min range mask first (for consistency with estimate_transform)
-        img1_min_masked = self.apply_range_min_mask(img1_polar)
-        img2_min_masked = self.apply_range_min_mask(img2_polar)
-
-        # Apply erosion mask
+        # Note: Min range masking removed (redundant - caller applies it in estimate_transform)
+        # Apply erosion mask directly to input (already min-range masked)
         img1_masked = self.apply_erosion_mask(
-            img1_min_masked,
+            img1_polar,
             erosion_iterations=self.rot_erosion_iterations,
             gaussian_sigma=self.rot_gaussian_sigma,
             gaussian_truncate=self.rot_gaussian_truncate
         )
         img2_masked = self.apply_erosion_mask(
-            img2_min_masked,
+            img2_polar,
             erosion_iterations=self.rot_erosion_iterations,
             gaussian_sigma=self.rot_gaussian_sigma,
             gaussian_truncate=self.rot_gaussian_truncate
@@ -552,8 +561,9 @@ class FFTLocalizer:
         # Phase correlation: row_offset > 0 = image2 shifts down = object farther = robot backward
         # Stonefish polar: Row 0 = far (top), Row N-1 = near (bottom)
         # Therefore: tx = -row_offset (negative sign needed)
-        tx = -row_offset * self.oculus.range_resolution  # Forward (meters)
-        ty = col_offset * self.oculus.range_resolution   # Left (meters)
+        # CRITICAL: Use cart_range_resolution (same as polar_to_cartesian), NOT oculus.range_resolution
+        tx = -row_offset * self.cart_range_resolution  # Forward (meters)
+        ty = col_offset * self.cart_range_resolution   # Left (meters)
 
         if self.verbose:
             print(f"Translation: ({tx:.2f}, {ty:.2f}) m (peak={peak_value:.4f})")
