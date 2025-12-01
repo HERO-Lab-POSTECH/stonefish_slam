@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **FFT 로컬라이제이션 - Rotation Center 버그 수정 (CRITICAL)** (2025-12-01)
+  - Rotation 보정 시 중심점을 top center → bottom center (sonar 위치)로 수정
+  - 회전 존재 시 ty 값 폭발 현상 해결
+  - Reference: krit_fft line 928-931
+  - **파일**: `stonefish_slam/core/localization_fft.py:534`
+
 - **FFT 로컬라이제이션 - Range Resolution 계산 오류 수정 (CRITICAL)** (2025-12-01)
   - **문제**: `(range_max - range_min) / rows` 계산식 사용 (극좌표 이미지는 0~range_max 범위)
   - **수정**: `range_max / rows`로 변경하여 정확한 스케일 팩터 적용

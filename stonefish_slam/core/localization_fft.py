@@ -531,8 +531,9 @@ class FFTLocalizer:
         img1_padded = self._apply_cartesian_padding(img1_masked, pad_size)
         img2_padded = self._apply_cartesian_padding(img2_masked, pad_size)
 
-        # Calculate rotation center (top center for Stonefish, accounting for padding)
-        center_row_padded = pad_size
+        # Calculate rotation center (bottom center - sonar position, accounting for padding)
+        # Reference: krit_fft line 928-931
+        center_row_padded = h - 1 + pad_size
         center_col_padded = w // 2 + pad_size
 
         # Apply rotation compensation
