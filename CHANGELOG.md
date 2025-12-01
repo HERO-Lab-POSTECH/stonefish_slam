@@ -19,16 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **FFT 로컬라이제이션 - Range Resolution 불일치 버그** (2025-12-01)
-  - `polar_to_cartesian()`와 `estimate_translation()`에서 다른 range_resolution 값 사용
-  - 회전 추정 시 심각한 병진 오차 발생
-  - 해결: range_resolution을 `self.cart_range_resolution`에 캐싱하여 일관성 유지
+- **FFT 로컬라이제이션 - Range Resolution 계산 오류 수정 (CRITICAL)** (2025-12-01)
+  - **문제**: `(range_max - range_min) / rows` 계산식 사용 (극좌표 이미지는 0~range_max 범위)
+  - **수정**: `range_max / rows`로 변경하여 정확한 스케일 팩터 적용
+  - **영향**: 회전 존재 시 병진 추정 정확도 대폭 향상
   - **파일**: `stonefish_slam/core/localization_fft.py`
 
-- **FFT 로컬라이제이션 - Gaussian 스무딩 제거** (2025-12-01)
-  - Gaussian 필터가 피크 에너지를 분산시켜 가짜 피크 생성
-  - 해결: `distance_transform_edt`로 교체하여 sharp peak 확보
-  - 성능 향상 및 상관 정확도 개선 (문헌: Reddy & Chatterji, Nature Scientific Reports 2025)
+- **FFT 로컬라이제이션 - Preprocessing 방식 변경** (2025-12-01)
+  - `distance_transform_edt` (이론적 개선 시도) → `gaussian_filter` (reference 구현)으로 변경
+  - Phase correlation peak 품질 개선 (krit_fft와 동일 방식)
   - **파일**: `stonefish_slam/core/localization_fft.py`
 
 - **FFT 로컬라이제이션 - Min Range 마스크 중복 제거** (2025-12-01)

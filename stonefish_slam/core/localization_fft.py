@@ -136,14 +136,10 @@ class FFTLocalizer:
                 break
             shrink = binary_erosion(shrink, structure).astype(np.float64)
 
-        # Apply distance-based smoothing (preserves peak sharpness better than Gaussian)
-        # Literature: Gaussian spreading creates spurious peaks in phase correlation
-        # Reference: Reddy & Chatterji, Nature Scientific Reports 2025
-        from scipy.ndimage import distance_transform_edt
-        dist = distance_transform_edt(shrink)
-        max_dist = np.max(dist) if np.max(dist) > 0 else 1.0
-        # Normalize with smooth falloff using gaussian_sigma as scale parameter
-        mask = np.clip(dist / (gaussian_sigma * 2), 0, 1)
+        # Apply Gaussian smoothing for soft mask edges (reference implementation)
+        # Based on krit_fft working implementation (lines 297-318)
+        from scipy.ndimage import gaussian_filter
+        mask = gaussian_filter(shrink, sigma=gaussian_sigma, truncate=gaussian_truncate)
 
         return image * mask
 
@@ -179,7 +175,9 @@ class FFTLocalizer:
                 print("Building polar-to-cartesian transformation maps (one-time setup)...")
 
             # Calculate range resolution
-            range_resolution = (self.oculus.range_max - self.range_min) / rows
+            # CRITICAL: Stonefish polar images cover FULL range from 0 to range_max
+            # range_min is only used for masking unreliable near-field data
+            range_resolution = self.oculus.range_max / rows
 
             # Cache for translation estimation (CRITICAL: same scale factor as cart conversion)
             self.cart_range_resolution = range_resolution
