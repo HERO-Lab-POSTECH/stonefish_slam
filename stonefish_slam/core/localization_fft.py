@@ -27,9 +27,9 @@ class FFTLocalizer:
     def __init__(self,
                  oculus: OculusProperty,
                  range_min: float = 0.5,
-                 rot_erosion_iterations: int = 1,
+                 rot_erosion_iterations: int = 3,
                  rot_gaussian_sigma: float = 4.0,
-                 rot_gaussian_truncate: float = 2.0,
+                 rot_gaussian_truncate: float = 4.0,
                  trans_erosion_iterations: int = 4,
                  trans_gaussian_sigma: float = 4.0,
                  trans_gaussian_truncate: float = 4.0,
@@ -92,9 +92,10 @@ class FFTLocalizer:
         # Calculate number of range bins to mask
         range_min_bins = int(self.range_min / self.oculus.range_max * range_bins)
 
-        # Mask the top rows (closest range data)
+        # Stonefish polar image: Row 0 = far (top), Row N-1 = near (bottom)
+        # Mask bottom rows (near field < min_range)
         if range_min_bins > 0:
-            masked_img[:range_min_bins, :] = 0
+            masked_img[-range_min_bins:, :] = 0
 
         return masked_img
 
@@ -416,15 +417,19 @@ class FFTLocalizer:
                 'peak_value': float (correlation peak)
                 'success': bool
         """
+        # Apply min range mask first (for consistency with estimate_transform)
+        img1_min_masked = self.apply_range_min_mask(img1_polar)
+        img2_min_masked = self.apply_range_min_mask(img2_polar)
+
         # Apply erosion mask
         img1_masked = self.apply_erosion_mask(
-            img1_polar,
+            img1_min_masked,
             erosion_iterations=self.rot_erosion_iterations,
             gaussian_sigma=self.rot_gaussian_sigma,
             gaussian_truncate=self.rot_gaussian_truncate
         )
         img2_masked = self.apply_erosion_mask(
-            img2_polar,
+            img2_min_masked,
             erosion_iterations=self.rot_erosion_iterations,
             gaussian_sigma=self.rot_gaussian_sigma,
             gaussian_truncate=self.rot_gaussian_truncate
