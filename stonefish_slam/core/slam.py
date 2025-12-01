@@ -582,16 +582,18 @@ class SLAMNode(Node):
             sonar_msg (Image): Sonar image message (polar coordinates)
             odom_msg (Odometry): Dead reckoning odometry
         """
-        # 1. Extract features internally using FeatureExtraction module
-        try:
-            points = self.feature_extractor.extract_features(sonar_msg)
-            self.get_logger().info(
-                f"Callback: extracted {len(points)} features",
-                throttle_duration_sec=1.0
-            )
-        except Exception as e:
-            self.get_logger().error(f"Feature extraction failed: {e}")
-            return
+        # 1. Extract features internally using FeatureExtraction module (ICP용 - FFT 활성화 시 건너뛰기)
+        points = np.array([])  # Default empty
+        if not self.fft_enable:
+            try:
+                points = self.feature_extractor.extract_features(sonar_msg)
+                self.get_logger().info(
+                    f"Callback: extracted {len(points)} features",
+                    throttle_duration_sec=1.0
+                )
+            except Exception as e:
+                self.get_logger().error(f"Feature extraction failed: {e}")
+                return
 
         # 2. Convert sonar image for mapping and FFT localization
         sonar_image = None
@@ -607,31 +609,6 @@ class SLAMNode(Node):
                         sonar_msg.height, sonar_msg.width
                     )
 
-                    # FFT 실행 (이전 프레임과 비교)
-                    if self.prev_polar_sonar is not None:
-                        try:
-                            # 깊은 복사로 ICP와 완전 분리
-                            polar_prev = self.prev_polar_sonar.copy()
-                            polar_curr = polar_sonar.copy()
-
-                            fft_result = self.fft_localizer.estimate_transform(polar_prev, polar_curr)
-
-                            if fft_result['success']:
-                                self.get_logger().info(
-                                    f"FFT: rotation={fft_result['rotation']:.2f}deg, "
-                                    f"translation=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m",
-                                    throttle_duration_sec=1.0
-                                )
-                                # TODO: FFT 결과를 어디에 저장/사용할지는 추후 결정
-                            else:
-                                self.get_logger().warn("FFT localization failed", throttle_duration_sec=2.0)
-
-                        except Exception as e:
-                            self.get_logger().error(f"FFT localization error: {e}")
-
-                    # 현재 polar image 저장 (다음 프레임용)
-                    self.prev_polar_sonar = polar_sonar.copy()
-
             except Exception as e:
                 self.get_logger().error(f"Failed to convert sonar image: {e}")
 
@@ -639,6 +616,40 @@ class SLAMNode(Node):
         time = sonar_msg.header.stamp
         dr_pose3 = r2g(odom_msg.pose.pose)
         frame = Keyframe(False, time, dr_pose3)
+
+        # FFT localization (if enabled and we have previous frame)
+        if self.fft_enable and self.prev_polar_sonar is not None and polar_sonar is not None:
+            try:
+                polar_prev = self.prev_polar_sonar.copy()
+                polar_curr = polar_sonar.copy()
+
+                fft_result = self.fft_localizer.estimate_transform(polar_prev, polar_curr)
+
+                if fft_result['success']:
+                    self.get_logger().info(
+                        f"FFT: rotation={fft_result['rotation']:.2f}deg, "
+                        f"translation=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m",
+                        throttle_duration_sec=1.0
+                    )
+                    # Store FFT transform in frame
+                    frame.fft_transform = n2g(
+                        (fft_result['translation'][0],
+                         fft_result['translation'][1],
+                         np.radians(fft_result['rotation'])),
+                        "Pose2"
+                    )
+                    frame.fft_success = True
+                else:
+                    self.get_logger().warn("FFT localization failed", throttle_duration_sec=2.0)
+                    frame.fft_success = False
+
+            except Exception as e:
+                self.get_logger().error(f"FFT localization error: {e}")
+                frame.fft_success = False
+
+        # Update prev_polar_sonar (if FFT enabled)
+        if self.fft_enable and polar_sonar is not None:
+            self.prev_polar_sonar = polar_sonar.copy()
 
         # Check if valid points (feature extraction may return empty on skip frames)
         if len(points) == 0 or (len(points) > 0 and np.isnan(points[0, 0])):
@@ -675,15 +686,39 @@ class SLAMNode(Node):
                 if not self.fg.keyframes:
                     self.fg.add_prior_factor(frame)
                 else:
-                    self.add_sequential_scan_matching(frame)
+                    if self.fft_enable and hasattr(frame, 'fft_success') and frame.fft_success:
+                        # FFT-based localization
+                        prev_key = self.fg.current_keyframe.key
+                        curr_key = frame.key
+
+                        # Add FFT factor with temporary covariance
+                        # TODO: Tune covariance based on FFT confidence
+                        fft_cov = np.diag([0.1, 0.1, 0.01])  # [tx, ty, rotation]
+                        self.fg.add_icp_factor(prev_key, curr_key, frame.fft_transform, fft_cov)
+
+                        # Add initial pose estimate
+                        target_pose = self.fg.current_keyframe.pose
+                        self.fg.values.insert(
+                            X(curr_key), target_pose.compose(frame.fft_transform)
+                        )
+
+                        self.get_logger().info(
+                            f"Keyframe added (FFT): #{len(self.fg.keyframes)}, "
+                            f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f})",
+                            throttle_duration_sec=1.0
+                        )
+                    else:
+                        # ICP-based localization (existing method)
+                        self.add_sequential_scan_matching(frame)
+
+                        self.get_logger().info(
+                            f"Keyframe added (ICP): #{len(self.fg.keyframes)}, "
+                            f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f}), "
+                            f"points={len(points)}, has_image={frame.image is not None}"
+                        )
 
                 # Update factor graph
                 self.fg.update_graph(frame)
-                self.get_logger().info(
-                    f"Keyframe added: #{len(self.fg.keyframes)}, "
-                    f"pose=({frame.pose.x():.2f}, {frame.pose.y():.2f}, {frame.pose.theta():.3f}), "
-                    f"points={len(points)}, has_image={frame.image is not None}"
-                )
 
                 # Loop closure (slam mode only)
                 if self.mode == 'slam' and self.localization.nssm_params.enable and self.add_nonsequential_scan_matching():
@@ -1269,7 +1304,7 @@ class SLAMNode(Node):
             # Fall back to odometry
             self.get_logger().warn(
                 f"[SSM] ICP failed ({ret2.status.description}), using odometry instead. "
-                f"DR delta: tx={ret.initial_transform.x():.2f}m, ty={ret.initial_transform.y():.2f}m, rot={np.degrees(ret.initial_transform.theta()):.1f}deg"
+                f"DR delta: tx={ret2.initial_transform.x():.2f}m, ty={ret2.initial_transform.y():.2f}m, rot={np.degrees(ret2.initial_transform.theta()):.1f}deg"
             )
             self.fg.add_odometry_factor(keyframe)
 

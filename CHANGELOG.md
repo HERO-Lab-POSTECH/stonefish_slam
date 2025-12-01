@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **FFT localization 결과를 실제 SLAM에 통합** (2025-12-01)
+  - FFT 활성화 시 ICP 대신 FFT transform을 factor graph에 추가
+  - Feature extraction을 FFT 활성화 시 건너뛰기 (성능 향상)
+  - FFT 결과를 keyframe에 저장 (`frame.fft_transform`, `frame.fft_success`)
+  - Localization dispatch: FFT 성공 시 FFT factor 추가, 실패 시 ICP로 fallback
+  - FFT covariance 임시값 사용 (추후 튜닝 필요)
+  - **파일**: `stonefish_slam/core/slam.py`
+
+### Fixed
+
+- **AttributeError 수정** (2025-12-01)
+  - Line 1272: `ret.initial_transform` → `ret2.initial_transform`
+  - `ret`는 `InitializationResult` (속성 없음), `ret2`는 `ICPResult` (속성 있음)
+  - **파일**: `stonefish_slam/core/slam.py`
+
 ### Added
 
 - **FFT 기반 로컬라이제이션 SLAM 노드 통합** (2025-12-01)
