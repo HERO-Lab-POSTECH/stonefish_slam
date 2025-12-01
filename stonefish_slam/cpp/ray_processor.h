@@ -25,12 +25,12 @@ class OctreeMapping;
  */
 struct RayProcessorConfig {
     // Range parameters
-    double max_range;                   // Maximum sonar range (m)
-    double min_range;                   // Minimum valid range (m)
+    double range_max;                   // Maximum sonar range (m)
+    double range_min;                   // Minimum valid range (m)
     double range_resolution;            // Range bin resolution (m)
 
     // Angular parameters
-    double vertical_aperture;           // Vertical beam aperture (radians)
+    double vertical_fov;           // Vertical beam aperture (radians)
     double horizontal_fov;              // Horizontal field of view (degrees)
     double bearing_resolution;          // Horizontal angular resolution (radians)
 
@@ -51,10 +51,10 @@ struct RayProcessorConfig {
 
     // Constructor with default values
     RayProcessorConfig()
-        : max_range(40.0),
-          min_range(0.5),
+        : range_max(40.0),
+          range_min(0.5),
           range_resolution(0.06),
-          vertical_aperture(20.0 * M_PI / 180.0),
+          vertical_fov(20.0 * M_PI / 180.0),
           horizontal_fov(130.0),
           bearing_resolution(0.0175),
           log_odds_occupied(0.5),
@@ -116,7 +116,7 @@ public:
      *
      * Main entry point from Python. Processes all bearings and updates octree.
      *
-     * @param polar_image 2D NumPy array (num_range_bins × num_bearings), uint8
+     * @param polar_image 2D NumPy array (num_range_bins × num_beams), uint8
      * @param T_sonar_to_world 4×4 transformation matrix (sonar → world frame)
      *
      * Performance: Processes ~128 bearings × 512 range bins in 100-150ms
@@ -163,7 +163,7 @@ public:
      *
      * Python equivalent: mapping_3d.py lines 372-396 (_compute_first_hit_map)
      *
-     * @param polar_image 2D NumPy array (num_range_bins × num_bearings), uint8
+     * @param polar_image 2D NumPy array (num_range_bins × num_beams), uint8
      * @return Vector of first hit ranges (one per bearing, in meters)
      */
     std::vector<double> compute_first_hit_map(
@@ -194,7 +194,7 @@ public:
      * @param voxel_world Voxel center in world frame
      * @param T_world_to_sonar Inverse transformation (world → sonar)
      * @param first_hit_map First hit ranges for all bearings (from compute_first_hit_map)
-     * @param num_bearings Total number of bearings (for index calculation)
+     * @param num_beams Total number of bearings (for index calculation)
      * @param exclude_bearing_rad Bearing angle to exclude from shadow check (for occupied voxels)
      *                            Default -999.0 means no exclusion (for free space)
      * @return True if voxel is in ANY bearing's shadow (should skip update)
@@ -203,7 +203,7 @@ public:
         const Eigen::Vector3d& voxel_world,
         const Eigen::Matrix4d& T_world_to_sonar,
         const std::vector<double>& first_hit_map,
-        int num_bearings,
+        int num_beams,
         double exclude_bearing_rad = -999.0
     ) const;
 
@@ -226,7 +226,7 @@ private:
      * Used by process_sonar_image() in OpenMP parallel region.
      *
      * @param bearing_idx Bearing index in polar image
-     * @param num_bearings Total number of bearings (for angle calculation)
+     * @param num_beams Total number of bearings (for angle calculation)
      * @param intensity_profile Intensity values along range (1D array)
      * @param T_sonar_to_world Transformation matrix
      * @param T_world_to_sonar Inverse transformation (for shadow validation)
@@ -236,7 +236,7 @@ private:
      */
     void process_single_ray_internal(
         int bearing_idx,
-        int num_bearings,
+        int num_beams,
         const std::vector<uint8_t>& intensity_profile,
         const Eigen::Matrix4d& T_sonar_to_world,
         const Eigen::Matrix4d& T_world_to_sonar,
@@ -261,7 +261,7 @@ private:
      * @param voxel_updates Output buffer to collect voxel updates
      * @param T_world_to_sonar Inverse transformation for shadow validation (optional)
      * @param first_hit_map First hit ranges for shadow validation (optional)
-     * @param num_bearings Number of bearings for shadow validation (optional)
+     * @param num_beams Number of bearings for shadow validation (optional)
      */
     void process_occupied_voxels_internal(
         const std::vector<int>& hit_indices,
@@ -271,7 +271,7 @@ private:
         std::vector<VoxelUpdate>& voxel_updates,
         const Eigen::Matrix4d* T_world_to_sonar = nullptr,
         const std::vector<double>* first_hit_map = nullptr,
-        int num_bearings = 0
+        int num_beams = 0
     );
 
     /**
@@ -311,7 +311,7 @@ private:
      * @param bearing_idx Bearing index in polar image
      * @return Bearing angle in radians (centered at 0)
      */
-    double compute_bearing_angle(int bearing_idx, int num_bearings) const;
+    double compute_bearing_angle(int bearing_idx, int num_beams) const;
 
     /**
      * @brief Compute 3D ray direction from bearing angle
@@ -362,7 +362,7 @@ private:
     RayProcessorConfig config_;
 
     // Cached values for performance
-    double half_aperture_;      // Cached vertical_aperture / 2
+    double half_aperture_;      // Cached vertical_fov / 2
 
     // Profiling counters (P3.1: exp() measurement)
     // Using mutable atomic for thread-safe updates in const methods

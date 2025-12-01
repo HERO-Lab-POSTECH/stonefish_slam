@@ -18,9 +18,9 @@ namespace py = pybind11;
 struct SonarRayConfig {
     double voxel_size;
     double log_odds_free;
-    double max_range;
-    double min_range;
-    double vertical_aperture;
+    double range_max;
+    double range_min;
+    double vertical_fov;
     bool use_range_weighting;
     double lambda_decay;
     bool enable_gaussian_weighting;

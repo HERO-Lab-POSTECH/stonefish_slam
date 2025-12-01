@@ -890,8 +890,8 @@ class SLAM(object):
             # parse the covariance
             translation_std = np.sqrt(np.max(np.linalg.eigvals(cov[:2, :2])))
             rotation_std = np.sqrt(cov[2, 2])
-            range_bound = translation_std * 5.0 + self.oculus.max_range
-            bearing_bound = rotation_std * 5.0 + self.oculus.horizontal_aperture * 0.5
+            range_bound = translation_std * 5.0 + self.oculus.range_max
+            bearing_bound = rotation_std * 5.0 + self.oculus.horizontal_fov * 0.5
 
             # figure out the uncertain points
             local_points = Keyframe.transform_points(target_points, pose.inverse())

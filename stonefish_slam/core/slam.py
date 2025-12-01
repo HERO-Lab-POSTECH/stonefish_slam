@@ -616,40 +616,6 @@ class SLAMNode(Node):
         dr_pose3 = r2g(odom_msg.pose.pose)
         frame = Keyframe(False, time, dr_pose3)
 
-        # FFT localization (if enabled and we have previous frame)
-        if self.fft_enable and self.prev_polar_sonar is not None and polar_sonar is not None:
-            try:
-                polar_prev = self.prev_polar_sonar.copy()
-                polar_curr = polar_sonar.copy()
-
-                fft_result = self.fft_localizer.estimate_transform(polar_prev, polar_curr)
-
-                if fft_result['success']:
-                    self.get_logger().info(
-                        f"FFT: rotation={fft_result['rotation']:.2f}deg, "
-                        f"translation=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m",
-                        throttle_duration_sec=1.0
-                    )
-                    # Store FFT transform in frame
-                    frame.fft_transform = n2g(
-                        (fft_result['translation'][0],
-                         fft_result['translation'][1],
-                         np.radians(fft_result['rotation'])),
-                        "Pose2"
-                    )
-                    frame.fft_success = True
-                else:
-                    self.get_logger().warn("FFT localization failed", throttle_duration_sec=2.0)
-                    frame.fft_success = False
-
-            except Exception as e:
-                self.get_logger().error(f"FFT localization error: {e}")
-                frame.fft_success = False
-
-        # Update prev_polar_sonar (if FFT enabled)
-        if self.fft_enable and polar_sonar is not None:
-            self.prev_polar_sonar = polar_sonar.copy()
-
         # Check if valid points (feature extraction may return empty on skip frames)
         if len(points) == 0 or (len(points) > 0 and np.isnan(points[0, 0])):
             frame.status = False
@@ -678,6 +644,40 @@ class SLAMNode(Node):
             if sonar_image is not None:
                 frame.image = sonar_image
                 frame.sonar_time = sonar_msg.header.stamp
+
+            # FFT localization (only for keyframes)
+            if self.fft_enable and self.prev_polar_sonar is not None and polar_sonar is not None:
+                try:
+                    polar_prev = self.prev_polar_sonar.copy()
+                    polar_curr = polar_sonar.copy()
+
+                    fft_result = self.fft_localizer.estimate_transform(polar_prev, polar_curr)
+
+                    if fft_result['success']:
+                        self.get_logger().info(
+                            f"FFT: rotation={fft_result['rotation']:.2f}deg, "
+                            f"translation=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m",
+                            throttle_duration_sec=1.0
+                        )
+                        # Store FFT transform in frame
+                        frame.fft_transform = n2g(
+                            (fft_result['translation'][0],
+                             fft_result['translation'][1],
+                             np.radians(fft_result['rotation'])),
+                            "Pose2"
+                        )
+                        frame.fft_success = True
+                    else:
+                        self.get_logger().warn("FFT localization failed", throttle_duration_sec=2.0)
+                        frame.fft_success = False
+
+                except Exception as e:
+                    self.get_logger().error(f"FFT localization error: {e}")
+                    frame.fft_success = False
+
+            # Update prev_polar_sonar for next keyframe (FFT only)
+            if self.fft_enable and polar_sonar is not None:
+                self.prev_polar_sonar = polar_sonar.copy()
 
             # Conditional localization processing
             if self.mode != 'mapping-only':

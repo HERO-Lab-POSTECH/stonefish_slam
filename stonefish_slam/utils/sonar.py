@@ -89,18 +89,18 @@ class OculusProperty(object):
         # r[i] - r[i - 1]
         self.range_resolution = None
         # n * resolution (set from sonar data during initialization)
-        self.max_range = None
+        self.range_max = None
 
         # bearings: [b1, ..., bm]
-        self.num_bearings = None
+        self.num_beams = None
         # rad
         self.bearings = None
         # b[m] - b[1]
-        self.horizontal_aperture = np.radians(130.)
+        self.horizontal_fov = np.radians(130.)
         # mean: (b[m] - b[1]) / m
         self.angular_resolution = None
         # rad
-        self.vertical_aperture = None
+        self.vertical_fov = None
 
         ##################################################
         # polar <-> Cartesian
@@ -134,30 +134,30 @@ class OculusProperty(object):
             self.num_ranges = ping.num_ranges
             self.range_resolution = ping.range_resolution
             self.ranges = self.range_resolution * (1 + np.arange(self.num_ranges))
-            self.max_range = self.ranges[-1]
+            self.range_max = self.ranges[-1]
 
             self.ro2ra = lambda ro: (ro + 1) * self.range_resolution
             self.ra2ro = lambda ra: np.round(ra / self.range_resolution - 1)
             changed = True
 
-        if len(ping.bearings) != self.num_bearings:
-            self.num_bearings = len(ping.bearings)
+        if len(ping.bearings) != self.num_beams:
+            self.num_beams = len(ping.bearings)
             self.bearings = np.deg2rad(np.array(ping.bearings, np.float32) / 100)
-            self.horizontal_aperture = abs(self.bearings[-1] - self.bearings[0])
-            self.angular_resolution = self.horizontal_aperture / self.num_bearings
+            self.horizontal_fov = abs(self.bearings[-1] - self.bearings[0])
+            self.angular_resolution = self.horizontal_fov / self.num_beams
             # Use default vertical aperture (mode 1 = 20 degrees)
-            self.vertical_aperture = OculusProperty.OCULUS_VERTICAL_APERTURE.get(1, np.deg2rad(20))
+            self.vertical_fov = OculusProperty.OCULUS_VERTICAL_APERTURE.get(1, np.deg2rad(20))
 
             self.b2c = interp1d(
                 self.bearings,
-                np.arange(self.num_bearings),
+                np.arange(self.num_beams),
                 kind="cubic",
                 bounds_error=False,
                 fill_value=-1,
                 assume_sorted=True,
             )
             self.c2b = interp1d(
-                np.arange(self.num_bearings),
+                np.arange(self.num_beams),
                 self.bearings,
                 kind="cubic",
                 bounds_error=False,
@@ -167,7 +167,7 @@ class OculusProperty(object):
             changed = True
 
         if changed:
-            height = self.max_range
+            height = self.range_max
             rows = self.num_ranges
             width = np.sin((self.bearings[-1] - self.bearings[0]) / 2) * height * 2
             cols = int(np.ceil(width / self.range_resolution))
@@ -236,7 +236,7 @@ class OculusProperty(object):
             self.bearings[0], self.bearings[-1], angular_resolution
         ):
             c, s = np.cos(bearing), np.sin(bearing)
-            points.append((self.max_range * c, self.max_range * s))
+            points.append((self.range_max * c, self.range_max * s))
         poly = Polygon(points)
 
         c, s = np.cos(origin[2]), np.sin(origin[2])
@@ -258,7 +258,7 @@ class OculusProperty(object):
             min_bearing, max_bearing = np.pi / 2 - max_bearing, np.pi / 2 - min_bearing
         fov = Wedge(
             (x, y),
-            self.max_range,
+            self.range_max,
             np.rad2deg(min_bearing),
             np.rad2deg(max_bearing),
             fill=False,
@@ -269,8 +269,8 @@ class OculusProperty(object):
     def __str__(self):
         d = dict(self.__dict__)
         d["angular_resolution"] = np.degrees(d["angular_resolution"])
-        d["horizontal_aperture"] = np.degrees(d["horizontal_aperture"])
-        d["vertical_aperture"] = np.degrees(d["vertical_aperture"])
+        d["horizontal_fov"] = np.degrees(d["horizontal_fov"])
+        d["vertical_fov"] = np.degrees(d["vertical_fov"])
         return (
             "\n===============================\n"
             "         Oculus Property\n"
@@ -278,9 +278,9 @@ class OculusProperty(object):
             "Model: {model:>24}\n"
             "#Ranges: {num_ranges:>22.0f}\n"
             "Range resolution: {range_resolution:>12.2f}m\n"
-            "#Bearings: {num_bearings:>21}\n"
+            "#Bearings: {num_beams:>21}\n"
             "Angular resolution: {angular_resolution:>8.1f}deg\n"
-            "Horizontal aperture: {horizontal_aperture:>7.1f}deg\n"
-            "Vertical aperture: {vertical_aperture:>9.1f}deg\n"
+            "Horizontal aperture: {horizontal_fov:>7.1f}deg\n"
+            "Vertical aperture: {vertical_fov:>9.1f}deg\n"
             "===============================\n".format(**d)
         )

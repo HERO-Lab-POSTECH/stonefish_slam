@@ -36,8 +36,8 @@ class Mapping3DStandaloneNode(Node):
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
 
         # Sonar hardware parameters (from slam.yaml sonar section)
-        self.declare_parameter('sonar.max_range', 40.0)
-        self.declare_parameter('sonar.min_range', 0.5)
+        self.declare_parameter('sonar.range_max', 40.0)
+        self.declare_parameter('sonar.range_min', 0.5)
         self.declare_parameter('sonar.horizontal_fov', 130.0)
         self.declare_parameter('sonar.vertical_fov', 20.0)
         self.declare_parameter('sonar.num_beams', 918)
@@ -84,8 +84,8 @@ class Mapping3DStandaloneNode(Node):
             # Node-level parameters
             'frame_interval': self.frame_interval,
             # Sonar hardware (from sonar.* parameters)
-            'max_range': self.get_parameter('sonar.max_range').value,
-            'min_range': self.get_parameter('sonar.min_range').value,
+            'range_max': self.get_parameter('sonar.range_max').value,
+            'range_min': self.get_parameter('sonar.range_min').value,
             'horizontal_fov': self.get_parameter('sonar.horizontal_fov').value,
             'vertical_fov': self.get_parameter('sonar.vertical_fov').value,
             'num_beams': self.get_parameter('sonar.num_beams').value,
@@ -124,7 +124,7 @@ class Mapping3DStandaloneNode(Node):
         self.get_logger().info(
             f'Mapper initialized: resolution={resolution}m, '
             f'sonar_tilt={config["sonar_tilt_deg"]}°, '
-            f'max_range={config["max_range"]}m, '
+            f'range_max={config["range_max"]}m, '
             f'adaptive_max_ratio={config["adaptive_max_ratio"]}'
         )
 
@@ -214,7 +214,7 @@ class Mapping3DStandaloneNode(Node):
                         # else: Black (shadow) - already initialized
                 else:
                     # No hit: entire range is free space (simulator environment)
-                    # ray_processor.cpp line 264-266: range_to_first_hit = max_range
+                    # ray_processor.cpp line 264-266: range_to_first_hit = range_max
                     threshold_debug[:, bearing_idx] = [0, 255, 0]  # Full column Green
 
             # ROS2 Image 메시지로 변환 및 publish (맵 업데이트와 동기화)

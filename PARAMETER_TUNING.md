@@ -8,12 +8,12 @@ Stonefish SLAM 3D 매핑의 품질을 정량적/정성적으로 개선하기 위
 ## 파라미터 구조 (config/slam.yaml)
 
 ### 1. 소나 하드웨어 파라미터 (변경 불가)
-- `max_range`: 20.0m (소나 최대 거리)
-- `min_range`: 0.5m (소나 최소 거리)
+- `range_max`: 20.0m (소나 최대 거리)
+- `range_min`: 0.5m (소나 최소 거리)
 - `horizontal_fov`: 130° (수평 시야각)
-- `vertical_aperture`: 20° (수직 빔 폭)
-- `image_width`: 918 (bearing 개수)
-- `image_height`: 512 (range bin 개수)
+- `vertical_fov`: 20° (수직 빔 폭)
+- `num_beams`: 918 (bearing 개수)
+- `num_bins`: 512 (range bin 개수)
 - `sonar_tilt_deg`: 30° (하향 틸트)
 
 ### 2. 3D Octree 파라미터 (mapping_3d)
@@ -74,7 +74,7 @@ Stonefish SLAM 3D 매핑의 품질을 정량적/정성적으로 개선하기 위
 
 ### D. Range Weighting
 **관계**: `use_range_weighting` + `lambda_decay`
-- **공식**: weight(r) = exp(-λ * r / max_range)
+- **공식**: weight(r) = exp(-λ * r / range_max)
 - **현재**: λ=0.1 → weight(20m) ≈ 0.90 (10% 감소)
 
 **의미**:
@@ -613,7 +613,7 @@ for r_idx, intensity in enumerate(intensity_profile):
    - 거의 불가능한 수준
 
 2. **Shadow 영역 오염 (더 심각)**
-   - No-hit ray (물체 안 보이는 bearing)가 max_range까지 free space 업데이트
+   - No-hit ray (물체 안 보이는 bearing)가 range_max까지 free space 업데이트
    - Angular cone 100% 중첩으로 인접 bearing의 shadow 영역 침범
    - 물체 뒤편 이전 occupied가 free space로 덮어씌워짐
 
@@ -624,7 +624,7 @@ Bearing A (물체 중앙): first_hit = 물체
   → 물체 뒤: Shadow (업데이트 안 함) ✅
 
 Bearing B (물체 옆, 빈 공간): first_hit = -1
-  → Free space: max_range까지 전체 업데이트 ❌
+  → Free space: range_max까지 전체 업데이트 ❌
   → Bearing A의 shadow 영역 침범 → free로 덮어씀 ❌
 ```
 
@@ -763,17 +763,17 @@ bearing_half_width = 0.142° × bearing_step × 0.5 = 0.142°
 
 **파일**: `ray_processor.cpp` line 303-305
 
-**3차 수정 - ⚠️ 가장 심각한 버그: No-hit ray의 max_range free space 업데이트**:
+**3차 수정 - ⚠️ 가장 심각한 버그: No-hit ray의 range_max free space 업데이트**:
 
 **문제** (사용자 지적):
-- No-hit ray (첫 반사 없음)가 max_range(30m)까지 free space로 업데이트
+- No-hit ray (첫 반사 없음)가 range_max(30m)까지 free space로 업데이트
 - 물체 뒤편 unknown 영역을 잘못 free로 마킹
 - 뒤로 돌아서 물체 뒷면 관측해도 **채워지지 않음** (이미 강한 free로 마킹됨)
 
 **근본 원인**:
 ```cpp
 if (first_hit_idx < 0) {
-    range_to_first_hit = config_.max_range;  // Simulator 환경 가정 (잘못됨)
+    range_to_first_hit = config_.range_max;  // Simulator 환경 가정 (잘못됨)
 }
 ```
 

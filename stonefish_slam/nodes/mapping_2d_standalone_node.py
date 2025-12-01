@@ -39,8 +39,8 @@ class Mapping2DStandaloneNode(Node):
         self.declare_parameter('intensity_threshold', 50)
 
         # Sonar parameters
-        self.declare_parameter('sonar.max_range', 20.0)
-        self.declare_parameter('sonar.min_range', 0.5)
+        self.declare_parameter('sonar.range_max', 20.0)
+        self.declare_parameter('sonar.range_min', 0.5)
         self.declare_parameter('sonar.horizontal_fov', 130.0)
         self.declare_parameter('sonar.num_beams', 918)
         self.declare_parameter('sonar.num_bins', 512)
@@ -54,9 +54,9 @@ class Mapping2DStandaloneNode(Node):
 
         map_resolution = self.get_parameter('map_2d_resolution').value
         map_size = self.get_parameter('map_size').value
-        sonar_range = self.get_parameter('sonar.max_range').value
+        sonar_range = self.get_parameter('sonar.range_max').value
         sonar_fov = self.get_parameter('sonar.horizontal_fov').value
-        range_min = self.get_parameter('sonar.min_range').value
+        range_min = self.get_parameter('sonar.range_min').value
         sonar_tilt_deg = self.get_parameter('sonar.sonar_tilt_deg').value
         intensity_threshold = self.get_parameter('intensity_threshold').value
 

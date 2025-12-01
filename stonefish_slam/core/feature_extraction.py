@@ -106,8 +106,8 @@ class FeatureExtraction:
         self.vertical_fov = self.node.get_parameter('sonar.vertical_fov').get_parameter_value().double_value
         self.num_beams = self.node.get_parameter('sonar.num_beams').get_parameter_value().integer_value
         self.num_bins = self.node.get_parameter('sonar.num_bins').get_parameter_value().integer_value
-        self.range_min = self.node.get_parameter('sonar.min_range').get_parameter_value().double_value
-        self.range_max = self.node.get_parameter('sonar.max_range').get_parameter_value().double_value
+        self.range_min = self.node.get_parameter('sonar.range_min').get_parameter_value().double_value
+        self.range_max = self.node.get_parameter('sonar.range_max').get_parameter_value().double_value
         self.sonar_tilt_deg = self.node.get_parameter('sonar.sonar_tilt_deg').get_parameter_value().double_value
         self.sonar_tilt_rad = np.radians(self.sonar_tilt_deg)
 

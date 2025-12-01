@@ -128,7 +128,7 @@ std::vector<VoxelUpdate> DDATraversal::process_free_space_ray(
     ) {
         std::unordered_map<VoxelKey, VoxelUpdate, VoxelKeyHash> updates_map;
 
-        double half_aperture = config.vertical_aperture / 2.0;
+        double half_aperture = config.vertical_fov / 2.0;
 
         // Vertical fan loop (moved from Python to C++)
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
@@ -176,13 +176,13 @@ std::vector<VoxelUpdate> DDATraversal::process_free_space_ray(
                 // Compute range
                 double range = (voxel_center - sonar_origin).norm();
 
-                // Skip if below min_range
-                if (range <= config.min_range) continue;
+                // Skip if below range_min
+                if (range <= config.range_min) continue;
 
                 // Range weighting
                 double range_weight = 1.0;
                 if (config.use_range_weighting) {
-                    range_weight = std::exp(-config.lambda_decay * range / config.max_range);
+                    range_weight = std::exp(-config.lambda_decay * range / config.range_max);
                 }
 
                 // Total log-odds update
@@ -222,9 +222,9 @@ PYBIND11_MODULE(dda_traversal, m) {
         .def(py::init<>())
         .def_readwrite("voxel_size", &SonarRayConfig::voxel_size)
         .def_readwrite("log_odds_free", &SonarRayConfig::log_odds_free)
-        .def_readwrite("max_range", &SonarRayConfig::max_range)
-        .def_readwrite("min_range", &SonarRayConfig::min_range)
-        .def_readwrite("vertical_aperture", &SonarRayConfig::vertical_aperture)
+        .def_readwrite("range_max", &SonarRayConfig::range_max)
+        .def_readwrite("range_min", &SonarRayConfig::range_min)
+        .def_readwrite("vertical_fov", &SonarRayConfig::vertical_fov)
         .def_readwrite("use_range_weighting", &SonarRayConfig::use_range_weighting)
         .def_readwrite("lambda_decay", &SonarRayConfig::lambda_decay)
         .def_readwrite("enable_gaussian_weighting", &SonarRayConfig::enable_gaussian_weighting)

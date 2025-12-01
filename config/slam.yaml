@@ -15,3 +15,8 @@ slam_node:
     # Localization modules
     ssm.enable: true   # Sequential Scan Matching (for localization)
     nssm.enable: true  # Non-Sequential Scan Matching (loop closure)
+
+    # FFT localization (optional)
+    fft_localization:
+      enable: true    # Enable FFT-based rotation/translation estimation
+      range_min: 0.5   # Minimum reliable range (meters)

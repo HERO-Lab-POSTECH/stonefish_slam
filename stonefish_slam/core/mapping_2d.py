@@ -185,7 +185,7 @@ class SonarMapping2D:
     def polar_to_cartesian_image(
         self,
         polar_img: np.ndarray,
-        max_range: Optional[float] = None,
+        range_max: Optional[float] = None,
         fov_deg: Optional[float] = None
     ) -> np.ndarray:
         """Convert polar sonar image to fan-shaped cartesian image.
@@ -202,14 +202,14 @@ class SonarMapping2D:
 
         Args:
             polar_img: Input polar image (range × bearing), shape (num_bins, num_beams)
-            max_range: Maximum sonar range in meters (default: self.sonar_range)
+            range_max: Maximum sonar range in meters (default: self.sonar_range)
             fov_deg: Field of view in degrees (default: self.sonar_fov)
 
         Returns:
             Fan-shaped cartesian image (height × width), uint8
         """
-        if max_range is None:
-            max_range = self.sonar_range
+        if range_max is None:
+            range_max = self.sonar_range
         if fov_deg is None:
             fov_deg = self.sonar_fov
 
@@ -218,10 +218,10 @@ class SonarMapping2D:
         # Build or use cached transformation maps (performance optimization)
         if self.p2c_cache is None:
             # Calculate range resolution
-            range_resolution = (max_range - self.range_min) / rows
+            range_resolution = (range_max - self.range_min) / rows
 
             # Maximum lateral extent based on FOV
-            max_lateral = max_range * np.sin(np.radians(fov_deg / 2.0))
+            max_lateral = range_max * np.sin(np.radians(fov_deg / 2.0))
 
             # Cartesian image dimensions (same resolution as range)
             cart_width = int(np.ceil(2 * max_lateral / range_resolution))
@@ -250,7 +250,7 @@ class SonarMapping2D:
             # CRITICAL: Stonefish FLS row convention is OPPOSITE of Oculus
             # Stonefish: row=0 (top) is FAR range, row=max (bottom) is NEAR range
             # Cartesian: YY=0 (top) should be FAR, YY=max (bottom) should be NEAR
-            x_meters = max_range - range_resolution * YY
+            x_meters = range_max - range_resolution * YY
 
             # Y: lateral distance - centered at 0
             y_meters = range_resolution * (-cart_width / 2.0 + XX + 0.5)
@@ -262,7 +262,7 @@ class SonarMapping2D:
             # Map polar coordinates to image indices
             # Range to row index (distance in meters to pixel row)
             # STONEFISH: row=0 is FAR (range_max), row=rows-1 is NEAR (range_min)
-            map_y = np.asarray((max_range - r_polar) / range_resolution, dtype=np.float32)
+            map_y = np.asarray((range_max - r_polar) / range_resolution, dtype=np.float32)
 
             # Bearing to column index (using interpolation)
             map_x = np.asarray(f_bearings(bearing_polar), dtype=np.float32)
@@ -289,7 +289,7 @@ class SonarMapping2D:
         cartesian_img = np.fliplr(cartesian_img)
 
         # Calculate actual range resolution for accurate distance calculation
-        range_resolution = (max_range - self.range_min) / rows
+        range_resolution = (range_max - self.range_min) / rows
 
         return cartesian_img, range_resolution
 

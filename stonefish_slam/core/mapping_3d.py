@@ -49,9 +49,9 @@ class SonarMapping3D:
 
         # Store parameters
         self.horizontal_fov = np.radians(config['horizontal_fov'])
-        self.vertical_aperture = np.radians(config['vertical_fov'])
-        self.max_range = config['max_range']
-        self.min_range = config['min_range']
+        self.vertical_fov = np.radians(config['vertical_fov'])
+        self.range_max = config['range_max']
+        self.range_min = config['range_min']
         self.intensity_threshold = config['intensity_threshold']
         self.num_beams = config['num_beams']
         self.num_bins = config['num_bins']
@@ -78,7 +78,7 @@ class SonarMapping3D:
         )
 
         # Range resolution (bin size in meters)
-        self.range_resolution = (self.max_range - self.min_range) / self.num_bins
+        self.range_resolution = (self.range_max - self.range_min) / self.num_bins
 
         # Get adaptive update settings from config
         self.adaptive_update = config['adaptive_update']
@@ -132,14 +132,14 @@ class SonarMapping3D:
             try:
                 # Create RayProcessorConfig
                 ray_config = RayProcessorConfig()
-                ray_config.max_range = self.max_range
-                ray_config.min_range = self.min_range
+                ray_config.range_max = self.range_max
+                ray_config.range_min = self.range_min
                 ray_config.range_resolution = self.range_resolution
-                ray_config.vertical_aperture = self.vertical_aperture
+                ray_config.vertical_fov = self.vertical_fov
                 # horizontal_fov: degrees for C++ angle calculation
                 ray_config.horizontal_fov = np.degrees(self.horizontal_fov)
                 # bearing_resolution: radians (proper interval calculation for np.linspace)
-                ray_config.bearing_resolution = self.horizontal_fov / (self.image_width - 1)
+                ray_config.bearing_resolution = self.horizontal_fov / (self.num_beams - 1)
                 ray_config.log_odds_occupied = self.log_odds_occupied
                 ray_config.log_odds_free = self.log_odds_free
                 ray_config.use_range_weighting = config['use_range_weighting']
@@ -247,9 +247,9 @@ class SonarMapping3D:
                 self.dda_config = dda_traversal.SonarRayConfig()
                 self.dda_config.voxel_size = self.voxel_resolution
                 self.dda_config.log_odds_free = self.log_odds_free
-                self.dda_config.max_range = self.max_range
-                self.dda_config.min_range = self.min_range
-                self.dda_config.vertical_aperture = self.vertical_aperture
+                self.dda_config.range_max = self.range_max
+                self.dda_config.range_min = self.range_min
+                self.dda_config.vertical_fov = self.vertical_fov
                 self.dda_config.use_range_weighting = self.use_range_weighting
                 self.dda_config.lambda_decay = self.lambda_decay
                 self.dda_config.enable_gaussian_weighting = self.enable_gaussian_weighting
@@ -337,15 +337,15 @@ class SonarMapping3D:
         """
         Compute distance-dependent weight using exponential decay.
 
-        Uses sonar's max_range as the reference for decay calculation.
-        No hard cutoff - weight decays smoothly from 1.0 (near) to ~0.9 (max_range).
+        Uses sonar's range_max as the reference for decay calculation.
+        No hard cutoff - weight decays smoothly from 1.0 (near) to ~0.9 (range_max).
 
         Args:
             range_m: Measured range in meters
             lambda_decay: Decay rate (use self.lambda_decay if None)
 
         Returns:
-            weight: (0.0, 1.0], exponential decay w(r) = exp(-λ * r / max_range)
+            weight: (0.0, 1.0], exponential decay w(r) = exp(-λ * r / range_max)
 
         Literature:
             - Fairfield 2007: σ(r) = σ₀ + k·r
@@ -356,8 +356,8 @@ class SonarMapping3D:
 
         # Exponential decay: w(r) = exp(-λ * r / r_max)
         # At r=0: w=1.0
-        # At r=max_range: w=exp(-λ) (e.g., λ=0.1 → w≈0.90)
-        return np.exp(-lambda_decay * range_m / self.max_range)
+        # At r=range_max: w=exp(-λ) (e.g., λ=0.1 → w≈0.90)
+        return np.exp(-lambda_decay * range_m / self.range_max)
 
     def _compute_first_hit_map(self, polar_image):
         """
@@ -368,10 +368,10 @@ class SonarMapping3D:
 
         Returns:
             np.ndarray: shape (n_bearings,), first hit range in meters for each bearing
-                       Returns max_range if no hit found
+                       Returns range_max if no hit found
         """
         range_bins, bearing_bins = polar_image.shape
-        first_hit_map = np.full(bearing_bins, self.max_range, dtype=np.float32)
+        first_hit_map = np.full(bearing_bins, self.range_max, dtype=np.float32)
 
         for b_idx in range(bearing_bins):
             intensity_profile = polar_image[:, b_idx]
@@ -380,7 +380,7 @@ class SonarMapping3D:
             for r_idx, intensity in enumerate(intensity_profile):
                 if intensity > self.intensity_threshold:
                     # Calculate actual range (FLS image: row 0 = far, row max = near)
-                    first_hit_map[b_idx] = self.max_range - r_idx * self.range_resolution
+                    first_hit_map[b_idx] = self.range_max - r_idx * self.range_resolution
                     break
 
         return first_hit_map
@@ -438,7 +438,7 @@ class SonarMapping3D:
         bearing_bins = len(first_hit_map)
         actual_bearing_resolution = self.horizontal_fov / (bearing_bins - 1)  # radians
         # Use vertical aperture for shadow cone width (matches beam physical footprint)
-        bearing_half_width = self.vertical_aperture / 2.0  # Half of vertical aperture in radians
+        bearing_half_width = self.vertical_fov / 2.0  # Half of vertical aperture in radians
 
         # 3. Calculate exclude bearing index if specified (for occupied voxels)
         exclude_idx = -1
@@ -594,17 +594,17 @@ class SonarMapping3D:
 
         # If no hit found, treat entire range as free space
         if first_hit_idx == -1:
-            # No reflection within max_range → entire measured range is free space
+            # No reflection within range_max → entire measured range is free space
             first_hit_idx = len(intensity_profile)  # Treat entire range as free
 
         # Calculate vertical aperture parameters
-        half_aperture = self.vertical_aperture / 2
+        half_aperture = self.vertical_fov / 2
 
         # Update free space before first hit (with sparse sampling)
         # Use C++ DDA batch processing if available
         if self.use_dda and first_hit_idx > 0:
             # Calculate range to first hit
-            range_to_first_hit = self.max_range - (first_hit_idx - 1) * self.range_resolution
+            range_to_first_hit = self.range_max - (first_hit_idx - 1) * self.range_resolution
 
             # Horizontal ray direction at bearing_angle
             ray_direction_horizontal = np.array([
@@ -619,7 +619,7 @@ class SonarMapping3D:
             ray_direction_world = ray_direction_world / np.linalg.norm(ray_direction_world)
 
             # Compute vertical steps
-            mid_range = self.max_range - (first_hit_idx / 2) * self.range_resolution
+            mid_range = self.range_max - (first_hit_idx / 2) * self.range_resolution
             vertical_spread = mid_range * np.tan(half_aperture)
             free_vertical_factor = 8.0
             num_vertical_steps = max(1, int(vertical_spread / (self.voxel_resolution * free_vertical_factor)))
@@ -671,7 +671,7 @@ class SonarMapping3D:
             free_sampling_step = 2  # Reduced from 10 to 2 for better coverage (0.12m intervals)
             for r_idx in range(0, first_hit_idx, free_sampling_step):
                 # Calculate actual range (FLS image: row 0 = far, row max = near)
-                range_m = self.max_range - r_idx * self.range_resolution
+                range_m = self.range_max - r_idx * self.range_resolution
 
                 # Calculate vertical spread at this range
                 vertical_spread = range_m * np.tan(half_aperture)
@@ -744,10 +744,10 @@ class SonarMapping3D:
         # Low intensity regions after first hit are shadow/unknown (not updated)
         for r_idx in high_intensity_indices:
             # Calculate actual range (FLS image: row 0 = far, row max = near)
-            range_m = self.max_range - r_idx * self.range_resolution
+            range_m = self.range_max - r_idx * self.range_resolution
 
             # Skip out-of-range (should not happen with correct calculation)
-            if range_m > self.max_range:
+            if range_m > self.range_max:
                 continue
 
             # Calculate vertical spread at this range
@@ -839,7 +839,7 @@ class SonarMapping3D:
         range_bins, bearing_bins = polar_image.shape
 
         # Check if dimensions match expected
-        if bearing_bins != self.image_width:
+        if bearing_bins != self.num_beams:
             # Resize bearing angles if needed
             self.bearing_angles = np.linspace(
                 -self.horizontal_fov/2,
@@ -849,7 +849,7 @@ class SonarMapping3D:
 
         if range_bins != self.num_bins:
             # Update range resolution if needed
-            self.range_resolution = (self.max_range - self.min_range) / range_bins
+            self.range_resolution = (self.range_max - self.range_min) / range_bins
 
         # Get robot transform
         T_base_to_world = self.pose_msg_to_transform(robot_pose)
