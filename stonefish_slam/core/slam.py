@@ -582,18 +582,17 @@ class SLAMNode(Node):
             sonar_msg (Image): Sonar image message (polar coordinates)
             odom_msg (Odometry): Dead reckoning odometry
         """
-        # 1. Extract features internally using FeatureExtraction module (ICP용 - FFT 활성화 시 건너뛰기)
-        points = np.array([])  # Default empty
-        if not self.fft_enable:
-            try:
-                points = self.feature_extractor.extract_features(sonar_msg)
-                self.get_logger().info(
-                    f"Callback: extracted {len(points)} features",
-                    throttle_duration_sec=1.0
-                )
-            except Exception as e:
-                self.get_logger().error(f"Feature extraction failed: {e}")
-                return
+        # 1. Extract features internally using FeatureExtraction module
+        # (ICP, mapping, keyframe 판단 등에 모두 필요 - 항상 수행)
+        try:
+            points = self.feature_extractor.extract_features(sonar_msg)
+            self.get_logger().info(
+                f"Callback: extracted {len(points)} features",
+                throttle_duration_sec=1.0
+            )
+        except Exception as e:
+            self.get_logger().error(f"Feature extraction failed: {e}")
+            return
 
         # 2. Convert sonar image for mapping and FFT localization
         sonar_image = None
