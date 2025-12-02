@@ -1,1 +1,0 @@
-/workspace/colcon_ws/src/stonefish_slam/launch/mapping_3d_standalone.launch.py

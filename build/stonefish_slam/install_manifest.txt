@@ -1,5 +1,0 @@
-/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/dead_reckoning_node
-/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/slam_node
-/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/kalman_node
-/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/mapping_3d_standalone
-/workspace/colcon_ws/src/stonefish_slam/install/stonefish_slam/lib/stonefish_slam/mapping_2d_standalone

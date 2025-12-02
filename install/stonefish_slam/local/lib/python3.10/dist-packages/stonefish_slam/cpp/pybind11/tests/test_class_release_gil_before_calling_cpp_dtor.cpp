@@ -1,1 +1,0 @@
-/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/cpp/pybind11/tests/test_class_release_gil_before_calling_cpp_dtor.cpp

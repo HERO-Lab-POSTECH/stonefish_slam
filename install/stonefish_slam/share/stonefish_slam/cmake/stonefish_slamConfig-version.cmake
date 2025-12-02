@@ -1,1 +1,0 @@
-/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam/ament_cmake_core/stonefish_slamConfig-version.cmake

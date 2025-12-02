@@ -1,1 +1,0 @@
-ament_cmake_symlink_install_targets("TARGET_FILES" "/workspace/colcon_ws/src/stonefish_slam/build/stonefish_slam/octree_mapping.cpython-310-x86_64-linux-gnu.so" "TARGETS" "octree_mapping" "LIBRARY_DESTINATION" "local/lib/python3.10/dist-packages/stonefish_slam")

@@ -1,1 +1,0 @@
-/workspace/colcon_ws/src/stonefish_slam/stonefish_slam/core/slam_legacy.py

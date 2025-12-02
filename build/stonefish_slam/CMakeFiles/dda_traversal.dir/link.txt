@@ -1,1 +1,0 @@
-/usr/lib/ccache/c++ -fPIC -flto -shared  -o dda_traversal.cpython-310-x86_64-linux-gnu.so CMakeFiles/dda_traversal.dir/stonefish_slam/cpp/dda_traversal.cpp.o 
