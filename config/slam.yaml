@@ -14,7 +14,7 @@ slam_node:
 
     # Localization modules
     ssm.enable: true   # Sequential Scan Matching (for localization)
-    nssm.enable: true  # Non-Sequential Scan Matching (loop closure)
+    nssm.enable: false  # Non-Sequential Scan Matching (loop closure)
 
     # FFT localization (optional)
     fft_localization:
