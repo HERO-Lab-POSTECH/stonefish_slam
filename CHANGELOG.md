@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **3가지 확률 업데이트 방법 지원 (2025-12-04)**
+  - `log_odds`: 기존 Bayesian log-odds (기본값)
+  - `weighted_avg`: voxelmap_fusion 스타일 가중 평균
+  - `iwlo`: Intensity-Weighted Log-Odds (권장, 고정도 맵핑용)
+  - C++ `OctreeMapping` 클래스에 새 메서드 추가:
+    - `insert_point_cloud_with_intensity()`: intensity 포함 업데이트
+    - `set_update_method()`: 업데이트 방법 선택
+    - `set_intensity_params()`: intensity 파라미터 설정
+    - `set_iwlo_params()`: IWLO 파라미터 설정
+  - Observation count 추적 (Weighted Average, IWLO용)
+  - IWLO 공식: `L_new = L_old + ΔL × w(I) × α(n)`
+    - Sigmoid weight: `w(I) = 1/(1 + exp(-sharpness×(normalized - 0.5)))`
+    - Adaptive learning rate: `α(n) = max(min_alpha, 1/(1 + decay_rate×n))`
+  - 파일: `stonefish_slam/cpp/octree_mapping.h`, `stonefish_slam/cpp/octree_mapping.cpp`, `stonefish_slam/core/mapping_3d.py`, `config/slam.yaml`
+
 ### Changed
 
 - **FFT localization 결과를 실제 SLAM에 통합** (2025-12-01)

@@ -8,8 +8,22 @@
 #include <Eigen/Dense>
 #include <vector>
 #include <memory>
+#include <unordered_map>
 
 namespace py = pybind11;
+
+/**
+ * @brief Update method for voxel probability updates
+ *
+ * - LOG_ODDS: Standard log-odds Bayesian update (default)
+ * - WEIGHTED_AVERAGE: Weighted average based on intensity (voxelmap_fusion style)
+ * - IWLO: Intensity-Weighted Log-Odds with adaptive learning rate
+ */
+enum class UpdateMethod {
+    LOG_ODDS = 0,          // Standard log-odds update (default)
+    WEIGHTED_AVERAGE = 1,  // Weighted average based on intensity
+    IWLO = 2               // Intensity-Weighted Log-Odds
+};
 
 /**
  * @brief Map statistics for profiling P3.2 (map size)
@@ -73,6 +87,27 @@ public:
     );
 
     /**
+     * @brief Batch insert point cloud with intensity-based updates
+     *
+     * Supports WEIGHTED_AVERAGE and IWLO update methods that use intensity values.
+     * For LOG_ODDS method, intensity is ignored and behaves like insert_point_cloud.
+     *
+     * @param points Nx3 NumPy array of world coordinates [x, y, z]
+     * @param intensities N-length array of intensity values (0-255)
+     * @param sensor_origin 3-length array [x, y, z] of sensor position
+     *
+     * Update behavior:
+     * - LOG_ODDS: Uses log_odds_occupied_, ignores intensity
+     * - WEIGHTED_AVERAGE: P_new = (n*P_old + w(I))/(n+1)
+     * - IWLO: L_new = L_old + ΔL * w(I) * α(n)
+     */
+    void insert_point_cloud_with_intensity(
+        py::array_t<double> points,
+        py::array_t<double> intensities,
+        py::array_t<double> sensor_origin
+    );
+
+    /**
      * @brief Get all occupied voxels above threshold
      *
      * @param threshold Occupancy probability threshold (0.0 to 1.0, default: 0.5)
@@ -132,6 +167,33 @@ public:
     void set_adaptive_params(bool enable, double threshold, double max_ratio);
 
     /**
+     * @brief Set update method (LOG_ODDS, WEIGHTED_AVERAGE, IWLO)
+     *
+     * @param method Update method enum (0=LOG_ODDS, 1=WEIGHTED_AVG, 2=IWLO)
+     */
+    void set_update_method(int method);
+
+    /**
+     * @brief Set intensity parameters for WEIGHTED_AVERAGE and IWLO
+     *
+     * @param threshold Intensity threshold (e.g., 35.0)
+     * @param max_val Maximum intensity value (e.g., 255.0)
+     */
+    void set_intensity_params(double threshold, double max_val);
+
+    /**
+     * @brief Set IWLO-specific parameters
+     *
+     * @param sharpness Sigmoid sharpness (default: 3.0)
+     * @param decay_rate Learning rate decay (default: 0.1)
+     * @param min_alpha Minimum learning rate (default: 0.1)
+     * @param L_min Log-odds saturation lower bound (default: -2.0)
+     * @param L_max Log-odds saturation upper bound (default: 3.5)
+     */
+    void set_iwlo_params(double sharpness, double decay_rate, double min_alpha,
+                         double L_min, double L_max);
+
+    /**
      * @brief Get map statistics (P3.2 profiling)
      *
      * @return MapStats with node counts and memory usage
@@ -148,4 +210,24 @@ private:
     bool adaptive_update_;                    // Enable adaptive protection
     double adaptive_threshold_;               // Probability threshold for protection
     double adaptive_max_ratio_;               // Max update ratio for protected voxels
+
+    // Update method and intensity parameters
+    UpdateMethod update_method_;              // Current update method
+    double intensity_threshold_;              // Intensity threshold (e.g., 35.0)
+    double intensity_max_;                    // Maximum intensity value (255.0)
+
+    // IWLO parameters
+    double sharpness_;                        // Sigmoid sharpness (3.0)
+    double decay_rate_;                       // Learning rate decay (0.1)
+    double min_alpha_;                        // Minimum learning rate (0.1)
+    double L_min_;                            // Saturation lower bound (-2.0)
+    double L_max_;                            // Saturation upper bound (3.5)
+
+    // Observation count tracking for IWLO and WEIGHTED_AVERAGE
+    std::unordered_map<uint64_t, int> observation_counts_;
+
+    // Helper functions
+    uint64_t key_to_hash(const octomap::OcTreeKey& key) const;
+    double intensity_to_weight(double intensity) const;
+    double compute_alpha(int obs_count) const;
 };

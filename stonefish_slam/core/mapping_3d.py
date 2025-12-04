@@ -94,6 +94,9 @@ class SonarMapping3D:
         # C++ backend initialization
         self.use_cpp_backend = config['use_cpp_backend']
 
+        # Update method configuration (new feature)
+        self.update_method = config.get('update_method', 'log_odds')  # 'log_odds', 'weighted_avg', 'iwlo'
+
         if self.use_cpp_backend:
             try:
                 from stonefish_slam import octree_mapping
@@ -112,7 +115,34 @@ class SonarMapping3D:
                 prob_max = 1.0 / (1.0 + np.exp(-self.log_odds_max))
                 self.cpp_octree.set_clamping_thresholds(prob_min, prob_max)
 
+                # Configure update method
+                method_map = {
+                    'log_odds': 0,
+                    'weighted_avg': 1,
+                    'iwlo': 2
+                }
+                method_code = method_map.get(self.update_method, 0)
+                self.cpp_octree.set_update_method(method_code)
+
+                # Configure intensity parameters for WEIGHTED_AVG and IWLO
+                if self.update_method in ['weighted_avg', 'iwlo']:
+                    self.cpp_octree.set_intensity_params(
+                        threshold=self.intensity_threshold,
+                        max_val=255.0
+                    )
+
+                # Configure IWLO-specific parameters
+                if self.update_method == 'iwlo':
+                    self.cpp_octree.set_iwlo_params(
+                        sharpness=config.get('sharpness', 3.0),
+                        decay_rate=config.get('decay_rate', 0.1),
+                        min_alpha=config.get('min_alpha', 0.1),
+                        L_min=config.get('L_min', -2.0),
+                        L_max=config.get('L_max', 3.5)
+                    )
+
                 print(f"[INFO] Using C++ OctoMap backend (resolution: {self.voxel_resolution}m, "
+                      f"method={self.update_method}, "
                       f"adaptive={self.adaptive_update}, threshold={self.adaptive_threshold}, "
                       f"max_ratio={self.adaptive_max_ratio}, clamp=[{self.log_odds_min}, {self.log_odds_max}])")
                 # No Python octree needed

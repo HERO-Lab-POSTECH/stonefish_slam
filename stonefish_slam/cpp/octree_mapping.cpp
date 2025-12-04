@@ -15,7 +15,15 @@ OctreeMapping::OctreeMapping(double resolution)
       log_odds_free_(-5.0),  // Strong free space clearing (balanced with occupied)
       adaptive_update_(true),
       adaptive_threshold_(0.5),
-      adaptive_max_ratio_(0.3)
+      adaptive_max_ratio_(0.3),
+      update_method_(UpdateMethod::LOG_ODDS),  // Default to LOG_ODDS
+      intensity_threshold_(35.0),
+      intensity_max_(255.0),
+      sharpness_(3.0),
+      decay_rate_(0.1),
+      min_alpha_(0.1),
+      L_min_(-2.0),
+      L_max_(3.5)
 {
     if (resolution_ <= 0.0) {
         throw std::invalid_argument("Resolution must be positive");
@@ -195,6 +203,192 @@ void OctreeMapping::insert_point_cloud(
     // tree_->prune();
 }
 
+void OctreeMapping::insert_point_cloud_with_intensity(
+    py::array_t<double> points,
+    py::array_t<double> intensities,
+    py::array_t<double> sensor_origin
+) {
+    // Input validation
+    auto points_buf = points.request();
+    auto intensities_buf = intensities.request();
+    auto origin_buf = sensor_origin.request();
+
+    // Check dimensions
+    if (points_buf.ndim != 2 || points_buf.shape[1] != 3) {
+        throw std::runtime_error("Points must be Nx3 array");
+    }
+    if (intensities_buf.ndim != 1) {
+        throw std::runtime_error("Intensities must be 1D array");
+    }
+    if (origin_buf.ndim != 1 || origin_buf.shape[0] != 3) {
+        throw std::runtime_error("Sensor origin must be 3-element array");
+    }
+
+    size_t num_points = points_buf.shape[0];
+    if (intensities_buf.shape[0] != static_cast<ssize_t>(num_points)) {
+        throw std::runtime_error("Points and intensities must have same length");
+    }
+
+    // Zero-copy access to NumPy data
+    const double* points_ptr = static_cast<const double*>(points_buf.ptr);
+    const double* intensities_ptr = static_cast<const double*>(intensities_buf.ptr);
+
+    // For LOG_ODDS method, fall back to standard insert_point_cloud
+    if (update_method_ == UpdateMethod::LOG_ODDS) {
+        // Create log_odds array (all occupied)
+        std::vector<double> log_odds_vec(num_points, log_odds_occupied_);
+        py::array_t<double> log_odds_arr(log_odds_vec.size(), log_odds_vec.data());
+        insert_point_cloud(points, log_odds_arr, sensor_origin);
+        return;
+    }
+
+    // For WEIGHTED_AVERAGE and IWLO: process with intensity
+#ifdef _OPENMP
+    // Parallel phase: compute keys and prepare updates
+    struct UpdateBatch {
+        std::vector<octomap::OcTreeKey> keys;
+        std::vector<double> intensities;
+
+        void reserve(size_t n) {
+            keys.reserve(n);
+            intensities.reserve(n);
+        }
+
+        void add(const octomap::OcTreeKey& key, double intensity) {
+            keys.push_back(key);
+            intensities.push_back(intensity);
+        }
+    };
+
+    std::vector<UpdateBatch> thread_batches(omp_get_max_threads());
+    for (auto& batch : thread_batches) {
+        batch.reserve(num_points / omp_get_max_threads() + 100);
+    }
+
+    #pragma omp parallel
+    {
+        int thread_id = omp_get_thread_num();
+        UpdateBatch& my_batch = thread_batches[thread_id];
+
+        #pragma omp for schedule(dynamic, 100) nowait
+        for (size_t i = 0; i < num_points; ++i) {
+            double x = points_ptr[i * 3 + 0];
+            double y = points_ptr[i * 3 + 1];
+            double z = points_ptr[i * 3 + 2];
+            octomap::point3d endpoint(x, y, z);
+
+            double intensity = intensities_ptr[i];
+
+            octomap::OcTreeKey key;
+            if (tree_->coordToKeyChecked(endpoint, key)) {
+                my_batch.add(key, intensity);
+            }
+        }
+    }
+
+    // Sequential phase: apply updates based on method
+    for (const auto& batch : thread_batches) {
+        for (size_t i = 0; i < batch.keys.size(); ++i) {
+            const auto& key = batch.keys[i];
+            double intensity = batch.intensities[i];
+
+            uint64_t hash = key_to_hash(key);
+
+            if (update_method_ == UpdateMethod::WEIGHTED_AVERAGE) {
+                // Weighted Average: P_new = (n*P_old + w(I)) / (n+1)
+                // Get observation count
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                // Get current node
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_prob = node ? node->getOccupancy() : 0.5;
+
+                // Compute weight from intensity
+                double weight = intensity_to_weight(intensity);
+
+                // Weighted average
+                double new_prob = (obs_count * current_prob + weight) / (obs_count + 1);
+
+                // Convert to log-odds and update
+                double new_log_odds = std::log(new_prob / (1.0 - new_prob + 1e-10));
+                tree_->updateNode(key, static_cast<float>(new_log_odds), false);
+
+            } else if (update_method_ == UpdateMethod::IWLO) {
+                // IWLO: L_new = L_old + ΔL * w(I) * α(n)
+                // Get observation count
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                // Get current node
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_log_odds = node ? node->getLogOdds() : 0.0;
+
+                // Compute intensity weight
+                double weight = intensity_to_weight(intensity);
+
+                // Compute adaptive learning rate
+                double alpha = compute_alpha(obs_count);
+
+                // IWLO update: ΔL = L_occ * w(I) * α(n)
+                double delta_L = log_odds_occupied_ * weight * alpha;
+
+                // Apply update with saturation
+                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
+
+                // Update node
+                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
+            }
+        }
+    }
+
+#else
+    // Single-threaded fallback
+    for (size_t i = 0; i < num_points; ++i) {
+        double x = points_ptr[i * 3 + 0];
+        double y = points_ptr[i * 3 + 1];
+        double z = points_ptr[i * 3 + 2];
+        octomap::point3d endpoint(x, y, z);
+
+        double intensity = intensities_ptr[i];
+
+        octomap::OcTreeKey key;
+        if (tree_->coordToKeyChecked(endpoint, key)) {
+            uint64_t hash = key_to_hash(key);
+
+            if (update_method_ == UpdateMethod::WEIGHTED_AVERAGE) {
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_prob = node ? node->getOccupancy() : 0.5;
+
+                double weight = intensity_to_weight(intensity);
+                double new_prob = (obs_count * current_prob + weight) / (obs_count + 1);
+
+                double new_log_odds = std::log(new_prob / (1.0 - new_prob + 1e-10));
+                tree_->updateNode(key, static_cast<float>(new_log_odds), false);
+
+            } else if (update_method_ == UpdateMethod::IWLO) {
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_log_odds = node ? node->getLogOdds() : 0.0;
+
+                double weight = intensity_to_weight(intensity);
+                double alpha = compute_alpha(obs_count);
+
+                double delta_L = log_odds_occupied_ * weight * alpha;
+                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
+
+                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
+            }
+        }
+    }
+#endif
+}
+
 py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
     if (threshold < 0.0 || threshold > 1.0) {
         throw std::invalid_argument("Threshold must be in [0, 1]");
@@ -291,6 +485,61 @@ MapStats OctreeMapping::get_map_stats() const {
     return {nodes, leaves, mem_mb};
 }
 
+// Set update method
+void OctreeMapping::set_update_method(int method) {
+    if (method < 0 || method > 2) {
+        throw std::invalid_argument("Invalid update method (0=LOG_ODDS, 1=WEIGHTED_AVG, 2=IWLO)");
+    }
+    update_method_ = static_cast<UpdateMethod>(method);
+}
+
+// Set intensity parameters
+void OctreeMapping::set_intensity_params(double threshold, double max_val) {
+    if (threshold < 0 || max_val <= threshold) {
+        throw std::invalid_argument("Invalid intensity parameters");
+    }
+    intensity_threshold_ = threshold;
+    intensity_max_ = max_val;
+}
+
+// Set IWLO parameters
+void OctreeMapping::set_iwlo_params(double sharpness, double decay_rate, double min_alpha,
+                                     double L_min, double L_max) {
+    if (sharpness <= 0 || decay_rate < 0 || min_alpha <= 0 || min_alpha > 1.0 || L_min >= L_max) {
+        throw std::invalid_argument("Invalid IWLO parameters");
+    }
+    sharpness_ = sharpness;
+    decay_rate_ = decay_rate;
+    min_alpha_ = min_alpha;
+    L_min_ = L_min;
+    L_max_ = L_max;
+}
+
+// Convert OcTreeKey to hash for observation counting
+uint64_t OctreeMapping::key_to_hash(const octomap::OcTreeKey& key) const {
+    // Simple hash: combine x, y, z using bit shifting
+    return (static_cast<uint64_t>(key[0]) << 32) |
+           (static_cast<uint64_t>(key[1]) << 16) |
+            static_cast<uint64_t>(key[2]);
+}
+
+// IWLO intensity to weight conversion (sigmoid)
+double OctreeMapping::intensity_to_weight(double intensity) const {
+    if (intensity <= intensity_threshold_) {
+        return 0.0;
+    }
+    // Normalize to [0, 1]
+    double normalized = (intensity - intensity_threshold_) / (intensity_max_ - intensity_threshold_);
+    // Sigmoid: 1 / (1 + exp(-sharpness * (normalized - 0.5)))
+    double x = sharpness_ * (normalized - 0.5);
+    return 1.0 / (1.0 + std::exp(-x));
+}
+
+// IWLO adaptive learning rate
+double OctreeMapping::compute_alpha(int obs_count) const {
+    return std::max(min_alpha_, 1.0 / (1.0 + decay_rate_ * obs_count));
+}
+
 // Pybind11 module definition
 PYBIND11_MODULE(octree_mapping, m) {
     m.doc() = "High-performance Octree mapping using OctoMap library";
@@ -315,6 +564,16 @@ PYBIND11_MODULE(octree_mapping, m) {
              "Args:\n"
              "    points: Nx3 NumPy array of [x, y, z] coordinates\n"
              "    log_odds: N-length array of log-odds updates\n"
+             "    sensor_origin: [x, y, z] sensor position")
+        .def("insert_point_cloud_with_intensity",
+             &OctreeMapping::insert_point_cloud_with_intensity,
+             py::arg("points"),
+             py::arg("intensities"),
+             py::arg("sensor_origin"),
+             "Batch insert point cloud with intensity-based updates\n\n"
+             "Args:\n"
+             "    points: Nx3 NumPy array of [x, y, z] coordinates\n"
+             "    intensities: N-length array of intensity values (0-255)\n"
              "    sensor_origin: [x, y, z] sensor position")
         .def("get_occupied_cells",
              &OctreeMapping::get_occupied_cells,
@@ -354,6 +613,23 @@ PYBIND11_MODULE(octree_mapping, m) {
              py::arg("threshold"),
              py::arg("max_ratio"),
              "Set adaptive update parameters (unidirectional Free -> Occupied protection)")
+        .def("set_update_method",
+             &OctreeMapping::set_update_method,
+             py::arg("method"),
+             "Set update method (0=LOG_ODDS, 1=WEIGHTED_AVG, 2=IWLO)")
+        .def("set_intensity_params",
+             &OctreeMapping::set_intensity_params,
+             py::arg("threshold"),
+             py::arg("max_val"),
+             "Set intensity parameters for WEIGHTED_AVG and IWLO")
+        .def("set_iwlo_params",
+             &OctreeMapping::set_iwlo_params,
+             py::arg("sharpness"),
+             py::arg("decay_rate"),
+             py::arg("min_alpha"),
+             py::arg("L_min"),
+             py::arg("L_max"),
+             "Set IWLO-specific parameters")
         .def("get_map_stats",
              &OctreeMapping::get_map_stats,
              "Get map statistics (P3.2 profiling)");
