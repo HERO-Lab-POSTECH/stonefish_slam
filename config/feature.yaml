@@ -16,7 +16,7 @@ slam_node:
     # Point cloud filtering params
     filter:
       threshold: 80  # the min intensity to be added (0-255, higher = fewer points)
-      point_downsample_resolution: 0.5  # Point cloud downsampling leaf size (meters)
+      resolution: 0.5  # Point cloud downsampling leaf size (meters)
       radius: 1.0  # outlier rejection radius
       min_points: 5  # outlier rejection min points
       skip: 5  # process every Nth frame

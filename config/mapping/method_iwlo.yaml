@@ -23,6 +23,6 @@ slam_node:
         L_max: 3.5                  # Log-odds upper bound (P ~ 0.97)
 
         # Adaptive update
-        adaptive_update: true
+        adaptive_update: false
         adaptive_threshold: 0.5
         adaptive_max_ratio: 0.3

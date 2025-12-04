@@ -43,8 +43,8 @@ def generate_launch_description():
         ),
         launch_arguments={
             'mode': 'localization-only',
-            'ssm.enable': 'true',
-            'nssm.enable': 'false',
+            'ssm_enable': 'true',      # Override yaml: ssm.enable=true
+            'nssm_enable': 'false',    # Override yaml: nssm.enable=false
             'enable_2d_mapping': 'false',
             'enable_3d_mapping': 'false',
             'vehicle_name': LaunchConfiguration('vehicle_name'),

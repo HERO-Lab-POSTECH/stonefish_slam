@@ -33,10 +33,10 @@ class Mapping2DStandaloneNode(Node):
         self.declare_parameter('odom_topic', '/bluerov2/odometry')
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
 
-        # Mapping 2D parameters
-        self.declare_parameter('map_2d_resolution', 0.1)
-        self.declare_parameter('map_size', [4000, 4000])
-        self.declare_parameter('intensity_threshold', 50)
+        # Mapping 2D parameters (must match mapping.yaml: mapping_2d.*)
+        self.declare_parameter('mapping_2d.map_2d_resolution', 0.1)
+        self.declare_parameter('mapping_2d.map_size', [4000, 4000])
+        self.declare_parameter('mapping_2d.intensity_threshold', 50)
 
         # Sonar parameters (defaults match sonar.yaml)
         self.declare_parameter('sonar.range_max', 15.0)
@@ -52,13 +52,13 @@ class Mapping2DStandaloneNode(Node):
         odom_topic = self.get_parameter('odom_topic').value
         sonar_topic = self.get_parameter('sonar_topic').value
 
-        map_resolution = self.get_parameter('map_2d_resolution').value
-        map_size = self.get_parameter('map_size').value
+        map_resolution = self.get_parameter('mapping_2d.map_2d_resolution').value
+        map_size = self.get_parameter('mapping_2d.map_size').value
         sonar_range = self.get_parameter('sonar.range_max').value
         sonar_fov = self.get_parameter('sonar.horizontal_fov').value
         range_min = self.get_parameter('sonar.range_min').value
         sonar_tilt_deg = self.get_parameter('sonar.sonar_tilt_deg').value
-        intensity_threshold = self.get_parameter('intensity_threshold').value
+        intensity_threshold = self.get_parameter('mapping_2d.intensity_threshold').value
 
         # Initialize mapper with SonarMapping2D signature
         self.mapper_2d = SonarMapping2D(
