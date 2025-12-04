@@ -150,7 +150,7 @@ void OctreeMapping::insert_point_cloud(
             double log_odds_update = batch.log_odds_updates[i];
 
             // Adaptive protection (unidirectional: Free → Occupied only)
-            // Protects free space voxels from being easily converted to occupied
+            // Only search if protection is needed, otherwise skip to avoid redundant search
             if (adaptive_update_ && log_odds_update > 0.0) {
                 octomap::OcTreeNode* node = tree_->search(key);
                 if (node) {
@@ -166,6 +166,7 @@ void OctreeMapping::insert_point_cloud(
 
             // Use updateNode() API for incremental update
             // This ensures pruning is performed automatically (lazy_eval=false)
+            // Note: updateNode internally performs search, so we only pre-search when adaptive protection is needed
             tree_->updateNode(key, static_cast<float>(log_odds_update), false);
         }
     }
@@ -186,6 +187,7 @@ void OctreeMapping::insert_point_cloud(
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
             // Adaptive protection (unidirectional: Free → Occupied only)
+            // Only search if protection is needed, otherwise skip to avoid redundant search
             if (adaptive_update_ && log_odds_update > 0.0) {
                 octomap::OcTreeNode* node = tree_->search(key);
                 if (node) {
@@ -199,6 +201,7 @@ void OctreeMapping::insert_point_cloud(
                 }
             }
 
+            // Note: updateNode internally performs search, so we only pre-search when adaptive protection is needed
             tree_->updateNode(key, static_cast<float>(log_odds_update), false);
         }
     }
@@ -305,7 +308,7 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 int obs_count = observation_counts_[hash];
                 observation_counts_[hash] = obs_count + 1;
 
-                // Get current node
+                // Get current node (needed for weighted average calculation)
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_prob = node ? node->getOccupancy() : 0.5;
 
@@ -315,8 +318,10 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 // Weighted average
                 double new_prob = (obs_count * current_prob + weight) / (obs_count + 1);
 
-                // Convert to log-odds and update
+                // Convert to log-odds and update (absolute value, not delta)
                 double new_log_odds = std::log(new_prob / (1.0 - new_prob + 1e-10));
+                // Note: For WEIGHTED_AVG, we set absolute log-odds, so updateNode still does internal search
+                // This is unavoidable due to the algorithm requiring current probability
                 tree_->updateNode(key, static_cast<float>(new_log_odds), false);
 
             } else if (update_method_ == UpdateMethod::IWLO) {
@@ -325,7 +330,7 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 int obs_count = observation_counts_[hash];
                 observation_counts_[hash] = obs_count + 1;
 
-                // Get current node
+                // Get current node (needed for delta calculation)
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
 
@@ -341,7 +346,8 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 // Apply update with saturation
                 double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
 
-                // Update node
+                // Update node with delta (updateNode expects delta, not absolute)
+                // Note: For IWLO, we must search first to compute delta, so double-search is unavoidable
                 tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
             }
         }
@@ -365,6 +371,7 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 int obs_count = observation_counts_[hash];
                 observation_counts_[hash] = obs_count + 1;
 
+                // Get current node (needed for weighted average calculation)
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_prob = node ? node->getOccupancy() : 0.5;
 
@@ -372,12 +379,14 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 double new_prob = (obs_count * current_prob + weight) / (obs_count + 1);
 
                 double new_log_odds = std::log(new_prob / (1.0 - new_prob + 1e-10));
+                // Note: For WEIGHTED_AVG, double-search is unavoidable (algorithm requires current probability)
                 tree_->updateNode(key, static_cast<float>(new_log_odds), false);
 
             } else if (update_method_ == UpdateMethod::IWLO) {
                 int obs_count = observation_counts_[hash];
                 observation_counts_[hash] = obs_count + 1;
 
+                // Get current node (needed for delta calculation)
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
 
@@ -387,6 +396,7 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 double delta_L = log_odds_occupied_ * weight * alpha;
                 double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
 
+                // Note: For IWLO, double-search is unavoidable (must compute delta first)
                 tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
             }
         }
@@ -399,38 +409,32 @@ py::array_t<double> OctreeMapping::get_occupied_cells(double threshold) {
         throw std::invalid_argument("Threshold must be in [0, 1]");
     }
 
-    // First pass: count cells above threshold
-    // Fixed: Removed isNodeOccupied() double-filtering, use threshold only (occupied voxels)
-    size_t occupied_count = 0;
-    for (octomap::OcTree::leaf_iterator it = tree_->begin_leafs();
-         it != tree_->end_leafs(); ++it) {
-        double occupancy = it->getOccupancy();
-        if (occupancy >= threshold) {
-            occupied_count++;
-        }
-    }
+    // Single pass: collect occupied cells directly into vector
+    // Optimization: avoid double iteration (count + fill)
+    std::vector<double> cells_data;
+    cells_data.reserve(tree_->getNumLeafNodes() / 2);  // Estimate: ~50% occupancy
 
-    // Allocate NumPy array (N x 4: x, y, z, log_odds)
-    py::array_t<double> result(std::vector<ssize_t>{static_cast<ssize_t>(occupied_count), 4});
-    auto result_buf = result.request();
-    double* result_ptr = static_cast<double*>(result_buf.ptr);
-
-    // Second pass: fill array with voxel centers and log-odds
-    // Fixed: Removed isNodeOccupied() double-filtering, use threshold only (occupied voxels)
-    size_t idx = 0;
     for (octomap::OcTree::leaf_iterator it = tree_->begin_leafs();
          it != tree_->end_leafs(); ++it) {
         double occupancy = it->getOccupancy();
         if (occupancy >= threshold) {
             // Get voxel center coordinates using keyToCoord (more reliable)
             octomap::point3d coord = tree_->keyToCoord(it.getKey());
-            result_ptr[idx * 4 + 0] = coord.x();
-            result_ptr[idx * 4 + 1] = coord.y();
-            result_ptr[idx * 4 + 2] = coord.z();
-            result_ptr[idx * 4 + 3] = it->getLogOdds();  // Add log-odds value
-            idx++;
+            cells_data.push_back(coord.x());
+            cells_data.push_back(coord.y());
+            cells_data.push_back(coord.z());
+            cells_data.push_back(it->getLogOdds());
         }
     }
+
+    // Calculate final count and create NumPy array
+    size_t occupied_count = cells_data.size() / 4;
+    py::array_t<double> result(std::vector<ssize_t>{static_cast<ssize_t>(occupied_count), 4});
+    auto result_buf = result.request();
+    double* result_ptr = static_cast<double*>(result_buf.ptr);
+
+    // Copy data from vector to NumPy array
+    std::copy(cells_data.begin(), cells_data.end(), result_ptr);
 
     return result;
 }

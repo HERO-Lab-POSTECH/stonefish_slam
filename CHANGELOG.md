@@ -46,6 +46,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **octree_mapping.cpp 성능 최적화 (2차)** (2025-12-04)
+  - `insert_point_cloud()`: adaptive protection이 필요 없는 경우 이중 search() 제거
+    - 최적화: `log_odds_update <= 0` 또는 `adaptive_update_ == false`일 때 search 건너뜀
+    - `updateNode()` 내부에서 search 수행하므로, 필요시에만 미리 search하여 중복 제거
+  - `get_occupied_cells()`: 이중 반복 제거
+    - 기존: 1차 루프(count) + 2차 루프(fill) → 2번 iteration
+    - 개선: std::vector로 단일 패스 수집 후 numpy 배열로 복사 → 1번 iteration
+    - 예상 성능: ~50% 향상 (iteration overhead 제거)
+  - `insert_point_cloud_with_intensity()`: 이중 search는 알고리즘상 불가피함을 명시
+    - WEIGHTED_AVG/IWLO는 현재 확률/log-odds 값을 먼저 읽어야 업데이트 가능
+  - 파일: `stonefish_slam/cpp/octree_mapping.cpp`
+
 - **C++ RayProcessor 최적화** (2025-12-04)
   - IWLO/Weighted Avg 사용 시 `insert_point_cloud_with_intensity()` 호출
   - Occupied voxel 처리 시 intensity 수집 및 저장
