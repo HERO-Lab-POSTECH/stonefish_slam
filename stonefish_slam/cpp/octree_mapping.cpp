@@ -4,6 +4,7 @@
 #include <pybind11/eigen.h>
 #include <stdexcept>
 #include <cmath>
+#include <algorithm>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -23,7 +24,8 @@ OctreeMapping::OctreeMapping(double resolution)
       decay_rate_(0.1),
       min_alpha_(0.1),
       L_min_(-2.0),
-      L_max_(3.5)
+      L_max_(3.5),
+      lut_initialized_(false)
 {
     if (resolution_ <= 0.0) {
         throw std::invalid_argument("Resolution must be positive");
@@ -39,6 +41,9 @@ OctreeMapping::OctreeMapping(double resolution)
 
     // Enable automatic pruning for memory efficiency
     tree_->enableChangeDetection(true);
+
+    // Initialize intensity weight LUT
+    initialize_lut();
 
 #ifdef _OPENMP
     int max_threads = omp_get_max_threads();
@@ -500,6 +505,8 @@ void OctreeMapping::set_intensity_params(double threshold, double max_val) {
     }
     intensity_threshold_ = threshold;
     intensity_max_ = max_val;
+    lut_initialized_ = false;  // LUT needs recalculation
+    initialize_lut();
 }
 
 // Set IWLO parameters
@@ -513,6 +520,8 @@ void OctreeMapping::set_iwlo_params(double sharpness, double decay_rate, double 
     min_alpha_ = min_alpha;
     L_min_ = L_min;
     L_max_ = L_max;
+    lut_initialized_ = false;  // LUT needs recalculation if sharpness changed
+    initialize_lut();
 }
 
 // Convert OcTreeKey to hash for observation counting
@@ -523,16 +532,27 @@ uint64_t OctreeMapping::key_to_hash(const octomap::OcTreeKey& key) const {
             static_cast<uint64_t>(key[2]);
 }
 
-// IWLO intensity to weight conversion (sigmoid)
-double OctreeMapping::intensity_to_weight(double intensity) const {
-    if (intensity <= intensity_threshold_) {
-        return 0.0;
+// Initialize intensity weight LUT (256 entries for 0-255 intensity range)
+void OctreeMapping::initialize_lut() {
+    if (lut_initialized_) return;
+
+    for (int i = 0; i < 256; ++i) {
+        if (i <= static_cast<int>(intensity_threshold_)) {
+            intensity_weight_lut_[i] = 0.0;
+        } else {
+            double normalized = (static_cast<double>(i) - intensity_threshold_)
+                               / (intensity_max_ - intensity_threshold_);
+            double x = sharpness_ * (normalized - 0.5);
+            intensity_weight_lut_[i] = 1.0 / (1.0 + std::exp(-x));
+        }
     }
-    // Normalize to [0, 1]
-    double normalized = (intensity - intensity_threshold_) / (intensity_max_ - intensity_threshold_);
-    // Sigmoid: 1 / (1 + exp(-sharpness * (normalized - 0.5)))
-    double x = sharpness_ * (normalized - 0.5);
-    return 1.0 / (1.0 + std::exp(-x));
+    lut_initialized_ = true;
+}
+
+// IWLO intensity to weight conversion (LUT-optimized)
+double OctreeMapping::intensity_to_weight(double intensity) const {
+    int idx = static_cast<int>(std::clamp(intensity, 0.0, 255.0));
+    return intensity_weight_lut_[idx];
 }
 
 // IWLO adaptive learning rate

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **C++ RayProcessor에 IWLO 지원 추가 (2025-12-04)**
+  - RayProcessorConfig에 IWLO 파라미터 추가:
+    - `update_method`: 0=LOG_ODDS, 1=WEIGHTED_AVG, 2=IWLO
+    - `sharpness`, `decay_rate`, `min_alpha`, `L_min`, `L_max`
+  - VoxelUpdate 구조체에 intensity 필드 추가
+  - process_sonar_image()에서 update_method 분기 지원
+  - 파일: `stonefish_slam/cpp/ray_processor.h`, `stonefish_slam/cpp/ray_processor.cpp`, `stonefish_slam/core/mapping_3d.py`
+
 - **3D Mapping Config 구조 및 Intensity 연동 완성 (2025-12-04)**
   - Config 파일 구조 추가 (`config/mapping/`):
     - `method_log_odds.yaml`: Log-odds 방법 파라미터
@@ -38,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **C++ RayProcessor 최적화** (2025-12-04)
+  - IWLO/Weighted Avg 사용 시 `insert_point_cloud_with_intensity()` 호출
+  - Occupied voxel 처리 시 intensity 수집 및 저장
+  - `mapping_3d.py`: RayProcessorConfig에 update_method 파라미터 전달
+  - 파일: `stonefish_slam/cpp/ray_processor.cpp`, `stonefish_slam/core/mapping_3d.py`
+
+- **octree_mapping.cpp 성능 최적화** (2025-12-04)
+  - exp() 호출을 256-entry LUT로 대체 (O(1) 조회)
+  - intensity_to_weight() 성능 대폭 개선
+  - 파일: `stonefish_slam/cpp/octree_mapping.cpp`
+
 - **FFT localization 결과를 실제 SLAM에 통합** (2025-12-01)
   - FFT 활성화 시 ICP 대신 FFT transform을 factor graph에 추가
   - Feature extraction을 FFT 활성화 시 건너뛰기 (성능 향상)
@@ -47,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **파일**: `stonefish_slam/core/slam.py`
 
 ### Fixed
+
+- **C++ RayProcessor의 IWLO 무시 버그 수정** (2025-12-04)
+  - 문제: `log_odds` 경로에서 IWLO/Weighted Avg 설정이 무시됨
+  - 수정: process_sonar_image()에서 update_method 분기 로직 추가
+  - 파일: `stonefish_slam/cpp/ray_processor.cpp`
 
 - **FFT 로컬라이제이션 - Rotation Center 버그 수정 (CRITICAL)** (2025-12-01)
   - Rotation 보정 시 중심점을 top center → bottom center (sonar 위치)로 수정

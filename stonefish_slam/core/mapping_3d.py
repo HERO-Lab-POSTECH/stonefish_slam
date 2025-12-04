@@ -179,12 +179,25 @@ class SonarMapping3D:
                 ray_config.bearing_step = config['bearing_step']
                 ray_config.intensity_threshold = self.intensity_threshold
 
+                # Update method configuration (LOG_ODDS=0, WEIGHTED_AVG=1, IWLO=2)
+                method_map = {'log_odds': 0, 'weighted_avg': 1, 'iwlo': 2}
+                ray_config.update_method = method_map.get(self.update_method, 0)
+
+                # IWLO parameters (used when update_method == 2)
+                if self.update_method == 'iwlo':
+                    ray_config.sharpness = config.get('sharpness', 3.0)
+                    ray_config.decay_rate = config.get('decay_rate', 0.1)
+                    ray_config.min_alpha = config.get('min_alpha', 0.1)
+                    ray_config.L_min = config.get('L_min', -2.0)
+                    ray_config.L_max = config.get('L_max', 3.5)
+                    ray_config.intensity_max = 255.0
+
                 # Store bearing_step for profiling
                 self.cpp_bearing_step = ray_config.bearing_step
 
                 # Create RayProcessor with shared octree
                 self.cpp_ray_processor = RayProcessor(self.cpp_octree, ray_config)
-                print(f"[INFO] C++ RayProcessor initialized (OpenMP enabled, bearing_step={ray_config.bearing_step})")
+                print(f"[INFO] C++ RayProcessor initialized (OpenMP enabled, bearing_step={ray_config.bearing_step}, update_method={self.update_method})")
             except Exception as e:
                 print(f"[WARNING] Failed to initialize C++ RayProcessor: {e}")
                 self.use_cpp_ray_processor = False

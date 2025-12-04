@@ -9,6 +9,7 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
+#include <array>
 
 namespace py = pybind11;
 
@@ -226,8 +227,13 @@ private:
     // Observation count tracking for IWLO and WEIGHTED_AVERAGE
     std::unordered_map<uint64_t, int> observation_counts_;
 
+    // Intensity weight LUT for performance optimization
+    std::array<double, 256> intensity_weight_lut_;
+    bool lut_initialized_ = false;
+
     // Helper functions
     uint64_t key_to_hash(const octomap::OcTreeKey& key) const;
     double intensity_to_weight(double intensity) const;
     double compute_alpha(int obs_count) const;
+    void initialize_lut();
 };

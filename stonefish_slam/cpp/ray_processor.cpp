@@ -156,6 +156,7 @@ void RayProcessor::process_sonar_image(
         struct VoxelUpdateSorted {
             VoxelKey key;
             double log_odds;
+            double intensity_max;  // Max intensity for this voxel
 
             bool operator<(const VoxelUpdateSorted& other) const {
                 return key < other.key;
@@ -169,7 +170,7 @@ void RayProcessor::process_sonar_image(
         for (const auto& updates : thread_updates) {
             for (const auto& update : updates) {
                 VoxelKey key(update.x, update.y, update.z, config_.voxel_resolution);
-                all_updates.push_back({key, update.log_odds});
+                all_updates.push_back({key, update.log_odds, update.intensity});
             }
         }
 
@@ -183,14 +184,16 @@ void RayProcessor::process_sonar_image(
         for (size_t i = 0; i < all_updates.size(); ) {
             VoxelKey current_key = all_updates[i].key;
             double sum = 0.0;
+            double max_intensity = 0.0;
 
             // Accumulate all updates for same voxel
             while (i < all_updates.size() && all_updates[i].key == current_key) {
                 sum += all_updates[i].log_odds;
+                max_intensity = std::max(max_intensity, all_updates[i].intensity_max);
                 i++;
             }
 
-            unique_updates.push_back({current_key, sum});
+            unique_updates.push_back({current_key, sum, max_intensity});
         }
 
         size_t unique_count = unique_updates.size();
@@ -213,16 +216,31 @@ void RayProcessor::process_sonar_image(
         // Allocate NumPy arrays for filtered voxels only
         std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(filtered_count), 3};
         py::array_t<double> points_np(points_shape);
-        py::array_t<double> log_odds_np(static_cast<py::ssize_t>(filtered_count));
         py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
 
         auto points_buf = points_np.request();
-        auto log_odds_buf = log_odds_np.request();
         auto origin_buf = origin_np.request();
 
         double* points_ptr = static_cast<double*>(points_buf.ptr);
-        double* log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
         double* origin_ptr = static_cast<double*>(origin_buf.ptr);
+
+        // Prepare data arrays based on update method
+        py::array_t<double> log_odds_np;
+        py::array_t<double> intensities_np;
+        double* log_odds_ptr = nullptr;
+        double* intensities_ptr = nullptr;
+
+        if (config_.update_method == 1 || config_.update_method == 2) {
+            // Weighted Average or IWLO: need intensity array
+            intensities_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
+            auto intensities_buf = intensities_np.request();
+            intensities_ptr = static_cast<double*>(intensities_buf.ptr);
+        } else {
+            // Log-odds: need log_odds array
+            log_odds_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
+            auto log_odds_buf = log_odds_np.request();
+            log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
+        }
 
         // Second pass: fill only valid voxels
         size_t write_idx = 0;
@@ -234,18 +252,28 @@ void RayProcessor::process_sonar_image(
                 points_ptr[write_idx * 3 + 0] = (update.key.x + 0.5) * config_.voxel_resolution;
                 points_ptr[write_idx * 3 + 1] = (update.key.y + 0.5) * config_.voxel_resolution;
                 points_ptr[write_idx * 3 + 2] = (update.key.z + 0.5) * config_.voxel_resolution;
-                log_odds_ptr[write_idx] = update.log_odds;
+
+                if (config_.update_method == 1 || config_.update_method == 2) {
+                    intensities_ptr[write_idx] = update.intensity_max;
+                } else {
+                    log_odds_ptr[write_idx] = update.log_odds;
+                }
                 write_idx++;
             }
         }
-
 
         origin_ptr[0] = sonar_origin_world[0];
         origin_ptr[1] = sonar_origin_world[1];
         origin_ptr[2] = sonar_origin_world[2];
 
-        // Single batch insert to octree
-        octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
+        // Single batch insert to octree (select API based on update method)
+        if (config_.update_method == 1 || config_.update_method == 2) {
+            // Weighted Average or IWLO
+            octree_->insert_point_cloud_with_intensity(points_np, intensities_np, origin_np);
+        } else {
+            // Log-odds
+            octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
+        }
     }
 }
 
@@ -393,7 +421,7 @@ void RayProcessor::process_single_ray_internal(
                     log_odds_update *= range_weight;
                 }
 
-                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update});
+                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 0.0});
             }
         }
     }
@@ -412,8 +440,8 @@ void RayProcessor::process_single_ray_internal(
 
         if (!hit_indices.empty()) {
             double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
-            process_occupied_voxels_internal(hit_indices, bearing_angle, T_sonar_to_world,
-                                            sonar_origin_world, voxel_updates,
+            process_occupied_voxels_internal(hit_indices, intensity_profile, bearing_angle,
+                                            T_sonar_to_world, sonar_origin_world, voxel_updates,
                                             &T_world_to_sonar, &first_hit_map, num_beams);
         }
     }
@@ -423,6 +451,7 @@ void RayProcessor::process_single_ray_internal(
 // Internal version: collect occupied voxels in C++ buffer (GIL-free, OpenMP-safe)
 void RayProcessor::process_occupied_voxels_internal(
     const std::vector<int>& hit_indices,
+    const std::vector<uint8_t>& intensity_profile,
     double bearing_angle,
     const Eigen::Matrix4d& T_sonar_to_world,
     const Eigen::Vector3d& sonar_origin_world,
@@ -433,6 +462,8 @@ void RayProcessor::process_occupied_voxels_internal(
 ) {
     // Process each range bin with high intensity
     for (int r_idx : hit_indices) {
+        // Get intensity value for this range bin
+        uint8_t intensity = intensity_profile[r_idx];
         // Calculate range (FLS convention: row 0 = far, row max = near)
         double range_m = config_.range_max - r_idx * config_.range_resolution;
 
@@ -505,7 +536,8 @@ void RayProcessor::process_occupied_voxels_internal(
                 points_world(0, idx),
                 points_world(1, idx),
                 points_world(2, idx),
-                log_odds_update
+                log_odds_update,
+                static_cast<double>(intensity)
             });
         }
     }
@@ -831,7 +863,14 @@ PYBIND11_MODULE(ray_processor, m) {
         .def_readwrite("gaussian_sigma_factor", &RayProcessorConfig::gaussian_sigma_factor)
         .def_readwrite("voxel_resolution", &RayProcessorConfig::voxel_resolution)
         .def_readwrite("bearing_step", &RayProcessorConfig::bearing_step)
-        .def_readwrite("intensity_threshold", &RayProcessorConfig::intensity_threshold);
+        .def_readwrite("intensity_threshold", &RayProcessorConfig::intensity_threshold)
+        .def_readwrite("update_method", &RayProcessorConfig::update_method)
+        .def_readwrite("sharpness", &RayProcessorConfig::sharpness)
+        .def_readwrite("decay_rate", &RayProcessorConfig::decay_rate)
+        .def_readwrite("min_alpha", &RayProcessorConfig::min_alpha)
+        .def_readwrite("L_min", &RayProcessorConfig::L_min)
+        .def_readwrite("L_max", &RayProcessorConfig::L_max)
+        .def_readwrite("intensity_max", &RayProcessorConfig::intensity_max);
 
     // RayProcessor class
     py::class_<RayProcessor>(m, "RayProcessor")

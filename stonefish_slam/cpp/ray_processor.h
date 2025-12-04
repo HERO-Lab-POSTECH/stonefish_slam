@@ -49,6 +49,15 @@ struct RayProcessorConfig {
     int bearing_step;                   // Bearing sampling step (e.g., 2 = every 2nd bearing)
     uint8_t intensity_threshold;        // Intensity threshold for detection (0-255)
 
+    // Update method parameters
+    int update_method;                  // 0=LOG_ODDS, 1=WEIGHTED_AVG, 2=IWLO
+    double sharpness;                   // IWLO sigmoid sharpness
+    double decay_rate;                  // IWLO decay rate
+    double min_alpha;                   // IWLO minimum alpha
+    double L_min;                       // IWLO saturation lower
+    double L_max;                       // IWLO saturation upper
+    double intensity_max;               // Maximum intensity value
+
     // Constructor with default values
     RayProcessorConfig()
         : range_max(40.0),
@@ -65,7 +74,14 @@ struct RayProcessorConfig {
           gaussian_sigma_factor(3.0),
           voxel_resolution(0.2),
           bearing_step(2),
-          intensity_threshold(30)
+          intensity_threshold(30),
+          update_method(0),
+          sharpness(3.0),
+          decay_rate(0.1),
+          min_alpha(0.1),
+          L_min(-2.0),
+          L_max(3.5),
+          intensity_max(255.0)
     {}
 };
 
@@ -217,6 +233,7 @@ private:
     struct VoxelUpdate {
         double x, y, z;
         double log_odds;
+        double intensity;  // Intensity value for IWLO/Weighted Average
     };
 
     /**
@@ -255,6 +272,7 @@ private:
      * own bearing, allowing self-updates while being protected from other bearings.
      *
      * @param hit_indices Indices of range bins with high intensity
+     * @param intensity_profile Intensity values along range (for IWLO)
      * @param bearing_angle Horizontal bearing angle (radians)
      * @param T_sonar_to_world Transformation matrix
      * @param sonar_origin_world Sonar origin in world frame (cached)
@@ -265,6 +283,7 @@ private:
      */
     void process_occupied_voxels_internal(
         const std::vector<int>& hit_indices,
+        const std::vector<uint8_t>& intensity_profile,
         double bearing_angle,
         const Eigen::Matrix4d& T_sonar_to_world,
         const Eigen::Vector3d& sonar_origin_world,
