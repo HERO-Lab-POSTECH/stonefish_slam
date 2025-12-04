@@ -151,27 +151,20 @@ void OctreeMapping::insert_point_cloud(
             double log_odds_update = batch.log_odds_updates[i];
 
             // Adaptive protection (unidirectional: Free → Occupied only)
-            // Optimization: updateNode first (performs internal search + update), then adjust if needed
+            double final_log_odds = log_odds_update;
             if (adaptive_update_ && log_odds_update > 0.0) {
-                // First, perform standard update to get/create node
-                octomap::OcTreeNode* node = tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+                // Check current probability BEFORE update
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_prob = node ? node->getOccupancy() : 0.5;
 
-                if (node) {
-                    double current_prob = node->getOccupancy();
-
-                    // If protection is needed, adjust the node value directly
-                    if (current_prob <= adaptive_threshold_) {
-                        // Revert update and apply scaled version
-                        double prev_log_odds = node->getLogOdds() - log_odds_update;
-                        double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
-                        double scaled_log_odds = prev_log_odds + log_odds_update * update_scale;
-                        node->setLogOdds(static_cast<float>(scaled_log_odds));
-                    }
+                // Apply protection if needed
+                if (current_prob <= adaptive_threshold_) {
+                    double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
+                    final_log_odds = log_odds_update * update_scale;
                 }
-            } else {
-                // No adaptive protection needed, direct update
-                tree_->updateNode(key, static_cast<float>(log_odds_update), false);
             }
+            // Single update with final log_odds
+            tree_->updateNode(key, static_cast<float>(final_log_odds), false);
         }
     }
 
@@ -188,31 +181,23 @@ void OctreeMapping::insert_point_cloud(
         double log_odds_update = log_odds_ptr[i];
 
         // Use updateNode() API for incremental update (enables pruning, lazy_eval=false)
-        // Optimization: Call updateNode first, then use returned node for adaptive adjustment
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
             // Adaptive protection (unidirectional: Free → Occupied only)
-            // Optimization: updateNode first (performs internal search + update), then adjust if needed
+            double final_log_odds = log_odds_update;
             if (adaptive_update_ && log_odds_update > 0.0) {
-                // First, perform standard update to get/create node
-                octomap::OcTreeNode* node = tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+                // Check current probability BEFORE update
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_prob = node ? node->getOccupancy() : 0.5;
 
-                if (node) {
-                    double current_prob = node->getOccupancy();
-
-                    // If protection is needed, adjust the node value directly
-                    if (current_prob <= adaptive_threshold_) {
-                        // Revert update and apply scaled version
-                        double prev_log_odds = node->getLogOdds() - log_odds_update;
-                        double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
-                        double scaled_log_odds = prev_log_odds + log_odds_update * update_scale;
-                        node->setLogOdds(static_cast<float>(scaled_log_odds));
-                    }
+                // Apply protection if needed
+                if (current_prob <= adaptive_threshold_) {
+                    double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
+                    final_log_odds = log_odds_update * update_scale;
                 }
-            } else {
-                // No adaptive protection needed, direct update
-                tree_->updateNode(key, static_cast<float>(log_odds_update), false);
             }
+            // Single update with final log_odds
+            tree_->updateNode(key, static_cast<float>(final_log_odds), false);
         }
     }
 #endif
@@ -643,22 +628,20 @@ void OctreeMapping::insert_voxels_batch_native(
             double log_odds_update = batch.log_odds_updates[i];
 
             // Adaptive protection (unidirectional: Free → Occupied only)
+            double final_log_odds = log_odds_update;
             if (adaptive_update_ && log_odds_update > 0.0) {
-                octomap::OcTreeNode* node = tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+                // Check current probability BEFORE update
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_prob = node ? node->getOccupancy() : 0.5;
 
-                if (node) {
-                    double current_prob = node->getOccupancy();
-
-                    if (current_prob <= adaptive_threshold_) {
-                        double prev_log_odds = node->getLogOdds() - log_odds_update;
-                        double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
-                        double scaled_log_odds = prev_log_odds + log_odds_update * update_scale;
-                        node->setLogOdds(static_cast<float>(scaled_log_odds));
-                    }
+                // Apply protection if needed
+                if (current_prob <= adaptive_threshold_) {
+                    double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
+                    final_log_odds = log_odds_update * update_scale;
                 }
-            } else {
-                tree_->updateNode(key, static_cast<float>(log_odds_update), false);
             }
+            // Single update with final log_odds
+            tree_->updateNode(key, static_cast<float>(final_log_odds), false);
         }
     }
 
@@ -672,22 +655,21 @@ void OctreeMapping::insert_voxels_batch_native(
 
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
+            // Adaptive protection (unidirectional: Free → Occupied only)
+            double final_log_odds = log_odds_update;
             if (adaptive_update_ && log_odds_update > 0.0) {
-                octomap::OcTreeNode* node = tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+                // Check current probability BEFORE update
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_prob = node ? node->getOccupancy() : 0.5;
 
-                if (node) {
-                    double current_prob = node->getOccupancy();
-
-                    if (current_prob <= adaptive_threshold_) {
-                        double prev_log_odds = node->getLogOdds() - log_odds_update;
-                        double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
-                        double scaled_log_odds = prev_log_odds + log_odds_update * update_scale;
-                        node->setLogOdds(static_cast<float>(scaled_log_odds));
-                    }
+                // Apply protection if needed
+                if (current_prob <= adaptive_threshold_) {
+                    double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
+                    final_log_odds = log_odds_update * update_scale;
                 }
-            } else {
-                tree_->updateNode(key, static_cast<float>(log_odds_update), false);
             }
+            // Single update with final log_odds
+            tree_->updateNode(key, static_cast<float>(final_log_odds), false);
         }
     }
 #endif

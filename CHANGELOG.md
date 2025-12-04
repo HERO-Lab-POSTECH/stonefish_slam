@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Adaptive Protection 로직 복원 (2025-12-04)**
+  - 버그 원인: 잘못된 최적화로 `updateNode()` 후 확률 확인하여 protection 판단
+  - 올바른 동작: `search()`로 **업데이트 전** 확률 확인 후 protection 판단
+  - 수정 위치 (4곳):
+    - Lines 155-174 (OpenMP parallel path - insert_point_cloud)
+    - Lines 196-215 (Single-threaded path - insert_point_cloud)
+    - Lines 646-661 (OpenMP parallel path - insert_voxels_batch_native)
+    - Lines 675-689 (Single-threaded path - insert_voxels_batch_native)
+  - 복원된 로직:
+    1. `tree_->search(key)`로 업데이트 전 확률 확인
+    2. `current_prob <= adaptive_threshold_` 판단
+    3. 약화된 `final_log_odds` 계산
+    4. 최종 값으로 1회만 `updateNode()`
+  - 성능: Double tree search는 알고리즘 정확성을 위해 필수
+  - 파일: `stonefish_slam/cpp/octree_mapping.cpp`
+
 ### Added
 
 - **C++ RayProcessor에 IWLO 지원 추가 (2025-12-04)**
