@@ -321,10 +321,10 @@ void RayProcessor::process_single_ray_internal(
         // Pre-compute constants (outside vertical loop for efficiency)
         const double cos_bear = std::cos(bearing_angle);
         const double sin_bear = std::sin(bearing_angle);
-        // 실제 bearing 해상도 기반 cone width 계산 (0.5 = 각 bearing 책임 영역만)
-        double actual_bearing_resolution = (config_.horizontal_fov * M_PI / 180.0) / (num_beams - 1);
-        const double bearing_half_width = actual_bearing_resolution * config_.bearing_step * 0.5;
-        const double cos_half_width = std::cos(bearing_half_width);
+        // OPTIMIZATION: Reuse actual_bearing_resolution computed at line 279
+        // Bearing cone width 계산 (0.5 = 각 bearing 책임 영역만)
+        const double bearing_cone_half_width = actual_bearing_resolution * config_.bearing_step * 0.5;
+        const double cos_half_width = std::cos(bearing_cone_half_width);
         const Eigen::Matrix3d R_world_to_sonar = T_sonar_to_world.block<3, 3>(0, 0).transpose();
 
         // Process free space with vertical fan (internal DDA traversal)
