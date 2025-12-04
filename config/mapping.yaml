@@ -22,7 +22,7 @@ slam_node:
       adaptive_max_ratio: 0.3   # max update ratio for protected voxels - Test 9: 0.2 → 0.3 (원복, 완화)
       use_range_weighting: true # use exponential range weighting
       lambda_decay: 0.1         # decay factor for range weighting
-      use_cpp_backend: true     # Test 5: C++ backend 활성화 (DDA + OpenMP)
+      use_cpp_backend: false     # Test 5: C++ backend 활성화 (DDA + OpenMP)
       enable_propagation: false  # Test 7: Bearing propagation (ray 사이 보간)
       propagation_radius: 2     # ±2 bearing 전파
       propagation_sigma: 1.5    # Gaussian 가중치 표준편차

@@ -370,8 +370,10 @@ void RayProcessor::process_single_ray_internal(
             // Transform to world frame (same transform as occupied)
             Eigen::Vector3d end_point = T_sonar_to_world.block<3, 3>(0, 0) * end_point_sonar + sonar_origin_world;
 
-            // DDA traversal (pure C++)
-            std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, 500);
+            // DDA traversal (pure C++) with dynamic max_voxels
+            double ray_length = (end_point - sonar_origin_world).norm();
+            int max_voxels = std::max(10, static_cast<int>(ray_length / config_.voxel_resolution * 1.5));
+            std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, max_voxels);
 
             // End voxel 제외로 occupied 영역 보호
             if (!voxels.empty()) {
@@ -688,8 +690,20 @@ bool RayProcessor::is_voxel_in_shadow(
         }
     }
 
-    // Check each bearing in first_hit_map
-    for (int b_idx = 0; b_idx < num_beams; ++b_idx) {
+    // OPTIMIZATION: Instead of checking all 512 bearings, compute voxel's bearing index
+    // and only check nearby bearings (±3 indices = 7 bearings total)
+    // This reduces 512 iterations to ~7 iterations (73x speedup)
+    int center_idx = static_cast<int>((voxel_bearing_rad + fov_rad / 2.0) / actual_bearing_resolution);
+    center_idx = std::clamp(center_idx, 0, num_beams - 1);
+
+    // Search radius: ±3 bearings around center (adjust based on bearing_half_width if needed)
+    // bearing_half_width in radians / actual_bearing_resolution gives number of bearings to cover
+    int search_radius = std::max(3, static_cast<int>(std::ceil(bearing_half_width / actual_bearing_resolution)));
+
+    // Check only nearby bearings
+    for (int b_idx = std::max(0, center_idx - search_radius);
+         b_idx <= std::min(num_beams - 1, center_idx + search_radius);
+         ++b_idx) {
         // Skip excluded bearing (for occupied voxels)
         if (b_idx == exclude_idx) {
             continue;
