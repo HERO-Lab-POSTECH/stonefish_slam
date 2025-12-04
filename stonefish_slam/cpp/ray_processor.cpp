@@ -213,66 +213,45 @@ void RayProcessor::process_sonar_image(
             }
         }
 
-        // Allocate NumPy arrays for filtered voxels only
-        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(filtered_count), 3};
-        py::array_t<double> points_np(points_shape);
-        py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
+        // Phase 3 Optimization: Use C++ native path (zero NumPy overhead)
+        // Prepare C++ vectors for filtered voxels only (no NumPy allocation)
+        std::vector<Eigen::Vector3d> points_vec;
+        points_vec.reserve(filtered_count);
 
-        auto points_buf = points_np.request();
-        auto origin_buf = origin_np.request();
-
-        double* points_ptr = static_cast<double*>(points_buf.ptr);
-        double* origin_ptr = static_cast<double*>(origin_buf.ptr);
-
-        // Prepare data arrays based on update method
-        py::array_t<double> log_odds_np;
-        py::array_t<double> intensities_np;
-        double* log_odds_ptr = nullptr;
-        double* intensities_ptr = nullptr;
-
-        if (config_.update_method == 1 || config_.update_method == 2) {
-            // Weighted Average or IWLO: need intensity array
-            intensities_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
-            auto intensities_buf = intensities_np.request();
-            intensities_ptr = static_cast<double*>(intensities_buf.ptr);
-        } else {
-            // Log-odds: need log_odds array
-            log_odds_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
-            auto log_odds_buf = log_odds_np.request();
-            log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
-        }
+        std::vector<double> data_vec;  // log_odds OR intensities depending on update method
+        data_vec.reserve(filtered_count);
 
         // Second pass: fill only valid voxels
-        size_t write_idx = 0;
         for (size_t i = 0; i < unique_count; ++i) {
             // VoxelKey is in grid units, compare directly
             if (unique_updates[i].key.z >= robot_grid_z) {  // Keep voxels at or below robot
                 const auto& update = unique_updates[i];
                 // Convert grid coordinates to world coordinates (voxel center)
-                points_ptr[write_idx * 3 + 0] = (update.key.x + 0.5) * config_.voxel_resolution;
-                points_ptr[write_idx * 3 + 1] = (update.key.y + 0.5) * config_.voxel_resolution;
-                points_ptr[write_idx * 3 + 2] = (update.key.z + 0.5) * config_.voxel_resolution;
+                double world_x = (update.key.x + 0.5) * config_.voxel_resolution;
+                double world_y = (update.key.y + 0.5) * config_.voxel_resolution;
+                double world_z = (update.key.z + 0.5) * config_.voxel_resolution;
+
+                points_vec.emplace_back(world_x, world_y, world_z);
 
                 if (config_.update_method == 1 || config_.update_method == 2) {
-                    intensities_ptr[write_idx] = update.intensity_max;
+                    // Intensity-based methods
+                    data_vec.push_back(update.intensity_max);
                 } else {
-                    log_odds_ptr[write_idx] = update.log_odds;
+                    // Log-odds method
+                    data_vec.push_back(update.log_odds);
                 }
-                write_idx++;
             }
         }
 
-        origin_ptr[0] = sonar_origin_world[0];
-        origin_ptr[1] = sonar_origin_world[1];
-        origin_ptr[2] = sonar_origin_world[2];
+        Eigen::Vector3d origin(sonar_origin_world[0], sonar_origin_world[1], sonar_origin_world[2]);
 
-        // Single batch insert to octree (select API based on update method)
+        // Single batch insert to octree using native C++ path (zero NumPy overhead)
         if (config_.update_method == 1 || config_.update_method == 2) {
             // Weighted Average or IWLO
-            octree_->insert_point_cloud_with_intensity(points_np, intensities_np, origin_np);
+            octree_->insert_voxels_batch_native_with_intensity(points_vec, data_vec, origin);
         } else {
             // Log-odds
-            octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
+            octree_->insert_voxels_batch_native(points_vec, data_vec, origin);
         }
     }
 }
@@ -296,6 +275,11 @@ void RayProcessor::process_single_ray_internal(
         return;  // Skip edge bearings
     }
 
+    // OPTIMIZATION: Pre-compute search radius once per ray (constant for all voxels)
+    double actual_bearing_resolution = fov_rad / (num_beams - 1);
+    double bearing_half_width = config_.vertical_fov / 2.0;
+    int search_radius = std::max(3, static_cast<int>(std::ceil(bearing_half_width / actual_bearing_resolution)));
+
     // 1. Find first hit only (ignore anything after first reflection)
     int first_hit_idx = find_first_hit(intensity_profile);
 
@@ -315,9 +299,7 @@ void RayProcessor::process_single_ray_internal(
 
     // Always perform free space processing (even if no hit found)
     {
-        // Compute bearing angle (use num_beams, not intensity_profile.size())
-        double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
-
+        // OPTIMIZATION: Reuse bearing_angle computed at line 292 (already available in outer scope)
         // Horizontal ray direction (in sonar frame)
         Eigen::Vector3d ray_direction_sonar = compute_ray_direction(bearing_angle);
 
@@ -383,7 +365,8 @@ void RayProcessor::process_single_ray_internal(
             // Add to voxel updates with range weighting
             for (const auto& voxel : voxels) {
                 // SHADOW VALIDATION: Skip voxels in shadow region
-                bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_beams);
+                // OPTIMIZATION: Pass pre-computed search_radius to avoid recomputation
+                bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_beams, -999.0, search_radius);
                 if (is_shadow) {
                     continue;  // Voxel is beyond first hit, skip free space update
                 }
@@ -441,7 +424,7 @@ void RayProcessor::process_single_ray_internal(
         }
 
         if (!hit_indices.empty()) {
-            double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
+            // Reuse bearing_angle computed at line 292 to avoid duplicate calculation
             process_occupied_voxels_internal(hit_indices, intensity_profile, bearing_angle,
                                             T_sonar_to_world, sonar_origin_world, voxel_updates,
                                             &T_world_to_sonar, &first_hit_map, num_beams);
@@ -458,9 +441,9 @@ void RayProcessor::process_occupied_voxels_internal(
     const Eigen::Matrix4d& T_sonar_to_world,
     const Eigen::Vector3d& sonar_origin_world,
     std::vector<VoxelUpdate>& voxel_updates,
-    const Eigen::Matrix4d* T_world_to_sonar,
-    const std::vector<double>* first_hit_map,
-    int num_beams
+    [[maybe_unused]] const Eigen::Matrix4d* T_world_to_sonar,
+    [[maybe_unused]] const std::vector<double>* first_hit_map,
+    [[maybe_unused]] int num_beams
 ) {
     // Process each range bin with high intensity
     for (int r_idx : hit_indices) {
@@ -658,7 +641,8 @@ bool RayProcessor::is_voxel_in_shadow(
     const Eigen::Matrix4d& T_world_to_sonar,
     const std::vector<double>& first_hit_map,
     int num_beams,
-    double exclude_bearing_rad
+    double exclude_bearing_rad,
+    int search_radius_override
 ) const {
     // Transform voxel to sonar frame
     Eigen::Vector4d voxel_world_homo(voxel_world.x(), voxel_world.y(), voxel_world.z(), 1.0);
@@ -696,9 +680,15 @@ bool RayProcessor::is_voxel_in_shadow(
     int center_idx = static_cast<int>((voxel_bearing_rad + fov_rad / 2.0) / actual_bearing_resolution);
     center_idx = std::clamp(center_idx, 0, num_beams - 1);
 
-    // Search radius: ±3 bearings around center (adjust based on bearing_half_width if needed)
-    // bearing_half_width in radians / actual_bearing_resolution gives number of bearings to cover
-    int search_radius = std::max(3, static_cast<int>(std::ceil(bearing_half_width / actual_bearing_resolution)));
+    // Search radius: use cached value if provided, otherwise compute
+    // OPTIMIZATION: Caller can pre-compute this once per sonar image (constant across all voxels)
+    int search_radius;
+    if (search_radius_override >= 0) {
+        search_radius = search_radius_override;
+    } else {
+        // bearing_half_width in radians / actual_bearing_resolution gives number of bearings to cover
+        search_radius = std::max(3, static_cast<int>(std::ceil(bearing_half_width / actual_bearing_resolution)));
+    }
 
     // Check only nearby bearings
     for (int b_idx = std::max(0, center_idx - search_radius);
@@ -915,6 +905,7 @@ PYBIND11_MODULE(ray_processor, m) {
              py::arg("first_hit_map"),
              py::arg("num_beams"),
              py::arg("exclude_bearing_rad") = -999.0,
+             py::arg("search_radius_override") = -1,
              "Check if voxel is in shadow region\n\n"
              "Args:\n"
              "    voxel_world: Voxel position in world frame (3D)\n"
@@ -922,6 +913,7 @@ PYBIND11_MODULE(ray_processor, m) {
              "    first_hit_map: List of first hit ranges for all bearings\n"
              "    num_beams: Total number of bearings\n"
              "    exclude_bearing_rad: Bearing to exclude from shadow check (default: -999.0, no exclusion)\n"
+             "    search_radius_override: Override search radius (default: -1, compute internally)\n"
              "Returns:\n"
              "    True if voxel is in shadow (should skip update)")
         .def("set_config",

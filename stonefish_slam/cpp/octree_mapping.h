@@ -201,6 +201,44 @@ public:
      */
     MapStats get_map_stats() const;
 
+    /**
+     * @brief C++ native batch insert (zero NumPy overhead)
+     *
+     * Internal-only method for use by C++ components (e.g., ray_processor).
+     * Bypasses NumPy array creation and Python binding overhead.
+     *
+     * @param points Vector of voxel centers in world coordinates
+     * @param log_odds Vector of log-odds updates per point
+     * @param sensor_origin Sensor position [x, y, z]
+     *
+     * Note: This method is NOT exposed to Python. It is identical in logic
+     *       to insert_point_cloud() but uses pure C++ containers.
+     */
+    void insert_voxels_batch_native(
+        const std::vector<Eigen::Vector3d>& points,
+        const std::vector<double>& log_odds,
+        const Eigen::Vector3d& sensor_origin
+    );
+
+    /**
+     * @brief C++ native batch insert with intensity (zero NumPy overhead)
+     *
+     * Internal-only method for WEIGHTED_AVERAGE and IWLO update methods.
+     * Bypasses NumPy array creation and Python binding overhead.
+     *
+     * @param points Vector of voxel centers in world coordinates
+     * @param intensities Vector of intensity values (0-255)
+     * @param sensor_origin Sensor position [x, y, z]
+     *
+     * Note: This method is NOT exposed to Python. It is identical in logic
+     *       to insert_point_cloud_with_intensity() but uses pure C++ containers.
+     */
+    void insert_voxels_batch_native_with_intensity(
+        const std::vector<Eigen::Vector3d>& points,
+        const std::vector<double>& intensities,
+        const Eigen::Vector3d& sensor_origin
+    );
+
 private:
     std::unique_ptr<octomap::OcTree> tree_;  // OctoMap tree instance
     double resolution_;                       // Voxel size in meters

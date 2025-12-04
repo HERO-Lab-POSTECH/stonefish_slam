@@ -144,30 +144,34 @@ void OctreeMapping::insert_point_cloud(
 
     // Sequential phase: merge all updates into tree
     // Use OctoMap's updateNode() API for incremental updates (enables pruning)
+    // Optimization: Call updateNode first, then use returned node for adaptive adjustment
     for (const auto& batch : thread_batches) {
         for (size_t i = 0; i < batch.keys.size(); ++i) {
             const auto& key = batch.keys[i];
             double log_odds_update = batch.log_odds_updates[i];
 
             // Adaptive protection (unidirectional: Free → Occupied only)
-            // Only search if protection is needed, otherwise skip to avoid redundant search
+            // Optimization: updateNode first (performs internal search + update), then adjust if needed
             if (adaptive_update_ && log_odds_update > 0.0) {
-                octomap::OcTreeNode* node = tree_->search(key);
+                // First, perform standard update to get/create node
+                octomap::OcTreeNode* node = tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+
                 if (node) {
                     double current_prob = node->getOccupancy();
 
-                    // Apply protection if current probability is below threshold
+                    // If protection is needed, adjust the node value directly
                     if (current_prob <= adaptive_threshold_) {
+                        // Revert update and apply scaled version
+                        double prev_log_odds = node->getLogOdds() - log_odds_update;
                         double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
-                        log_odds_update *= update_scale;
+                        double scaled_log_odds = prev_log_odds + log_odds_update * update_scale;
+                        node->setLogOdds(static_cast<float>(scaled_log_odds));
                     }
                 }
+            } else {
+                // No adaptive protection needed, direct update
+                tree_->updateNode(key, static_cast<float>(log_odds_update), false);
             }
-
-            // Use updateNode() API for incremental update
-            // This ensures pruning is performed automatically (lazy_eval=false)
-            // Note: updateNode internally performs search, so we only pre-search when adaptive protection is needed
-            tree_->updateNode(key, static_cast<float>(log_odds_update), false);
         }
     }
 
@@ -184,25 +188,31 @@ void OctreeMapping::insert_point_cloud(
         double log_odds_update = log_odds_ptr[i];
 
         // Use updateNode() API for incremental update (enables pruning, lazy_eval=false)
+        // Optimization: Call updateNode first, then use returned node for adaptive adjustment
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
             // Adaptive protection (unidirectional: Free → Occupied only)
-            // Only search if protection is needed, otherwise skip to avoid redundant search
+            // Optimization: updateNode first (performs internal search + update), then adjust if needed
             if (adaptive_update_ && log_odds_update > 0.0) {
-                octomap::OcTreeNode* node = tree_->search(key);
+                // First, perform standard update to get/create node
+                octomap::OcTreeNode* node = tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+
                 if (node) {
                     double current_prob = node->getOccupancy();
 
-                    // Apply protection if current probability is below threshold
+                    // If protection is needed, adjust the node value directly
                     if (current_prob <= adaptive_threshold_) {
+                        // Revert update and apply scaled version
+                        double prev_log_odds = node->getLogOdds() - log_odds_update;
                         double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
-                        log_odds_update *= update_scale;
+                        double scaled_log_odds = prev_log_odds + log_odds_update * update_scale;
+                        node->setLogOdds(static_cast<float>(scaled_log_odds));
                     }
                 }
+            } else {
+                // No adaptive protection needed, direct update
+                tree_->updateNode(key, static_cast<float>(log_odds_update), false);
             }
-
-            // Note: updateNode internally performs search, so we only pre-search when adaptive protection is needed
-            tree_->updateNode(key, static_cast<float>(log_odds_update), false);
         }
     }
 #endif
@@ -562,6 +572,274 @@ double OctreeMapping::intensity_to_weight(double intensity) const {
 // IWLO adaptive learning rate
 double OctreeMapping::compute_alpha(int obs_count) const {
     return std::max(min_alpha_, 1.0 / (1.0 + decay_rate_ * obs_count));
+}
+
+// C++ native batch insert (zero NumPy overhead)
+void OctreeMapping::insert_voxels_batch_native(
+    const std::vector<Eigen::Vector3d>& points,
+    const std::vector<double>& log_odds,
+    const Eigen::Vector3d& sensor_origin
+) {
+    // Input validation
+    if (points.size() != log_odds.size()) {
+        throw std::runtime_error("Points and log_odds must have same length");
+    }
+
+    size_t num_points = points.size();
+    if (num_points == 0) {
+        return;  // No work to do
+    }
+
+    // Convert sensor origin to OctoMap point
+    octomap::point3d sensor_pos(sensor_origin.x(), sensor_origin.y(), sensor_origin.z());
+
+    // Identical logic to insert_point_cloud(), but using std::vector instead of NumPy
+#ifdef _OPENMP
+    // Thread-local storage for batched updates
+    struct UpdateBatch {
+        std::vector<octomap::OcTreeKey> keys;
+        std::vector<double> log_odds_updates;
+
+        void reserve(size_t n) {
+            keys.reserve(n);
+            log_odds_updates.reserve(n);
+        }
+
+        void add(const octomap::OcTreeKey& key, double log_odds) {
+            keys.push_back(key);
+            log_odds_updates.push_back(log_odds);
+        }
+    };
+
+    // Parallel phase: compute keys and prepare updates (no tree access)
+    std::vector<UpdateBatch> thread_batches(omp_get_max_threads());
+    for (auto& batch : thread_batches) {
+        batch.reserve(num_points / omp_get_max_threads() + 100);
+    }
+
+    #pragma omp parallel
+    {
+        int thread_id = omp_get_thread_num();
+        UpdateBatch& my_batch = thread_batches[thread_id];
+
+        #pragma omp for schedule(dynamic, 100) nowait
+        for (size_t i = 0; i < num_points; ++i) {
+            const Eigen::Vector3d& pt = points[i];
+            octomap::point3d endpoint(pt.x(), pt.y(), pt.z());
+
+            double log_odds_update = log_odds[i];
+
+            octomap::OcTreeKey key;
+            if (tree_->coordToKeyChecked(endpoint, key)) {
+                my_batch.add(key, log_odds_update);
+            }
+        }
+    }
+
+    // Sequential phase: merge all updates into tree
+    for (const auto& batch : thread_batches) {
+        for (size_t i = 0; i < batch.keys.size(); ++i) {
+            const auto& key = batch.keys[i];
+            double log_odds_update = batch.log_odds_updates[i];
+
+            // Adaptive protection (unidirectional: Free → Occupied only)
+            if (adaptive_update_ && log_odds_update > 0.0) {
+                octomap::OcTreeNode* node = tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+
+                if (node) {
+                    double current_prob = node->getOccupancy();
+
+                    if (current_prob <= adaptive_threshold_) {
+                        double prev_log_odds = node->getLogOdds() - log_odds_update;
+                        double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
+                        double scaled_log_odds = prev_log_odds + log_odds_update * update_scale;
+                        node->setLogOdds(static_cast<float>(scaled_log_odds));
+                    }
+                }
+            } else {
+                tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+            }
+        }
+    }
+
+#else
+    // Single-threaded fallback
+    for (size_t i = 0; i < num_points; ++i) {
+        const Eigen::Vector3d& pt = points[i];
+        octomap::point3d endpoint(pt.x(), pt.y(), pt.z());
+
+        double log_odds_update = log_odds[i];
+
+        octomap::OcTreeKey key;
+        if (tree_->coordToKeyChecked(endpoint, key)) {
+            if (adaptive_update_ && log_odds_update > 0.0) {
+                octomap::OcTreeNode* node = tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+
+                if (node) {
+                    double current_prob = node->getOccupancy();
+
+                    if (current_prob <= adaptive_threshold_) {
+                        double prev_log_odds = node->getLogOdds() - log_odds_update;
+                        double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
+                        double scaled_log_odds = prev_log_odds + log_odds_update * update_scale;
+                        node->setLogOdds(static_cast<float>(scaled_log_odds));
+                    }
+                }
+            } else {
+                tree_->updateNode(key, static_cast<float>(log_odds_update), false);
+            }
+        }
+    }
+#endif
+}
+
+// C++ native batch insert with intensity (zero NumPy overhead)
+void OctreeMapping::insert_voxels_batch_native_with_intensity(
+    const std::vector<Eigen::Vector3d>& points,
+    const std::vector<double>& intensities,
+    const Eigen::Vector3d& sensor_origin
+) {
+    // Input validation
+    if (points.size() != intensities.size()) {
+        throw std::runtime_error("Points and intensities must have same length");
+    }
+
+    size_t num_points = points.size();
+    if (num_points == 0) {
+        return;  // No work to do
+    }
+
+    // For LOG_ODDS method, convert to log-odds and use standard native path
+    if (update_method_ == UpdateMethod::LOG_ODDS) {
+        std::vector<double> log_odds_vec(num_points, log_odds_occupied_);
+        insert_voxels_batch_native(points, log_odds_vec, sensor_origin);
+        return;
+    }
+
+    // For WEIGHTED_AVERAGE and IWLO: process with intensity
+#ifdef _OPENMP
+    // Parallel phase: compute keys and prepare updates
+    struct UpdateBatch {
+        std::vector<octomap::OcTreeKey> keys;
+        std::vector<double> intensities;
+
+        void reserve(size_t n) {
+            keys.reserve(n);
+            intensities.reserve(n);
+        }
+
+        void add(const octomap::OcTreeKey& key, double intensity) {
+            keys.push_back(key);
+            intensities.push_back(intensity);
+        }
+    };
+
+    std::vector<UpdateBatch> thread_batches(omp_get_max_threads());
+    for (auto& batch : thread_batches) {
+        batch.reserve(num_points / omp_get_max_threads() + 100);
+    }
+
+    #pragma omp parallel
+    {
+        int thread_id = omp_get_thread_num();
+        UpdateBatch& my_batch = thread_batches[thread_id];
+
+        #pragma omp for schedule(dynamic, 100) nowait
+        for (size_t i = 0; i < num_points; ++i) {
+            const Eigen::Vector3d& pt = points[i];
+            octomap::point3d endpoint(pt.x(), pt.y(), pt.z());
+
+            double intensity = intensities[i];
+
+            octomap::OcTreeKey key;
+            if (tree_->coordToKeyChecked(endpoint, key)) {
+                my_batch.add(key, intensity);
+            }
+        }
+    }
+
+    // Sequential phase: apply updates based on method
+    for (const auto& batch : thread_batches) {
+        for (size_t i = 0; i < batch.keys.size(); ++i) {
+            const auto& key = batch.keys[i];
+            double intensity = batch.intensities[i];
+
+            uint64_t hash = key_to_hash(key);
+
+            if (update_method_ == UpdateMethod::WEIGHTED_AVERAGE) {
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_prob = node ? node->getOccupancy() : 0.5;
+
+                double weight = intensity_to_weight(intensity);
+                double new_prob = (obs_count * current_prob + weight) / (obs_count + 1);
+
+                double new_log_odds = std::log(new_prob / (1.0 - new_prob + 1e-10));
+                tree_->updateNode(key, static_cast<float>(new_log_odds), false);
+
+            } else if (update_method_ == UpdateMethod::IWLO) {
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_log_odds = node ? node->getLogOdds() : 0.0;
+
+                double weight = intensity_to_weight(intensity);
+                double alpha = compute_alpha(obs_count);
+
+                double delta_L = log_odds_occupied_ * weight * alpha;
+                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
+
+                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
+            }
+        }
+    }
+
+#else
+    // Single-threaded fallback
+    for (size_t i = 0; i < num_points; ++i) {
+        const Eigen::Vector3d& pt = points[i];
+        octomap::point3d endpoint(pt.x(), pt.y(), pt.z());
+
+        double intensity = intensities[i];
+
+        octomap::OcTreeKey key;
+        if (tree_->coordToKeyChecked(endpoint, key)) {
+            uint64_t hash = key_to_hash(key);
+
+            if (update_method_ == UpdateMethod::WEIGHTED_AVERAGE) {
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_prob = node ? node->getOccupancy() : 0.5;
+
+                double weight = intensity_to_weight(intensity);
+                double new_prob = (obs_count * current_prob + weight) / (obs_count + 1);
+
+                double new_log_odds = std::log(new_prob / (1.0 - new_prob + 1e-10));
+                tree_->updateNode(key, static_cast<float>(new_log_odds), false);
+
+            } else if (update_method_ == UpdateMethod::IWLO) {
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_log_odds = node ? node->getLogOdds() : 0.0;
+
+                double weight = intensity_to_weight(intensity);
+                double alpha = compute_alpha(obs_count);
+
+                double delta_L = log_odds_occupied_ * weight * alpha;
+                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
+
+                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
+            }
+        }
+    }
+#endif
 }
 
 // Pybind11 module definition

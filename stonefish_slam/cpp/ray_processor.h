@@ -213,6 +213,8 @@ public:
      * @param num_beams Total number of bearings (for index calculation)
      * @param exclude_bearing_rad Bearing angle to exclude from shadow check (for occupied voxels)
      *                            Default -999.0 means no exclusion (for free space)
+     * @param search_radius_override Override search radius (optimization: pre-computed value)
+     *                               Default -1 means compute internally
      * @return True if voxel is in ANY bearing's shadow (should skip update)
      */
     bool is_voxel_in_shadow(
@@ -220,7 +222,8 @@ public:
         const Eigen::Matrix4d& T_world_to_sonar,
         const std::vector<double>& first_hit_map,
         int num_beams,
-        double exclude_bearing_rad = -999.0
+        double exclude_bearing_rad = -999.0,
+        int search_radius_override = -1
     ) const;
 
 private:
@@ -382,6 +385,7 @@ private:
 
     // Cached values for performance
     double half_aperture_;      // Cached vertical_fov / 2
+    int search_radius_cache_;   // Cached search radius for shadow detection
 
     // Profiling counters (P3.1: exp() measurement)
     // Using mutable atomic for thread-safe updates in const methods

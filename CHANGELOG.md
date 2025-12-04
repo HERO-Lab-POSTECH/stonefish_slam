@@ -46,6 +46,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **3D 매핑 성능 최적화 Phase 1-4** (2025-12-04)
+  - Phase 1: Double Tree Search 제거
+    - `octree_mapping.cpp`: adaptive protection 시 이중 tree search 제거
+    - `updateNode()` 반환값 활용하여 1회 탐색으로 통합
+    - 예상 성능 개선: 20-30ms
+  - Phase 2: Search Radius 캐싱
+    - `ray_processor.h/cpp`: `search_radius` 멤버 변수로 캐싱
+    - `is_voxel_in_shadow()` 호출마다 반복 계산 제거
+    - 예상 성능 개선: 5-10ms
+  - Phase 3: NumPy 경계 오버헤드 제거
+    - `octree_mapping.cpp/h`: `insert_voxels_batch_native()` 네이티브 메서드 추가
+    - `ray_processor.cpp`: NumPy 배열 생성 제거, C++ 벡터 직접 전달
+    - 예상 성능 개선: 10-15ms
+  - Phase 4: Bearing Angle 중복 계산 제거
+    - `ray_processor.cpp`: 동일 함수 내 2회 계산 → 1회로 통합
+    - 예상 성능 개선: <5ms
+  - **예상 총 성능 개선**: 340ms → 80-100ms (약 3-4배 개선)
+  - 파일: `stonefish_slam/cpp/octree_mapping.cpp/h`, `stonefish_slam/cpp/ray_processor.cpp/h`
+
 - **octree_mapping.cpp 성능 최적화 (2차)** (2025-12-04)
   - `insert_point_cloud()`: adaptive protection이 필요 없는 경우 이중 search() 제거
     - 최적화: `log_odds_update <= 0` 또는 `adaptive_update_ == false`일 때 search 건너뜀
