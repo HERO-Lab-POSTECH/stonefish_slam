@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **3D Mapping Config 구조 및 Intensity 연동 완성 (2025-12-04)**
+  - Config 파일 구조 추가 (`config/mapping/`):
+    - `method_log_odds.yaml`: Log-odds 방법 파라미터
+    - `method_weighted_avg.yaml`: Weighted Average 방법 파라미터
+    - `method_iwlo.yaml`: IWLO 방법 파라미터 (권장)
+  - `mapping.yaml`에 `update_method` 파라미터 추가
+  - `slam.launch.py`에 `update_method` 인자 추가 (동적 config 로딩)
+  - `mapping_3d.py`: Intensity 정보 수집 및 C++ 백엔드 전달 경로 구현
+    - `insert_point_cloud_with_intensity()` API 호출 지원
+    - Method별 파라미터 자동 설정
+  - 파일: `config/mapping/method_*.yaml`, `config/mapping.yaml`, `launch/slam.launch.py`, `core/mapping_3d.py`
+
 - **3가지 확률 업데이트 방법 지원 (2025-12-04)**
   - `log_odds`: 기존 Bayesian log-odds (기본값)
   - `weighted_avg`: voxelmap_fusion 스타일 가중 평균

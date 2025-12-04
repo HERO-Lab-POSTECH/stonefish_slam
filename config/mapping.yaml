@@ -29,3 +29,6 @@ slam_node:
       enable_gaussian_weighting: false  # Enable Gaussian weighting for bearing-based updates
       use_dda_traversal: true   # Use DDA ray traversal algorithm (C++ backend)
       bearing_step: 1           # Process every Nth bearing (1 = all bearings)
+
+      # Probability update method
+      update_method: 'log_odds'   # Options: 'log_odds', 'weighted_avg', 'iwlo'

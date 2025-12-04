@@ -590,8 +590,15 @@ class SonarMapping3D:
                     propagated_updates[adjacent_voxel_key] = {
                         'point': np.array([new_px, new_py, pz]),
                         'sum': 0.0,
-                        'count': 0
+                        'count': 0,
+                        'intensity': update_info.get('intensity', 0.0)  # Propagate intensity
                     }
+                else:
+                    # Update with max intensity when merging
+                    propagated_updates[adjacent_voxel_key]['intensity'] = max(
+                        propagated_updates[adjacent_voxel_key].get('intensity', 0.0),
+                        update_info.get('intensity', 0.0)
+                    )
 
                 propagated_updates[adjacent_voxel_key]['sum'] += weighted_sum
                 propagated_updates[adjacent_voxel_key]['count'] += update_info['count']
@@ -686,7 +693,12 @@ class SonarMapping3D:
                             continue  # Skip voxel in shadow region
 
                     if key not in voxel_updates:
-                        voxel_updates[key] = {'point': voxel_center, 'sum': 0.0, 'count': 0}
+                        voxel_updates[key] = {
+                            'point': voxel_center,
+                            'sum': 0.0,
+                            'count': 0,
+                            'intensity': 0.0  # DDA free space has no intensity
+                        }
                     voxel_updates[key]['sum'] += update.log_odds_sum
                     voxel_updates[key]['count'] += update.count
 
@@ -761,7 +773,12 @@ class SonarMapping3D:
 
                     # Accumulate log-odds updates (no type distinction)
                     if voxel_key not in voxel_updates:
-                        voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0}
+                        voxel_updates[voxel_key] = {
+                            'point': pt_world[:3],
+                            'sum': 0.0,
+                            'count': 0,
+                            'intensity': 0.0  # Free space has no intensity
+                        }
                     voxel_updates[voxel_key]['sum'] += log_odds_update  # Use weighted value
                     voxel_updates[voxel_key]['count'] += 1
 
@@ -838,7 +855,18 @@ class SonarMapping3D:
 
                 # Accumulate log-odds updates (no type distinction - just add)
                 if voxel_key not in voxel_updates:
-                    voxel_updates[voxel_key] = {'point': pt_world[:3], 'sum': 0.0, 'count': 0}
+                    voxel_updates[voxel_key] = {
+                        'point': pt_world[:3],
+                        'sum': 0.0,
+                        'count': 0,
+                        'intensity': intensity_profile[r_idx]  # Store intensity for C++ batch update
+                    }
+                else:
+                    # Update with max intensity (if multiple observations)
+                    voxel_updates[voxel_key]['intensity'] = max(
+                        voxel_updates[voxel_key].get('intensity', 0.0),
+                        intensity_profile[r_idx]
+                    )
                 voxel_updates[voxel_key]['sum'] += log_odds_update
                 voxel_updates[voxel_key]['count'] += 1
 
@@ -963,7 +991,18 @@ class SonarMapping3D:
                 # Add to all updates
                 for voxel_key, update_info in voxel_updates.items():
                     if voxel_key not in all_voxel_updates:
-                        all_voxel_updates[voxel_key] = {'point': update_info['point'], 'sum': 0.0, 'count': 0}
+                        all_voxel_updates[voxel_key] = {
+                            'point': update_info['point'],
+                            'sum': 0.0,
+                            'count': 0,
+                            'intensity': update_info.get('intensity', 0.0)
+                        }
+                    else:
+                        # Merge intensity (max value)
+                        all_voxel_updates[voxel_key]['intensity'] = max(
+                            all_voxel_updates[voxel_key].get('intensity', 0.0),
+                            update_info.get('intensity', 0.0)
+                        )
                     all_voxel_updates[voxel_key]['sum'] += update_info['sum']
                     all_voxel_updates[voxel_key]['count'] += update_info['count']
 
@@ -979,7 +1018,18 @@ class SonarMapping3D:
                     # Merge propagated updates
                     for voxel_key, update_info in propagated.items():
                         if voxel_key not in all_voxel_updates:
-                            all_voxel_updates[voxel_key] = {'point': update_info['point'], 'sum': 0.0, 'count': 0}
+                            all_voxel_updates[voxel_key] = {
+                                'point': update_info['point'],
+                                'sum': 0.0,
+                                'count': 0,
+                                'intensity': update_info.get('intensity', 0.0)
+                            }
+                        else:
+                            # Merge intensity (max value)
+                            all_voxel_updates[voxel_key]['intensity'] = max(
+                                all_voxel_updates[voxel_key].get('intensity', 0.0),
+                                update_info.get('intensity', 0.0)
+                            )
                         all_voxel_updates[voxel_key]['sum'] += update_info['sum']
                         all_voxel_updates[voxel_key]['count'] += update_info['count']
 
@@ -1011,6 +1061,7 @@ class SonarMapping3D:
                     # Prepare batch arrays
                     points_list = []
                     log_odds_list = []
+                    intensities_list = []
 
                     for voxel_key, update_info in all_voxel_updates.items():
                         # Calculate average update
@@ -1018,15 +1069,28 @@ class SonarMapping3D:
                         points_list.append(update_info['point'])
                         log_odds_list.append(avg_update)
 
+                        # Get intensity (if available, otherwise use default)
+                        intensity = update_info.get('intensity', 0.0)
+                        intensities_list.append(intensity)
+
                     # Convert to numpy arrays
                     points = np.array(points_list, dtype=np.float64)
                     log_odds = np.array(log_odds_list, dtype=np.float64)
+                    intensities = np.array(intensities_list, dtype=np.float64)
 
                     # Get sensor origin from transform
                     sensor_origin = T_sonar_to_world[:3, 3]
 
-                    # Single batch insert call
-                    self.cpp_octree.insert_point_cloud(points, log_odds, sensor_origin)
+                    # Single batch insert call with method-dependent API
+                    if self.update_method in ['weighted_avg', 'iwlo']:
+                        # Use intensity-aware API
+                        self.cpp_octree.insert_point_cloud_with_intensity(
+                            points, intensities, sensor_origin
+                        )
+                    else:
+                        # Use standard log-odds API
+                        self.cpp_octree.insert_point_cloud(points, log_odds, sensor_origin)
+
                     num_voxels_updated = len(points)
             else:
                 # Python update path (existing)

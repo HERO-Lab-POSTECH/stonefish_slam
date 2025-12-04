@@ -1,0 +1,10 @@
+# Weighted Average Method Configuration
+# voxelmap_fusion style: P_new = (n*P_old + P_obs)/(n+1)
+slam_node:
+  ros__parameters:
+    mapping_3d:
+      method:
+        intensity_threshold: 35     # Minimum intensity for observation
+        intensity_max: 255          # Maximum intensity value
+        occupied_threshold: 0.7     # Probability threshold for occupied
+        # Intensity -> Probability mapping: [threshold, max] -> [0.7, 0.95]

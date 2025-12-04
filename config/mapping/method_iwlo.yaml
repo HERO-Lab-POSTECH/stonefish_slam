@@ -1,0 +1,28 @@
+# IWLO (Intensity-Weighted Log-Odds) Method Configuration
+# Combines Log-Odds Bayesian with intensity weighting
+# Formula: L_new = L_old + ΔL × w(I) × α(n)
+slam_node:
+  ros__parameters:
+    mapping_3d:
+      method:
+        # Base log-odds parameters
+        log_odds_occupied: 2.0      # Base occupied increment
+        log_odds_free: -3.0         # Base free decrement
+
+        # Intensity weighting parameters
+        intensity_threshold: 35     # Minimum intensity for observation
+        intensity_max: 255          # Maximum intensity value
+        sharpness: 3.0              # Sigmoid steepness for intensity-to-weight
+
+        # Learning rate decay
+        decay_rate: 0.1             # Observation count decay rate
+        min_alpha: 0.1              # Minimum learning rate
+
+        # Saturation limits
+        L_min: -2.0                 # Log-odds lower bound (P ~ 0.12)
+        L_max: 3.5                  # Log-odds upper bound (P ~ 0.97)
+
+        # Adaptive update
+        adaptive_update: true
+        adaptive_threshold: 0.5
+        adaptive_max_ratio: 0.3
