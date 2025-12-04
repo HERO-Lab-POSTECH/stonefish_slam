@@ -120,6 +120,12 @@ class Mapping3DStandaloneNode(Node):
             'enable_profiling': self.get_parameter('enable_profiling').value,
         }
 
+        # Debug: Check parameter loading
+        self.get_logger().info(
+            f'DEBUG: mapping_3d.use_cpp_backend={self.get_parameter("mapping_3d.use_cpp_backend").value}, '
+            f'use_cpp_ray_processor={self.get_parameter("use_cpp_ray_processor").value}'
+        )
+
         self.mapper_3d = SonarMapping3D(config)
         self.get_logger().info(
             f'Mapper initialized: resolution={resolution}m, '
@@ -153,6 +159,13 @@ class Mapping3DStandaloneNode(Node):
             Image,
             '/mapping_3d_standalone/threshold_debug',
             10
+        )
+
+        # Log C++ backend status
+        self.get_logger().info(
+            f'C++ Backend: use_cpp_backend={self.mapper_3d.use_cpp_backend}, '
+            f'use_cpp_ray_processor={self.mapper_3d.use_cpp_ray_processor}, '
+            f'cpp_ray_processor={self.mapper_3d.cpp_ray_processor is not None}'
         )
 
         self.get_logger().info(

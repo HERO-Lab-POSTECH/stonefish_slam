@@ -24,7 +24,7 @@ from stonefish_slam.core.octree import HierarchicalOctree, OctNode
 
 # C++ Ray Processor import (with fallback)
 try:
-    from stonefish_slam.ray_processor import RayProcessor, RayProcessorConfig
+    from stonefish_slam.cpp.ray_processor import RayProcessor, RayProcessorConfig
     CPP_RAY_PROCESSOR_AVAILABLE = True
 except ImportError as e:
     print(f"[WARNING] C++ RayProcessor not available: {e}")
@@ -99,7 +99,7 @@ class SonarMapping3D:
 
         if self.use_cpp_backend:
             try:
-                from stonefish_slam import octree_mapping
+                from stonefish_slam.cpp import octree_mapping
                 self.cpp_octree = octree_mapping.OctreeMapping(resolution=self.voxel_resolution)
 
                 # Configure adaptive protection (unidirectional: Free → Occupied only)
