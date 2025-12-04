@@ -11,9 +11,11 @@ def generate_launch_description():
     mapping_2d_node = Node(
         package='stonefish_slam',
         executable='mapping_2d_standalone',
-        name='mapping_2d_node',
+        name='slam_node',  # Must match yaml namespace (slam_node.ros__parameters)
         parameters=[
-            str(config_dir / 'slam.yaml'),
+            str(config_dir / 'sonar.yaml'),    # Sonar parameters
+            str(config_dir / 'mapping.yaml'),  # Mapping parameters
+            str(config_dir / 'slam.yaml'),     # General SLAM params
             {
                 'frame_interval': 10,
                 'odom_topic': '/bluerov2/odometry',

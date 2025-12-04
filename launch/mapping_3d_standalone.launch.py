@@ -29,7 +29,7 @@ def generate_launch_description():
         Node(
             package='stonefish_slam',
             executable='mapping_3d_standalone',
-            name='mapping_3d_node',
+            name='slam_node',  # Must match yaml namespace (slam_node.ros__parameters)
             output='screen',
             parameters=[
                 str(config_dir / 'sonar.yaml'),    # Sonar parameters

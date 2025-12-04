@@ -38,13 +38,13 @@ class Mapping2DStandaloneNode(Node):
         self.declare_parameter('map_size', [4000, 4000])
         self.declare_parameter('intensity_threshold', 50)
 
-        # Sonar parameters
-        self.declare_parameter('sonar.range_max', 20.0)
+        # Sonar parameters (defaults match sonar.yaml)
+        self.declare_parameter('sonar.range_max', 15.0)
         self.declare_parameter('sonar.range_min', 0.5)
         self.declare_parameter('sonar.horizontal_fov', 130.0)
-        self.declare_parameter('sonar.num_beams', 918)
-        self.declare_parameter('sonar.num_bins', 512)
-        self.declare_parameter('sonar.sonar_position', [0.25, 0.0, 0.08])
+        self.declare_parameter('sonar.num_beams', 512)
+        self.declare_parameter('sonar.num_bins', 500)
+        self.declare_parameter('sonar.sonar_position', [0.0, 0.0, 0.0])
         self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
 
         # Get parameters
