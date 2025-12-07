@@ -137,8 +137,8 @@ class SonarMapping3D:
                         sharpness=config.get('sharpness', 3.0),
                         decay_rate=config.get('decay_rate', 0.1),
                         min_alpha=config.get('min_alpha', 0.1),
-                        L_min=config.get('L_min', -2.0),
-                        L_max=config.get('L_max', 3.5)
+                        log_odds_min=config.get('log_odds_min', -2.0),
+                        log_odds_max=config.get('log_odds_max', 3.5)
                     )
 
                 print(f"[INFO] Using C++ OctoMap backend (resolution: {self.voxel_resolution}m, "
@@ -179,6 +179,11 @@ class SonarMapping3D:
                 ray_config.bearing_step = config['bearing_step']
                 ray_config.intensity_threshold = self.intensity_threshold
 
+                # Propagation parameters (read directly from config since self.* not yet defined)
+                ray_config.enable_propagation = config.get('enable_propagation', False)
+                ray_config.propagation_radius = config.get('propagation_radius', 2)
+                ray_config.propagation_sigma = config.get('propagation_sigma', 1.5)
+
                 # Update method configuration (LOG_ODDS=0, WEIGHTED_AVG=1, IWLO=2)
                 method_map = {'log_odds': 0, 'weighted_avg': 1, 'iwlo': 2}
                 ray_config.update_method = method_map.get(self.update_method, 0)
@@ -188,8 +193,8 @@ class SonarMapping3D:
                     ray_config.sharpness = config.get('sharpness', 3.0)
                     ray_config.decay_rate = config.get('decay_rate', 0.1)
                     ray_config.min_alpha = config.get('min_alpha', 0.1)
-                    ray_config.L_min = config.get('L_min', -2.0)
-                    ray_config.L_max = config.get('L_max', 3.5)
+                    ray_config.log_odds_min = config.get('log_odds_min', -2.0)
+                    ray_config.log_odds_max = config.get('log_odds_max', 3.5)
                     ray_config.intensity_max = 255.0
 
                 # Store bearing_step for profiling
@@ -404,37 +409,25 @@ class SonarMapping3D:
 
     def compute_perspective_elevation(self, nominal_vertical_angle, bearing_angle):
         """
-        Perspective projection을 고려한 실제 elevation angle 계산
+        Perspective projection 보정 - 비활성화
 
-        Stonefish FLS는 perspective projection을 사용하므로, 같은 image row의
-        픽셀들이 다른 elevation angle을 가짐.
+        [DISABLED] Stonefish FLS는 sonarInput.frag에서 이미 3D Euclidean distance를
+        직접 계산하여 출력합니다 (len = length(eyePos - fragPos)).
+        따라서 추가적인 perspective projection 보정이 필요하지 않습니다.
 
-        수학적 유도:
-        - Perspective projection에서 viewing direction = normalize([tan(b), tan(v), 1])
-        - Elevation = arcsin(tan(v) / sqrt(tan²(b) + tan²(v) + 1))
+        이전의 perspective 보정은 bearing=0 (horizontal FOV 중앙)에서 elevation을
+        그대로 유지하고, bearing이 커질수록 elevation을 압축했습니다.
+        이로 인해 중앙 부분의 Z 분포가 더 넓어져 "중앙 움푹 파임" 현상이 발생했습니다.
 
         Args:
             nominal_vertical_angle: 이미지 row에 대응하는 nominal vertical angle (radians)
-            bearing_angle: 이미지 column에 대응하는 bearing angle (radians)
+            bearing_angle: 이미지 column에 대응하는 bearing angle (radians, unused)
 
         Returns:
-            실제 3D 공간의 elevation angle (radians)
+            nominal_vertical_angle 그대로 반환 (보정 없음)
         """
-        # Edge case: vertical angle이 0이면 bearing과 무관하게 0
-        if abs(nominal_vertical_angle) < 1e-9:
-            return 0.0
-
-        tan_v = np.tan(nominal_vertical_angle)
-        tan_b = np.tan(bearing_angle)
-
-        # Perspective projection formula
-        denominator = np.sqrt(tan_b * tan_b + tan_v * tan_v + 1.0)
-        sin_elevation = tan_v / denominator
-
-        # Clamp to valid range for arcsin
-        sin_elevation = np.clip(sin_elevation, -1.0, 1.0)
-
-        return np.arcsin(sin_elevation)
+        # Identity 변환: perspective 보정 없이 nominal angle 그대로 반환
+        return nominal_vertical_angle
 
     def _compute_first_hit_map(self, polar_image):
         """
