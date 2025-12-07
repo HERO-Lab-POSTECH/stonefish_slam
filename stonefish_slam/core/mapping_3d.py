@@ -402,6 +402,40 @@ class SonarMapping3D:
         # At r=range_max: w=exp(-λ) (e.g., λ=0.1 → w≈0.90)
         return np.exp(-lambda_decay * range_m / self.range_max)
 
+    def compute_perspective_elevation(self, nominal_vertical_angle, bearing_angle):
+        """
+        Perspective projection을 고려한 실제 elevation angle 계산
+
+        Stonefish FLS는 perspective projection을 사용하므로, 같은 image row의
+        픽셀들이 다른 elevation angle을 가짐.
+
+        수학적 유도:
+        - Perspective projection에서 viewing direction = normalize([tan(b), tan(v), 1])
+        - Elevation = arcsin(tan(v) / sqrt(tan²(b) + tan²(v) + 1))
+
+        Args:
+            nominal_vertical_angle: 이미지 row에 대응하는 nominal vertical angle (radians)
+            bearing_angle: 이미지 column에 대응하는 bearing angle (radians)
+
+        Returns:
+            실제 3D 공간의 elevation angle (radians)
+        """
+        # Edge case: vertical angle이 0이면 bearing과 무관하게 0
+        if abs(nominal_vertical_angle) < 1e-9:
+            return 0.0
+
+        tan_v = np.tan(nominal_vertical_angle)
+        tan_b = np.tan(bearing_angle)
+
+        # Perspective projection formula
+        denominator = np.sqrt(tan_b * tan_b + tan_v * tan_v + 1.0)
+        sin_elevation = tan_v / denominator
+
+        # Clamp to valid range for arcsin
+        sin_elevation = np.clip(sin_elevation, -1.0, 1.0)
+
+        return np.arcsin(sin_elevation)
+
     def _compute_first_hit_map(self, polar_image):
         """
         Compute first hit range for each bearing
@@ -743,13 +777,16 @@ class SonarMapping3D:
                     base_log_odds_free = base_log_odds_free * range_weight
 
                 for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
-                    # Calculate vertical angle within aperture
-                    vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
+                    # Calculate nominal vertical angle within aperture
+                    nominal_vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
 
-                    # Apply Gaussian weighting if enabled
+                    # Apply perspective projection correction
+                    actual_elevation = self.compute_perspective_elevation(nominal_vertical_angle, bearing_angle)
+
+                    # Apply Gaussian weighting if enabled (use nominal angle for weighting)
                     if self.enable_gaussian_weighting:
                         # Normalized angle: -1 to +1
-                        normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
+                        normalized_angle = nominal_vertical_angle / half_aperture if half_aperture > 0 else 0
                         # Gaussian: exp(-0.5 * (x/σ)^2), σ = 1/gaussian_sigma_factor
                         gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
                         log_odds_update = base_log_odds_free * gaussian_weight
@@ -757,12 +794,12 @@ class SonarMapping3D:
                         # Uniform weighting (default)
                         log_odds_update = base_log_odds_free
 
-                    # Calculate 3D position in sonar frame
+                    # Calculate 3D position in sonar frame using corrected elevation
                     # Sonar coordinate system: X=forward, Y=right, Z=down (FRD)
                     # Bearing: negative=left, positive=right
-                    x_sonar = range_m * np.cos(vertical_angle) * np.cos(bearing_angle)
-                    y_sonar = range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
-                    z_sonar = range_m * np.sin(vertical_angle)
+                    x_sonar = range_m * np.cos(actual_elevation) * np.cos(bearing_angle)
+                    y_sonar = range_m * np.cos(actual_elevation) * np.sin(bearing_angle)
+                    z_sonar = range_m * np.sin(actual_elevation)
 
                     # Transform to world frame
                     pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])
@@ -825,13 +862,16 @@ class SonarMapping3D:
                 base_log_odds_occupied = base_log_odds_occupied * range_weight
 
             for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
-                # Calculate vertical angle within aperture
-                vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
+                # Calculate nominal vertical angle within aperture
+                nominal_vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
 
-                # Apply Gaussian weighting if enabled
+                # Apply perspective projection correction
+                actual_elevation = self.compute_perspective_elevation(nominal_vertical_angle, bearing_angle)
+
+                # Apply Gaussian weighting if enabled (use nominal angle for weighting)
                 if self.enable_gaussian_weighting:
                     # Normalized angle: -1 to +1
-                    normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
+                    normalized_angle = nominal_vertical_angle / half_aperture if half_aperture > 0 else 0
                     # Gaussian: exp(-0.5 * (x/σ)^2), σ = 1/gaussian_sigma_factor
                     gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
                     log_odds_update = base_log_odds_occupied * gaussian_weight
@@ -839,11 +879,11 @@ class SonarMapping3D:
                     # Uniform weighting (default)
                     log_odds_update = base_log_odds_occupied
 
-                # Calculate 3D position in sonar frame
+                # Calculate 3D position in sonar frame using corrected elevation
                 # Bearing: negative=left, positive=right
-                x_sonar = range_m * np.cos(vertical_angle) * np.cos(bearing_angle)
-                y_sonar = range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
-                z_sonar = range_m * np.sin(vertical_angle)
+                x_sonar = range_m * np.cos(actual_elevation) * np.cos(bearing_angle)
+                y_sonar = range_m * np.cos(actual_elevation) * np.sin(bearing_angle)
+                z_sonar = range_m * np.sin(actual_elevation)
 
                 # Transform to world frame
                 pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])

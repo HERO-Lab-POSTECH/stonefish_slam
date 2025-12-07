@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **FLS Perspective Projection 보정** (2025-12-07): 3D 매핑 곡면 왜곡 수정
+  - 문제: Stonefish FLS는 perspective projection 사용, 같은 vertical sample이 곡면 형태
+  - 기존: 모든 bearing에서 동일한 vertical_angle 적용 (평면 가정)
+  - 수정: bearing에 따른 실제 elevation 계산 (`arcsin(tan(v)/sqrt(tan²(b)+tan²(v)+1))`)
+  - 효과: 가장자리(±65°)에서 Z 오차 0.5m(57%) → 0, 회전 시 갈고리 왜곡 제거
+  - 파일: `ray_processor.cpp`, `ray_processor.h`, `mapping_3d.py`
 - **Adaptive Protection 로직 복원** (2025-12-04): `updateNode()` 전에 확률 확인 필수 (알고리즘 정확성)
 
 ### Added

@@ -342,11 +342,13 @@ void RayProcessor::process_single_ray_internal(
             // Compute end point in sonar frame (same as occupied calculation)
             // This ensures coordinate consistency when sonar is tilted
             // Optimized: pre-computed cos_bear/sin_bear outside loop
-            double cos_vert = std::cos(vertical_angle);
-            double horizontal_range = safe_range * cos_vert;
+            // Perspective projection 보정: bearing에 따른 실제 elevation 계산
+            double actual_elevation = compute_perspective_elevation(vertical_angle, bearing_angle);
+            double cos_elev = std::cos(actual_elevation);
+            double horizontal_range = safe_range * cos_elev;
             double x_sonar = horizontal_range * cos_bear;
             double y_sonar = horizontal_range * sin_bear;
-            double z_sonar = safe_range * std::sin(vertical_angle);
+            double z_sonar = safe_range * std::sin(actual_elevation);
             Eigen::Vector3d end_point_sonar(x_sonar, y_sonar, z_sonar);
 
             // Transform to world frame (same transform as occupied)
@@ -474,9 +476,11 @@ void RayProcessor::process_occupied_voxels_internal(
 
             // Sonar frame coordinates (FRD: X=forward, Y=right, Z=down)
             // Bearing: 0=forward, positive=right, negative=left
-            double x_sonar = range_m * std::cos(vertical_angle) * std::cos(bearing_angle);
-            double y_sonar = range_m * std::cos(vertical_angle) * std::sin(bearing_angle);
-            double z_sonar = range_m * std::sin(vertical_angle);
+            // Perspective projection 보정: bearing에 따른 실제 elevation 계산
+            double actual_elevation = compute_perspective_elevation(vertical_angle, bearing_angle);
+            double x_sonar = range_m * std::cos(actual_elevation) * std::cos(bearing_angle);
+            double y_sonar = range_m * std::cos(actual_elevation) * std::sin(bearing_angle);
+            double z_sonar = range_m * std::sin(actual_elevation);
 
             points_sonar.col(col_idx) << x_sonar, y_sonar, z_sonar;
         }
@@ -564,6 +568,27 @@ double RayProcessor::compute_vertical_angle(int v_step, int num_vertical_steps) 
         return 0.0;
     }
     return (static_cast<double>(v_step) / num_vertical_steps) * half_aperture_;
+}
+
+// Compute perspective elevation angle
+double RayProcessor::compute_perspective_elevation(double nominal_vertical_angle, double bearing_angle) const {
+    // Edge case: vertical angle이 0이면 bearing과 무관하게 0
+    if (std::abs(nominal_vertical_angle) < 1e-9) {
+        return 0.0;
+    }
+
+    double tan_v = std::tan(nominal_vertical_angle);
+    double tan_b = std::tan(bearing_angle);
+
+    // Perspective projection formula
+    // elevation = arcsin(tan(v) / sqrt(tan²(b) + tan²(v) + 1))
+    double denominator = std::sqrt(tan_b * tan_b + tan_v * tan_v + 1.0);
+    double sin_elevation = tan_v / denominator;
+
+    // Clamp to valid range for asin
+    sin_elevation = std::max(-1.0, std::min(1.0, sin_elevation));
+
+    return std::asin(sin_elevation);
 }
 
 // Compute bearing angle
