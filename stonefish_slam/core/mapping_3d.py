@@ -409,25 +409,45 @@ class SonarMapping3D:
 
     def compute_perspective_elevation(self, nominal_vertical_angle, bearing_angle):
         """
-        Perspective projection 보정 - 비활성화
+        Perspective projection 역보정 (확대)
 
-        [DISABLED] Stonefish FLS는 sonarInput.frag에서 이미 3D Euclidean distance를
-        직접 계산하여 출력합니다 (len = length(eyePos - fragPos)).
-        따라서 추가적인 perspective projection 보정이 필요하지 않습니다.
+        Stonefish FLS는 perspective projection을 사용하여 렌더링합니다.
+        이로 인해 horizontal FOV 끝단(high bearing)에서 effective elevation이 압축됩니다.
 
-        이전의 perspective 보정은 bearing=0 (horizontal FOV 중앙)에서 elevation을
-        그대로 유지하고, bearing이 커질수록 elevation을 압축했습니다.
-        이로 인해 중앙 부분의 Z 분포가 더 넓어져 "중앙 움푹 파임" 현상이 발생했습니다.
+        압축 효과:
+        - 중앙(bearing=0°): elevation 변화 없음
+        - 끝단(bearing=65°): elevation이 약 cos(65°)≈0.42 배로 압축
+
+        이 함수는 압축을 역보정(확대)하여 모든 bearing에서 균일한 elevation 분포를 얻습니다.
+        역보정: actual_elevation = nominal_elevation / cos(bearing)
+
+        이렇게 하면 평평한 바닥이 모든 bearing에서 동일한 Z값을 가지게 됩니다.
 
         Args:
             nominal_vertical_angle: 이미지 row에 대응하는 nominal vertical angle (radians)
-            bearing_angle: 이미지 column에 대응하는 bearing angle (radians, unused)
+            bearing_angle: 이미지 column에 대응하는 bearing angle (radians)
 
         Returns:
-            nominal_vertical_angle 그대로 반환 (보정 없음)
+            역보정된 elevation angle (radians)
         """
-        # Identity 변환: perspective 보정 없이 nominal angle 그대로 반환
-        return nominal_vertical_angle
+        # Edge case: vertical angle이 0이면 bearing과 무관하게 0
+        if abs(nominal_vertical_angle) < 1e-9:
+            return 0.0
+
+        cos_bearing = np.cos(bearing_angle)
+
+        # 극단적인 bearing 값에서 수치 안정성 보장 (cos(90°)=0)
+        if abs(cos_bearing) < 0.1:  # bearing > ~84°
+            cos_bearing = 0.1 * np.sign(cos_bearing) if cos_bearing != 0 else 0.1
+
+        # 역보정: 끝단에서 elevation 확대
+        corrected_angle = nominal_vertical_angle / cos_bearing
+
+        # Clamp to reasonable range (avoid extreme values)
+        max_angle = self.vertical_fov  # 최대 vertical_fov까지 허용
+        corrected_angle = np.clip(corrected_angle, -max_angle, max_angle)
+
+        return corrected_angle
 
     def _compute_first_hit_map(self, polar_image):
         """

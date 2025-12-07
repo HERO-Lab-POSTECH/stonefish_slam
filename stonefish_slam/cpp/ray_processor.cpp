@@ -654,14 +654,32 @@ double RayProcessor::compute_vertical_angle(int v_step, int num_vertical_steps) 
     return (static_cast<double>(v_step) / num_vertical_steps) * half_aperture_;
 }
 
-// Compute perspective elevation angle
-// [DISABLED] Stonefish FLS outputs 3D Euclidean distance directly,
-// so no additional perspective correction is needed.
-// Previous correction caused "center dip" artifact in 3D mapping.
+// Compute perspective elevation angle with inverse correction
+// Stonefish FLS uses perspective projection which compresses elevation at FOV edges.
+// This function applies INVERSE correction (expansion) to compensate.
+// Result: flat floor appears flat across all bearings.
 double RayProcessor::compute_perspective_elevation(double nominal_vertical_angle, double bearing_angle) const {
-    // Identity transform: return nominal angle without perspective correction
-    (void)bearing_angle;  // Unused parameter
-    return nominal_vertical_angle;
+    // Edge case: vertical angle이 0이면 bearing과 무관하게 0
+    if (std::abs(nominal_vertical_angle) < 1e-9) {
+        return 0.0;
+    }
+
+    double cos_bearing = std::cos(bearing_angle);
+
+    // 극단적인 bearing 값에서 수치 안정성 보장 (cos(90°)=0)
+    if (std::abs(cos_bearing) < 0.1) {  // bearing > ~84°
+        cos_bearing = (cos_bearing >= 0) ? 0.1 : -0.1;
+    }
+
+    // 역보정: 끝단에서 elevation 확대
+    double corrected_angle = nominal_vertical_angle / cos_bearing;
+
+    // Clamp to reasonable range (avoid extreme values)
+    // Use 2 * half_aperture_ as max (full vertical FOV)
+    double max_angle = 2.0 * half_aperture_;
+    corrected_angle = std::max(-max_angle, std::min(max_angle, corrected_angle));
+
+    return corrected_angle;
 }
 
 // Compute bearing angle
