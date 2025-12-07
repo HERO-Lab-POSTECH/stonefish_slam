@@ -213,8 +213,6 @@ public:
      * @param num_beams Total number of bearings (for index calculation)
      * @param exclude_bearing_rad Bearing angle to exclude from shadow check (for occupied voxels)
      *                            Default -999.0 means no exclusion (for free space)
-     * @param search_radius_override Override search radius (optimization: pre-computed value)
-     *                               Default -1 means compute internally
      * @return True if voxel is in ANY bearing's shadow (should skip update)
      */
     bool is_voxel_in_shadow(
@@ -222,8 +220,7 @@ public:
         const Eigen::Matrix4d& T_world_to_sonar,
         const std::vector<double>& first_hit_map,
         int num_beams,
-        double exclude_bearing_rad = -999.0,
-        int search_radius_override = -1
+        double exclude_bearing_rad = -999.0
     ) const;
 
 private:
@@ -329,23 +326,6 @@ private:
     double compute_vertical_angle(int v_step, int num_vertical_steps) const;
 
     /**
-     * @brief Perspective projection을 고려한 실제 elevation angle 계산
-     *
-     * Stonefish FLS는 perspective projection을 사용하므로, 같은 image row의
-     * 픽셀들이 다른 elevation angle을 가짐. 이 함수는 nominal vertical angle과
-     * bearing angle을 받아 실제 3D 공간의 elevation angle을 계산.
-     *
-     * 수학적 유도:
-     * - Perspective projection에서 viewing direction = normalize([tan(b), tan(v), 1])
-     * - Elevation = arcsin(tan(v) / sqrt(tan²(b) + tan²(v) + 1))
-     *
-     * @param nominal_vertical_angle 이미지 row에 대응하는 nominal vertical angle (radians)
-     * @param bearing_angle 이미지 column에 대응하는 bearing angle (radians)
-     * @return 실제 3D 공간의 elevation angle (radians)
-     */
-    double compute_perspective_elevation(double nominal_vertical_angle, double bearing_angle) const;
-
-    /**
      * @brief Compute bearing angle from bearing index
      * @param bearing_idx Bearing index in polar image
      * @return Bearing angle in radians (centered at 0)
@@ -402,7 +382,6 @@ private:
 
     // Cached values for performance
     double half_aperture_;      // Cached vertical_fov / 2
-    int search_radius_cache_;   // Cached search radius for shadow detection
 
     // Profiling counters (P3.1: exp() measurement)
     // Using mutable atomic for thread-safe updates in const methods

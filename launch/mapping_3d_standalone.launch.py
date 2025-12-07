@@ -35,12 +35,12 @@ def generate_launch_description():
                 str(config_dir / 'sonar.yaml'),    # Sonar parameters
                 str(config_dir / 'mapping.yaml'),  # Mapping parameters
                 str(config_dir / 'slam.yaml'),     # General SLAM params
-                # Method-specific config loaded based on update_method
-                str(config_dir / 'mapping' / 'method_log_odds.yaml'),  # Default method config
+                # Method-specific config - use method_iwlo.yaml for IWLO testing
+                str(config_dir / 'mapping' / 'method_iwlo.yaml'),
                 {
                     # Standalone-specific settings only
                     'resolution': 0.2,
-                    'frame_interval': 15,
+                    'frame_interval': 5,
                     'odom_topic': '/bluerov2/odometry',
                     'sonar_topic': '/bluerov2/fls/image',
                     'update_method': update_method,

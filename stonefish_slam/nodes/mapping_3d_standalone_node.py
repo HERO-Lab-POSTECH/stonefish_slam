@@ -63,6 +63,12 @@ class Mapping3DStandaloneNode(Node):
         self.declare_parameter('mapping_3d.use_dda_traversal', True)
         self.declare_parameter('mapping_3d.bearing_step', 2)
 
+        # IWLO parameters
+        self.declare_parameter('mapping_3d.sharpness', 1.0)
+        self.declare_parameter('mapping_3d.decay_rate', 0.05)
+        self.declare_parameter('mapping_3d.min_alpha', 0.3)
+        self.declare_parameter('mapping_3d.update_method', 'iwlo')
+
         # Additional parameters
         self.declare_parameter('intensity_threshold', 50)
         self.declare_parameter('max_frames', 0)  # 0 = unlimited (was 1000, caused hang at frame #1300)
@@ -118,6 +124,11 @@ class Mapping3DStandaloneNode(Node):
             'propagation_radius': self.get_parameter('propagation_radius').value,
             'propagation_sigma': self.get_parameter('propagation_sigma').value,
             'enable_profiling': self.get_parameter('enable_profiling').value,
+            # IWLO parameters
+            'sharpness': self.get_parameter('mapping_3d.sharpness').value,
+            'decay_rate': self.get_parameter('mapping_3d.decay_rate').value,
+            'min_alpha': self.get_parameter('mapping_3d.min_alpha').value,
+            'update_method': self.get_parameter('mapping_3d.update_method').value,
         }
 
         # Debug: Check parameter loading
@@ -145,11 +156,11 @@ class Mapping3DStandaloneNode(Node):
         odom_sub = message_filters.Subscriber(self, Odometry, odom_topic)
         sonar_sub = message_filters.Subscriber(self, Image, sonar_topic)
 
-        # Approximate time sync (1 second tolerance, larger queue)
+        # Approximate time sync (100ms tolerance)
         self.ts = message_filters.ApproximateTimeSynchronizer(
             [odom_sub, sonar_sub],
-            queue_size=50,
-            slop=1.0
+            queue_size=20,
+            slop=0.1
         )
         self.ts.registerCallback(self.sync_callback)
 
@@ -178,9 +189,14 @@ class Mapping3DStandaloneNode(Node):
 
         self.frame_count += 1
 
-        # Debug: First callback confirmation
+        # Debug: First callback confirmation + time sync check
         if self.frame_count == 1:
-            self.get_logger().info('First synchronized message received!')
+            odom_time = odom_msg.header.stamp.sec + odom_msg.header.stamp.nanosec * 1e-9
+            sonar_time = sonar_msg.header.stamp.sec + sonar_msg.header.stamp.nanosec * 1e-9
+            time_diff = abs(odom_time - sonar_time)
+            self.get_logger().info(
+                f'First synchronized message received! Time diff: {time_diff*1000:.1f}ms'
+            )
 
         # Frame sampling: only process every Nth frame
         if self.frame_count % self.frame_interval != 0:

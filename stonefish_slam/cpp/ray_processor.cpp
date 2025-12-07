@@ -59,10 +59,10 @@ RayProcessor::RayProcessor(
     }
 
 #ifdef _OPENMP
-    std::cout << "[RayProcessor] OpenMP enabled: " << omp_get_max_threads()
+    std::cerr << "[RayProcessor] OpenMP enabled: " << omp_get_max_threads()
               << " threads available" << std::endl;
 #else
-    std::cout << "[RayProcessor] OpenMP not available, single-threaded" << std::endl;
+    std::cerr << "[RayProcessor] OpenMP not available, single-threaded" << std::endl;
 #endif
 }
 
@@ -156,7 +156,7 @@ void RayProcessor::process_sonar_image(
         struct VoxelUpdateSorted {
             VoxelKey key;
             double log_odds;
-            double intensity_max;  // Max intensity for this voxel
+            double intensity_avg;  // Average intensity for this voxel
 
             bool operator<(const VoxelUpdateSorted& other) const {
                 return key < other.key;
@@ -183,35 +183,29 @@ void RayProcessor::process_sonar_image(
 
         for (size_t i = 0; i < all_updates.size(); ) {
             VoxelKey current_key = all_updates[i].key;
-            double max_occupied = 0.0;  // Max positive (occupied) update
-            double max_free = 0.0;      // Max negative (free) update (closest to 0)
-            double max_intensity = 0.0;
-            bool has_occupied = false;
-            bool has_free = false;
+            double sum = 0.0;
+            double intensity_sum = 0.0;
+            int count = 0;
 
-            // Separate occupied and free updates, take MAX of each
+            // Accumulate all updates for same voxel
             while (i < all_updates.size() && all_updates[i].key == current_key) {
-                double log_odds = all_updates[i].log_odds;
-                if (log_odds > 0) {
-                    // Occupied update: take maximum
-                    max_occupied = std::max(max_occupied, log_odds);
-                    has_occupied = true;
-                } else if (log_odds < 0) {
-                    // Free update: take maximum (closest to 0, i.e., least negative)
-                    if (!has_free) {
-                        max_free = log_odds;
-                        has_free = true;
-                    } else {
-                        max_free = std::max(max_free, log_odds);  // max of negatives = closest to 0
-                    }
-                }
-                max_intensity = std::max(max_intensity, all_updates[i].intensity_max);
+                sum += all_updates[i].log_odds;
+                intensity_sum += all_updates[i].intensity_avg;
+                count++;
                 i++;
             }
 
-            // Combine: max_occupied + max_free (one update per type per frame)
-            double final_log_odds = max_occupied + max_free;
-            unique_updates.push_back({current_key, final_log_odds, max_intensity});
+            // Average intensity: if multiple rays hit same voxel, average their intensities
+            double avg_intensity = intensity_sum / count;
+
+            // DEBUG: Log free/occupied count
+            static int debug_count = 0;
+            if (debug_count < 5 && sum < 0) {
+                std::cerr << "[DEBUG] Free voxel: log_odds_sum=" << sum << ", avg_intensity=" << avg_intensity << std::endl;
+                debug_count++;
+            }
+
+            unique_updates.push_back({current_key, sum, avg_intensity});
         }
 
         size_t unique_count = unique_updates.size();
@@ -231,68 +225,68 @@ void RayProcessor::process_sonar_image(
             }
         }
 
-        // Phase 3 Optimization: Use C++ native path (zero NumPy overhead)
-        // For IWLO/Weighted Average: separate free space (use log_odds) and occupied (use intensity)
-        Eigen::Vector3d origin(sonar_origin_world[0], sonar_origin_world[1], sonar_origin_world[2]);
+        // Allocate NumPy arrays for filtered voxels only
+        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(filtered_count), 3};
+        py::array_t<double> points_np(points_shape);
+        py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
 
-        if (config_.update_method == 1 || config_.update_method == 2) {
-            // IWLO or Weighted Average: split into free space and occupied
-            std::vector<Eigen::Vector3d> free_points, occupied_points;
-            std::vector<double> free_log_odds, occupied_intensities;
-            free_points.reserve(filtered_count / 2);
-            occupied_points.reserve(filtered_count / 2);
-            free_log_odds.reserve(filtered_count / 2);
-            occupied_intensities.reserve(filtered_count / 2);
+        auto points_buf = points_np.request();
+        auto origin_buf = origin_np.request();
 
-            for (size_t i = 0; i < unique_count; ++i) {
-                if (unique_updates[i].key.z >= robot_grid_z) {
-                    const auto& update = unique_updates[i];
-                    double world_x = (update.key.x + 0.5) * config_.voxel_resolution;
-                    double world_y = (update.key.y + 0.5) * config_.voxel_resolution;
-                    double world_z = (update.key.z + 0.5) * config_.voxel_resolution;
+        double* points_ptr = static_cast<double*>(points_buf.ptr);
+        double* origin_ptr = static_cast<double*>(origin_buf.ptr);
 
-                    if (update.log_odds < 0) {
-                        // Free space: use log_odds directly
-                        free_points.emplace_back(world_x, world_y, world_z);
-                        free_log_odds.push_back(update.log_odds);
-                    } else {
-                        // Occupied: use intensity for IWLO/Weighted Average
-                        occupied_points.emplace_back(world_x, world_y, world_z);
-                        occupied_intensities.push_back(update.intensity_max);
-                    }
-                }
-            }
+        // Prepare data arrays based on update method
+        py::array_t<double> log_odds_np;
+        py::array_t<double> intensities_np;
+        double* log_odds_ptr = nullptr;
+        double* intensities_ptr = nullptr;
 
-            // Insert free space using log_odds method
-            if (!free_points.empty()) {
-                octree_->insert_voxels_batch_native(free_points, free_log_odds, origin);
-            }
-            // Insert occupied using intensity-based method
-            if (!occupied_points.empty()) {
-                octree_->insert_voxels_batch_native_with_intensity(occupied_points, occupied_intensities, origin);
-            }
+        if (config_.update_method == 1) {
+            // Weighted Average: need intensity array
+            intensities_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
+            auto intensities_buf = intensities_np.request();
+            intensities_ptr = static_cast<double*>(intensities_buf.ptr);
         } else {
-            // Log-odds method: all voxels use log_odds
-            std::vector<Eigen::Vector3d> points_vec;
-            std::vector<double> data_vec;
-            points_vec.reserve(filtered_count);
-            data_vec.reserve(filtered_count);
+            // Log-odds or IWLO: use log_odds_sum directly
+            log_odds_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
+            auto log_odds_buf = log_odds_np.request();
+            log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
+        }
 
-            for (size_t i = 0; i < unique_count; ++i) {
-                if (unique_updates[i].key.z >= robot_grid_z) {
-                    const auto& update = unique_updates[i];
-                    double world_x = (update.key.x + 0.5) * config_.voxel_resolution;
-                    double world_y = (update.key.y + 0.5) * config_.voxel_resolution;
-                    double world_z = (update.key.z + 0.5) * config_.voxel_resolution;
+        // Second pass: fill only valid voxels
+        size_t write_idx = 0;
+        for (size_t i = 0; i < unique_count; ++i) {
+            // VoxelKey is in grid units, compare directly
+            if (unique_updates[i].key.z >= robot_grid_z) {  // Keep voxels at or below robot
+                const auto& update = unique_updates[i];
+                // Convert grid coordinates to world coordinates (voxel center)
+                points_ptr[write_idx * 3 + 0] = (update.key.x + 0.5) * config_.voxel_resolution;
+                points_ptr[write_idx * 3 + 1] = (update.key.y + 0.5) * config_.voxel_resolution;
+                points_ptr[write_idx * 3 + 2] = (update.key.z + 0.5) * config_.voxel_resolution;
 
-                    points_vec.emplace_back(world_x, world_y, world_z);
-                    data_vec.push_back(update.log_odds);
+                if (config_.update_method == 1) {
+                    // Weighted Average: use intensity
+                    intensities_ptr[write_idx] = update.intensity_avg;
+                } else {
+                    // Log-odds or IWLO: use log_odds_sum
+                    log_odds_ptr[write_idx] = update.log_odds;
                 }
+                write_idx++;
             }
+        }
 
-            if (!points_vec.empty()) {
-                octree_->insert_voxels_batch_native(points_vec, data_vec, origin);
-            }
+        origin_ptr[0] = sonar_origin_world[0];
+        origin_ptr[1] = sonar_origin_world[1];
+        origin_ptr[2] = sonar_origin_world[2];
+
+        // Single batch insert to octree (select API based on update method)
+        if (config_.update_method == 1 || config_.update_method == 2) {
+            // Weighted Average OR IWLO: use intensity-based API
+            octree_->insert_point_cloud_with_intensity(points_np, intensities_np, origin_np);
+        } else {
+            // LOG_ODDS ONLY: use log_odds_sum directly
+            octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
         }
     }
 }
@@ -308,6 +302,13 @@ void RayProcessor::process_single_ray_internal(
     const std::vector<double>& first_hit_map,
     std::vector<VoxelUpdate>& voxel_updates
 ) {
+    // DEBUG: Function entry
+    static int fn_entry = 0;
+    if (fn_entry < 3) {
+        std::cerr << "[DEBUG FN] process_single_ray_internal called, bearing_idx=" << bearing_idx << std::endl;
+        fn_entry++;
+    }
+
     // FOV EDGE EXCLUSION: Skip outer 5% of horizontal FOV (central 90%)
     double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
     double fov_rad = config_.horizontal_fov * M_PI / 180.0;
@@ -315,11 +316,6 @@ void RayProcessor::process_single_ray_internal(
     if (std::abs(bearing_angle) > max_bearing_angle) {
         return;  // Skip edge bearings
     }
-
-    // OPTIMIZATION: Pre-compute search radius once per ray (constant for all voxels)
-    double actual_bearing_resolution = fov_rad / (num_beams - 1);
-    double bearing_half_width = config_.vertical_fov / 2.0;
-    int search_radius = std::max(3, static_cast<int>(std::ceil(bearing_half_width / actual_bearing_resolution)));
 
     // 1. Find first hit only (ignore anything after first reflection)
     int first_hit_idx = find_first_hit(intensity_profile);
@@ -340,7 +336,9 @@ void RayProcessor::process_single_ray_internal(
 
     // Always perform free space processing (even if no hit found)
     {
-        // OPTIMIZATION: Reuse bearing_angle computed at line 292 (already available in outer scope)
+        // Compute bearing angle (use num_beams, not intensity_profile.size())
+        double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
+
         // Horizontal ray direction (in sonar frame)
         Eigen::Vector3d ray_direction_sonar = compute_ray_direction(bearing_angle);
 
@@ -355,6 +353,16 @@ void RayProcessor::process_single_ray_internal(
 
         // Safety margin: end 1 voxel before occupied to prevent overlap
         double safe_range = range_to_first_hit - config_.voxel_resolution;
+
+        // DEBUG: Check free space entry
+        static int entry_debug = 0;
+        if (entry_debug < 5) {
+            std::cerr << "[DEBUG ENTRY] range_to_first_hit=" << range_to_first_hit
+                      << ", safe_range=" << safe_range
+                      << ", voxel_res=" << config_.voxel_resolution << std::endl;
+            entry_debug++;
+        }
+
         if (safe_range <= 0.0) {
             return;  // Skip this bearing if too close
         }
@@ -362,10 +370,10 @@ void RayProcessor::process_single_ray_internal(
         // Pre-compute constants (outside vertical loop for efficiency)
         const double cos_bear = std::cos(bearing_angle);
         const double sin_bear = std::sin(bearing_angle);
-        // OPTIMIZATION: Reuse actual_bearing_resolution computed at line 279
-        // Bearing cone width 계산 (0.5 = 각 bearing 책임 영역만)
-        const double bearing_cone_half_width = actual_bearing_resolution * config_.bearing_step * 0.5;
-        const double cos_half_width = std::cos(bearing_cone_half_width);
+        // 실제 bearing 해상도 기반 cone width 계산 (0.5 = 각 bearing 책임 영역만)
+        double actual_bearing_resolution = (config_.horizontal_fov * M_PI / 180.0) / (num_beams - 1);
+        const double bearing_half_width = actual_bearing_resolution * config_.bearing_step * 0.5;
+        const double cos_half_width = std::cos(bearing_half_width);
         const Eigen::Matrix3d R_world_to_sonar = T_sonar_to_world.block<3, 3>(0, 0).transpose();
 
         // Process free space with vertical fan (internal DDA traversal)
@@ -383,22 +391,25 @@ void RayProcessor::process_single_ray_internal(
             // Compute end point in sonar frame (same as occupied calculation)
             // This ensures coordinate consistency when sonar is tilted
             // Optimized: pre-computed cos_bear/sin_bear outside loop
-            // Perspective projection 보정: bearing에 따른 실제 elevation 계산
-            double actual_elevation = compute_perspective_elevation(vertical_angle, bearing_angle);
-            double cos_elev = std::cos(actual_elevation);
-            double horizontal_range = safe_range * cos_elev;
+            double cos_vert = std::cos(vertical_angle);
+            double horizontal_range = safe_range * cos_vert;
             double x_sonar = horizontal_range * cos_bear;
             double y_sonar = horizontal_range * sin_bear;
-            double z_sonar = safe_range * std::sin(actual_elevation);
+            double z_sonar = safe_range * std::sin(vertical_angle);
             Eigen::Vector3d end_point_sonar(x_sonar, y_sonar, z_sonar);
 
             // Transform to world frame (same transform as occupied)
             Eigen::Vector3d end_point = T_sonar_to_world.block<3, 3>(0, 0) * end_point_sonar + sonar_origin_world;
 
-            // DDA traversal (pure C++) with dynamic max_voxels
-            double ray_length = (end_point - sonar_origin_world).norm();
-            int max_voxels = std::max(10, static_cast<int>(ray_length / config_.voxel_resolution * 1.5));
-            std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, max_voxels);
+            // DDA traversal (pure C++)
+            std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, 500);
+
+            // DEBUG: Check DDA result
+            static int dda_debug = 0;
+            if (dda_debug < 3) {
+                std::cerr << "[DEBUG DDA] voxels.size()=" << voxels.size() << ", range_to_first_hit=" << range_to_first_hit << std::endl;
+                dda_debug++;
+            }
 
             // End voxel 제외로 occupied 영역 보호
             if (!voxels.empty()) {
@@ -408,8 +419,7 @@ void RayProcessor::process_single_ray_internal(
             // Add to voxel updates with range weighting
             for (const auto& voxel : voxels) {
                 // SHADOW VALIDATION: Skip voxels in shadow region
-                // OPTIMIZATION: Pass pre-computed search_radius to avoid recomputation
-                bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_beams, -999.0, search_radius);
+                bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_beams);
                 if (is_shadow) {
                     continue;  // Voxel is beyond first hit, skip free space update
                 }
@@ -449,7 +459,14 @@ void RayProcessor::process_single_ray_internal(
                     log_odds_update *= range_weight;
                 }
 
-                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 0.0, bearing_idx});
+                // DEBUG: Check free space generation
+                static int free_debug = 0;
+                if (free_debug < 3) {
+                    std::cerr << "[DEBUG FREE] log_odds_free=" << config_.log_odds_free
+                              << ", log_odds_update=" << log_odds_update << std::endl;
+                    free_debug++;
+                }
+                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 0.0});  // 0.0 < intensity_threshold = free space
             }
         }
     }
@@ -467,9 +484,9 @@ void RayProcessor::process_single_ray_internal(
         }
 
         if (!hit_indices.empty()) {
-            // Reuse bearing_angle computed at line 292 to avoid duplicate calculation
+            double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
             process_occupied_voxels_internal(hit_indices, intensity_profile, bearing_angle,
-                                            bearing_idx, T_sonar_to_world, sonar_origin_world, voxel_updates,
+                                            T_sonar_to_world, sonar_origin_world, voxel_updates,
                                             &T_world_to_sonar, &first_hit_map, num_beams);
         }
     }
@@ -481,13 +498,12 @@ void RayProcessor::process_occupied_voxels_internal(
     const std::vector<int>& hit_indices,
     const std::vector<uint8_t>& intensity_profile,
     double bearing_angle,
-    int bearing_idx,
     const Eigen::Matrix4d& T_sonar_to_world,
     const Eigen::Vector3d& sonar_origin_world,
     std::vector<VoxelUpdate>& voxel_updates,
-    [[maybe_unused]] const Eigen::Matrix4d* T_world_to_sonar,
-    [[maybe_unused]] const std::vector<double>* first_hit_map,
-    [[maybe_unused]] int num_beams
+    const Eigen::Matrix4d* T_world_to_sonar,
+    const std::vector<double>* first_hit_map,
+    int num_beams
 ) {
     // Process each range bin with high intensity
     for (int r_idx : hit_indices) {
@@ -518,11 +534,9 @@ void RayProcessor::process_occupied_voxels_internal(
 
             // Sonar frame coordinates (FRD: X=forward, Y=right, Z=down)
             // Bearing: 0=forward, positive=right, negative=left
-            // Perspective projection 보정: bearing에 따른 실제 elevation 계산
-            double actual_elevation = compute_perspective_elevation(vertical_angle, bearing_angle);
-            double x_sonar = range_m * std::cos(actual_elevation) * std::cos(bearing_angle);
-            double y_sonar = range_m * std::cos(actual_elevation) * std::sin(bearing_angle);
-            double z_sonar = range_m * std::sin(actual_elevation);
+            double x_sonar = range_m * std::cos(vertical_angle) * std::cos(bearing_angle);
+            double y_sonar = range_m * std::cos(vertical_angle) * std::sin(bearing_angle);
+            double z_sonar = range_m * std::sin(vertical_angle);
 
             points_sonar.col(col_idx) << x_sonar, y_sonar, z_sonar;
         }
@@ -568,50 +582,8 @@ void RayProcessor::process_occupied_voxels_internal(
                 points_world(1, idx),
                 points_world(2, idx),
                 log_odds_update,
-                static_cast<double>(intensity),
-                bearing_idx
+                static_cast<double>(intensity)
             });
-
-            // Propagation: Add voxels at adjacent bearings with Gaussian weighting
-            if (config_.enable_propagation && num_beams > 1) {
-                double fov_rad = config_.horizontal_fov * M_PI / 180.0;
-                double actual_bearing_res = fov_rad / (num_beams - 1);
-
-                for (int p_offset = -config_.propagation_radius; p_offset <= config_.propagation_radius; ++p_offset) {
-                    if (p_offset == 0) continue;  // Skip original bearing
-
-                    // Gaussian weight for propagation
-                    double prop_gaussian = std::exp(-0.5 * std::pow(static_cast<double>(p_offset) / config_.propagation_sigma, 2));
-
-                    // Compute new bearing angle
-                    double new_bearing_angle = bearing_angle + p_offset * actual_bearing_res;
-
-                    // Check if within FOV (90% of half FOV to avoid edges)
-                    if (std::abs(new_bearing_angle) > fov_rad / 2.0 * 0.9) continue;
-
-                    // Compute new position in sonar frame
-                    double actual_elevation = compute_perspective_elevation(vertical_angle, new_bearing_angle);
-                    double x_sonar = range_m * std::cos(actual_elevation) * std::cos(new_bearing_angle);
-                    double y_sonar = range_m * std::cos(actual_elevation) * std::sin(new_bearing_angle);
-                    double z_sonar = range_m * std::sin(actual_elevation);
-
-                    // Transform to world frame
-                    Eigen::Vector3d point_sonar(x_sonar, y_sonar, z_sonar);
-                    Eigen::Vector3d point_world = T_sonar_to_world.block<3, 3>(0, 0) * point_sonar + sonar_origin_world;
-
-                    // Weighted log-odds (apply propagation Gaussian weight)
-                    double prop_log_odds = log_odds_update * prop_gaussian;
-
-                    voxel_updates.push_back({
-                        point_world.x(),
-                        point_world.y(),
-                        point_world.z(),
-                        prop_log_odds,
-                        static_cast<double>(intensity) * prop_gaussian,  // Also weight intensity
-                        bearing_idx  // Original bearing idx for tracking
-                    });
-                }
-            }
         }
     }
 }
@@ -652,34 +624,6 @@ double RayProcessor::compute_vertical_angle(int v_step, int num_vertical_steps) 
         return 0.0;
     }
     return (static_cast<double>(v_step) / num_vertical_steps) * half_aperture_;
-}
-
-// Compute perspective elevation angle with inverse correction
-// Stonefish FLS uses perspective projection which compresses elevation at FOV edges.
-// This function applies INVERSE correction (expansion) to compensate.
-// Result: flat floor appears flat across all bearings.
-double RayProcessor::compute_perspective_elevation(double nominal_vertical_angle, double bearing_angle) const {
-    // Edge case: vertical angle이 0이면 bearing과 무관하게 0
-    if (std::abs(nominal_vertical_angle) < 1e-9) {
-        return 0.0;
-    }
-
-    double cos_bearing = std::cos(bearing_angle);
-
-    // 극단적인 bearing 값에서 수치 안정성 보장 (cos(90°)=0)
-    if (std::abs(cos_bearing) < 0.1) {  // bearing > ~84°
-        cos_bearing = (cos_bearing >= 0) ? 0.1 : -0.1;
-    }
-
-    // 역보정: 끝단에서 elevation 확대
-    double corrected_angle = nominal_vertical_angle / cos_bearing;
-
-    // Clamp to reasonable range (avoid extreme values)
-    // Use 2 * half_aperture_ as max (full vertical FOV)
-    double max_angle = 2.0 * half_aperture_;
-    corrected_angle = std::max(-max_angle, std::min(max_angle, corrected_angle));
-
-    return corrected_angle;
 }
 
 // Compute bearing angle
@@ -757,8 +701,7 @@ bool RayProcessor::is_voxel_in_shadow(
     const Eigen::Matrix4d& T_world_to_sonar,
     const std::vector<double>& first_hit_map,
     int num_beams,
-    double exclude_bearing_rad,
-    int search_radius_override
+    double exclude_bearing_rad
 ) const {
     // Transform voxel to sonar frame
     Eigen::Vector4d voxel_world_homo(voxel_world.x(), voxel_world.y(), voxel_world.z(), 1.0);
@@ -790,26 +733,8 @@ bool RayProcessor::is_voxel_in_shadow(
         }
     }
 
-    // OPTIMIZATION: Instead of checking all 512 bearings, compute voxel's bearing index
-    // and only check nearby bearings (±3 indices = 7 bearings total)
-    // This reduces 512 iterations to ~7 iterations (73x speedup)
-    int center_idx = static_cast<int>((voxel_bearing_rad + fov_rad / 2.0) / actual_bearing_resolution);
-    center_idx = std::clamp(center_idx, 0, num_beams - 1);
-
-    // Search radius: use cached value if provided, otherwise compute
-    // OPTIMIZATION: Caller can pre-compute this once per sonar image (constant across all voxels)
-    int search_radius;
-    if (search_radius_override >= 0) {
-        search_radius = search_radius_override;
-    } else {
-        // bearing_half_width in radians / actual_bearing_resolution gives number of bearings to cover
-        search_radius = std::max(3, static_cast<int>(std::ceil(bearing_half_width / actual_bearing_resolution)));
-    }
-
-    // Check only nearby bearings
-    for (int b_idx = std::max(0, center_idx - search_radius);
-         b_idx <= std::min(num_beams - 1, center_idx + search_radius);
-         ++b_idx) {
+    // Check each bearing in first_hit_map
+    for (int b_idx = 0; b_idx < num_beams; ++b_idx) {
         // Skip excluded bearing (for occupied voxels)
         if (b_idx == exclude_idx) {
             continue;
@@ -988,12 +913,9 @@ PYBIND11_MODULE(ray_processor, m) {
         .def_readwrite("sharpness", &RayProcessorConfig::sharpness)
         .def_readwrite("decay_rate", &RayProcessorConfig::decay_rate)
         .def_readwrite("min_alpha", &RayProcessorConfig::min_alpha)
-        .def_readwrite("log_odds_min", &RayProcessorConfig::log_odds_min)
-        .def_readwrite("log_odds_max", &RayProcessorConfig::log_odds_max)
-        .def_readwrite("intensity_max", &RayProcessorConfig::intensity_max)
-        .def_readwrite("enable_propagation", &RayProcessorConfig::enable_propagation)
-        .def_readwrite("propagation_radius", &RayProcessorConfig::propagation_radius)
-        .def_readwrite("propagation_sigma", &RayProcessorConfig::propagation_sigma);
+        .def_readwrite("L_min", &RayProcessorConfig::L_min)
+        .def_readwrite("L_max", &RayProcessorConfig::L_max)
+        .def_readwrite("intensity_max", &RayProcessorConfig::intensity_max);
 
     // RayProcessor class
     py::class_<RayProcessor>(m, "RayProcessor")
@@ -1024,7 +946,6 @@ PYBIND11_MODULE(ray_processor, m) {
              py::arg("first_hit_map"),
              py::arg("num_beams"),
              py::arg("exclude_bearing_rad") = -999.0,
-             py::arg("search_radius_override") = -1,
              "Check if voxel is in shadow region\n\n"
              "Args:\n"
              "    voxel_world: Voxel position in world frame (3D)\n"
@@ -1032,7 +953,6 @@ PYBIND11_MODULE(ray_processor, m) {
              "    first_hit_map: List of first hit ranges for all bearings\n"
              "    num_beams: Total number of bearings\n"
              "    exclude_bearing_rad: Bearing to exclude from shadow check (default: -999.0, no exclusion)\n"
-             "    search_radius_override: Override search radius (default: -1, compute internally)\n"
              "Returns:\n"
              "    True if voxel is in shadow (should skip update)")
         .def("set_config",

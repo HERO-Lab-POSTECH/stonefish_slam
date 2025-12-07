@@ -1,5 +1,6 @@
 # Mapping Module Configuration
 # Contains: 2D and 3D mapping parameters
+# Method-specific parameters are in config/mapping/method_*.yaml
 slam_node:
   ros__parameters:
     # ==================== 2D Mapping Configuration ====================
@@ -11,24 +12,23 @@ slam_node:
 
     # ==================== 3D Mapping Configuration ====================
     mapping_3d:
-      map_3d_voxel_size: 0.2    # 3D octree voxel size (meters) - Test 3: 0.3 → 0.2
-      min_probability: 0.6      # minimum probability for occupied voxel
-      log_odds_occupied: 2.0    # log-odds increment for occupied - Test 8: 2.0 → 3.5 (침식 방지)
-      log_odds_free: -3.0      # log-odds decrement for free space - Test 10: -3.0 → -4.0 (carving 강화)
-      log_odds_min: -30.0       # minimum log-odds (clamping) - Test 8: -15.0 → -12.0 (비대칭 완화)
-      log_odds_max: 20.0        # maximum log-odds (clamping) - Test 2: 10.0 → 20.0
-      adaptive_update: true     # enable adaptive Bayesian update
-      adaptive_threshold: 0.5   # probability threshold for protection - Test 9: 5.0 → 0.5 (원복, 동적 업데이트 허용)
-      adaptive_max_ratio: 0.3   # max update ratio for protected voxels - Test 9: 0.2 → 0.3 (원복, 완화)
-      use_range_weighting: true # use exponential range weighting
-      lambda_decay: 0.1         # decay factor for range weighting
-      use_cpp_backend: true     # Test 5: C++ backend 활성화 (DDA + OpenMP)
-      enable_propagation: false  # Test 7: Bearing propagation (ray 사이 보간)
-      propagation_radius: 2     # ±2 bearing 전파
-      propagation_sigma: 1.5    # Gaussian 가중치 표준편차
-      enable_gaussian_weighting: false  # Enable Gaussian weighting for bearing-based updates
-      use_dda_traversal: true   # Use DDA ray traversal algorithm (C++ backend)
-      bearing_step: 4           # Process every Nth bearing (4 = 128 bearings, 권장)
+      # Common parameters (all methods)
+      map_3d_voxel_size: 0.1        # 3D octree voxel size (meters)
+      min_probability: 0.8          # minimum probability for occupied voxel
+      use_cpp_backend: true          # Use C++ backend (DDA + OpenMP)
+      use_cpp_ray_processor: true    # Use C++ ray processor backend
+      use_dda_traversal: true        # Use DDA ray traversal algorithm
+      bearing_step: 4                # Process every Nth bearing (4 = 128 bearings)
 
-      # Probability update method
+      # Range weighting (common)
+      use_range_weighting: true      # use exponential range weighting
+      lambda_decay: 0.1              # decay factor for range weighting
+
+      # Propagation (common)
+      enable_propagation: true      # Bearing propagation (ray 사이 보간)
+      propagation_radius: 2          # ±2 bearing 전파
+      propagation_sigma: 1.5         # Gaussian 가중치 표준편차
+      enable_gaussian_weighting: true  # Gaussian weighting for bearing-based updates
+
+      # Probability update method (method-specific params in method_*.yaml)
       update_method: 'iwlo'   # Options: 'log_odds', 'weighted_avg', 'iwlo'

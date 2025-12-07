@@ -150,6 +150,22 @@ void OctreeMapping::insert_point_cloud(
             const auto& key = batch.keys[i];
             double log_odds_update = batch.log_odds_updates[i];
 
+            // IWLO: Apply learning rate decay based on observation count
+            if (update_method_ == UpdateMethod::IWLO) {
+                uint64_t hash = key_to_hash(key);
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                double alpha = compute_alpha(obs_count);
+                log_odds_update *= alpha;
+
+                // Apply saturation
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_log_odds = node ? node->getLogOdds() : 0.0;
+                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + log_odds_update));
+                log_odds_update = new_log_odds - current_log_odds;
+            }
+
             // Adaptive protection (unidirectional: Free → Occupied only)
             double final_log_odds = log_odds_update;
             if (adaptive_update_ && log_odds_update > 0.0) {
@@ -183,6 +199,22 @@ void OctreeMapping::insert_point_cloud(
         // Use updateNode() API for incremental update (enables pruning, lazy_eval=false)
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
+            // IWLO: Apply learning rate decay based on observation count
+            if (update_method_ == UpdateMethod::IWLO) {
+                uint64_t hash = key_to_hash(key);
+                int obs_count = observation_counts_[hash];
+                observation_counts_[hash] = obs_count + 1;
+
+                double alpha = compute_alpha(obs_count);
+                log_odds_update *= alpha;
+
+                // Apply saturation
+                octomap::OcTreeNode* node = tree_->search(key);
+                double current_log_odds = node ? node->getLogOdds() : 0.0;
+                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + log_odds_update));
+                log_odds_update = new_log_odds - current_log_odds;
+            }
+
             // Adaptive protection (unidirectional: Free → Occupied only)
             double final_log_odds = log_odds_update;
             if (adaptive_update_ && log_odds_update > 0.0) {
@@ -320,7 +352,7 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 tree_->updateNode(key, static_cast<float>(new_log_odds), false);
 
             } else if (update_method_ == UpdateMethod::IWLO) {
-                // IWLO: L_new = L_old + ΔL * w(I) * α(n)
+                // IWLO: L_new = L_old + ΔL * α(n)
                 // Get observation count
                 int obs_count = observation_counts_[hash];
                 observation_counts_[hash] = obs_count + 1;
@@ -329,20 +361,23 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
 
-                // Compute intensity weight
-                double weight = intensity_to_weight(intensity);
-
                 // Compute adaptive learning rate
                 double alpha = compute_alpha(obs_count);
 
-                // IWLO update: ΔL = L_occ * w(I) * α(n)
-                double delta_L = log_odds_occupied_ * weight * alpha;
+                double delta_L;
+                if (intensity < intensity_threshold_) {
+                    // Free space: ΔL = L_free * α(n) (no weight)
+                    delta_L = log_odds_free_ * alpha;
+                } else {
+                    // Occupied: ΔL = L_occ * w(I) * α(n)
+                    double weight = intensity_to_weight(intensity);
+                    delta_L = log_odds_occupied_ * weight * alpha;
+                }
 
                 // Apply update with saturation
                 double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
 
                 // Update node with delta (updateNode expects delta, not absolute)
-                // Note: For IWLO, we must search first to compute delta, so double-search is unavoidable
                 tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
             }
         }
@@ -385,13 +420,19 @@ void OctreeMapping::insert_point_cloud_with_intensity(
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
 
-                double weight = intensity_to_weight(intensity);
                 double alpha = compute_alpha(obs_count);
 
-                double delta_L = log_odds_occupied_ * weight * alpha;
-                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
+                double delta_L;
+                if (intensity < intensity_threshold_) {
+                    // Free space: ΔL = L_free * α(n) (no weight)
+                    delta_L = log_odds_free_ * alpha;
+                } else {
+                    // Occupied: ΔL = L_occ * w(I) * α(n)
+                    double weight = intensity_to_weight(intensity);
+                    delta_L = log_odds_occupied_ * weight * alpha;
+                }
 
-                // Note: For IWLO, double-search is unavoidable (must compute delta first)
+                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
                 tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
             }
         }
@@ -768,12 +809,17 @@ void OctreeMapping::insert_voxels_batch_native_with_intensity(
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
 
-                double weight = intensity_to_weight(intensity);
                 double alpha = compute_alpha(obs_count);
 
-                double delta_L = log_odds_occupied_ * weight * alpha;
-                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
+                double delta_L;
+                if (intensity < intensity_threshold_) {
+                    delta_L = log_odds_free_ * alpha;
+                } else {
+                    double weight = intensity_to_weight(intensity);
+                    delta_L = log_odds_occupied_ * weight * alpha;
+                }
 
+                double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
                 tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
             }
         }
@@ -811,10 +857,18 @@ void OctreeMapping::insert_voxels_batch_native_with_intensity(
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
 
-                double weight = intensity_to_weight(intensity);
                 double alpha = compute_alpha(obs_count);
 
-                double delta_L = log_odds_occupied_ * weight * alpha;
+                double delta_L;
+                if (intensity < intensity_threshold_) {
+                    // Free space: L_free * α(n) (no weight)
+                    delta_L = log_odds_free_ * alpha;
+                } else {
+                    // Occupied: L_occ * w(I) * α(n)
+                    double weight = intensity_to_weight(intensity);
+                    delta_L = log_odds_occupied_ * weight * alpha;
+                }
+
                 double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
 
                 tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);

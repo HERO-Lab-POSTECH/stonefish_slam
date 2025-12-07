@@ -24,7 +24,7 @@ from stonefish_slam.core.octree import HierarchicalOctree, OctNode
 
 # C++ Ray Processor import (with fallback)
 try:
-    from stonefish_slam.cpp.ray_processor import RayProcessor, RayProcessorConfig
+    from stonefish_slam.ray_processor import RayProcessor, RayProcessorConfig
     CPP_RAY_PROCESSOR_AVAILABLE = True
 except ImportError as e:
     print(f"[WARNING] C++ RayProcessor not available: {e}")
@@ -91,6 +91,8 @@ class SonarMapping3D:
         self.log_odds_min = config['log_odds_min']
         self.log_odds_max = config['log_odds_max']
 
+        print(f"[IWLO CONFIG] log_odds_free={self.log_odds_free}, log_odds_occupied={self.log_odds_occupied}, update_method={config.get('update_method', 'log_odds')}")
+
         # C++ backend initialization
         self.use_cpp_backend = config['use_cpp_backend']
 
@@ -99,12 +101,8 @@ class SonarMapping3D:
 
         if self.use_cpp_backend:
             try:
-                from stonefish_slam.cpp import octree_mapping
+                from stonefish_slam import octree_mapping
                 self.cpp_octree = octree_mapping.OctreeMapping(resolution=self.voxel_resolution)
-
-                # Configure log-odds thresholds (CRITICAL: without this, defaults 0.5/-5.0 are used!)
-                self.cpp_octree.set_log_odds_thresholds(self.log_odds_occupied, self.log_odds_free)
-                print(f"[Mapping3D] CPP: log_odds_occupied={self.log_odds_occupied}, log_odds_free={self.log_odds_free}")
 
                 # Configure adaptive protection (unidirectional: Free → Occupied only)
                 self.cpp_octree.set_adaptive_params(
@@ -138,11 +136,11 @@ class SonarMapping3D:
                 # Configure IWLO-specific parameters
                 if self.update_method == 'iwlo':
                     self.cpp_octree.set_iwlo_params(
-                        sharpness=config.get('sharpness', 3.0),
-                        decay_rate=config.get('decay_rate', 0.1),
-                        min_alpha=config.get('min_alpha', 0.1),
-                        log_odds_min=config.get('log_odds_min', -2.0),
-                        log_odds_max=config.get('log_odds_max', 3.5)
+                        sharpness=config.get('sharpness', 1.0),
+                        decay_rate=config.get('decay_rate', 0.05),
+                        min_alpha=config.get('min_alpha', 0.3),
+                        L_min=config.get('log_odds_min', -6.0),
+                        L_max=config.get('log_odds_max', 2.0)
                     )
 
                 print(f"[INFO] Using C++ OctoMap backend (resolution: {self.voxel_resolution}m, "
@@ -183,22 +181,17 @@ class SonarMapping3D:
                 ray_config.bearing_step = config['bearing_step']
                 ray_config.intensity_threshold = self.intensity_threshold
 
-                # Propagation parameters (read directly from config since self.* not yet defined)
-                ray_config.enable_propagation = config.get('enable_propagation', False)
-                ray_config.propagation_radius = config.get('propagation_radius', 2)
-                ray_config.propagation_sigma = config.get('propagation_sigma', 1.5)
-
                 # Update method configuration (LOG_ODDS=0, WEIGHTED_AVG=1, IWLO=2)
                 method_map = {'log_odds': 0, 'weighted_avg': 1, 'iwlo': 2}
                 ray_config.update_method = method_map.get(self.update_method, 0)
 
                 # IWLO parameters (used when update_method == 2)
                 if self.update_method == 'iwlo':
-                    ray_config.sharpness = config.get('sharpness', 3.0)
-                    ray_config.decay_rate = config.get('decay_rate', 0.1)
-                    ray_config.min_alpha = config.get('min_alpha', 0.1)
-                    ray_config.log_odds_min = config.get('log_odds_min', -2.0)
-                    ray_config.log_odds_max = config.get('log_odds_max', 3.5)
+                    ray_config.sharpness = config.get('sharpness', 1.0)
+                    ray_config.decay_rate = config.get('decay_rate', 0.05)
+                    ray_config.min_alpha = config.get('min_alpha', 0.3)
+                    ray_config.L_min = config.get('log_odds_min', -6.0)
+                    ray_config.L_max = config.get('log_odds_max', 2.0)
                     ray_config.intensity_max = 255.0
 
                 # Store bearing_step for profiling
@@ -228,12 +221,14 @@ class SonarMapping3D:
                 size=None  # Auto-calculated
             )
 
-            # Pass all settings to octree via C++ setter methods
-            # Note: Direct attribute assignment doesn't work with pybind11
-            self.octree.set_log_odds_thresholds(self.log_odds_occupied, self.log_odds_free)
-            self.octree.set_adaptive_params(self.adaptive_update, self.adaptive_threshold, self.adaptive_max_ratio)
-            # Note: log_odds_min/max are set via set_iwlo_params
-            print(f"[Mapping3D] log_odds_occupied={self.log_odds_occupied}, log_odds_free={self.log_odds_free}")
+            # Pass all settings to octree
+            self.octree.adaptive_update = self.adaptive_update
+            self.octree.adaptive_threshold = self.adaptive_threshold
+            self.octree.adaptive_max_ratio = self.adaptive_max_ratio
+            self.octree.log_odds_occupied = self.log_odds_occupied
+            self.octree.log_odds_free = self.log_odds_free
+            self.octree.log_odds_min = self.log_odds_min
+            self.octree.log_odds_max = self.log_odds_max
 
         # Frame counter
         self.frame_count = 0
@@ -408,48 +403,6 @@ class SonarMapping3D:
         # At r=0: w=1.0
         # At r=range_max: w=exp(-λ) (e.g., λ=0.1 → w≈0.90)
         return np.exp(-lambda_decay * range_m / self.range_max)
-
-    def compute_perspective_elevation(self, nominal_vertical_angle, bearing_angle):
-        """
-        Perspective projection 역보정 (확대)
-
-        Stonefish FLS는 perspective projection을 사용하여 렌더링합니다.
-        이로 인해 horizontal FOV 끝단(high bearing)에서 effective elevation이 압축됩니다.
-
-        압축 효과:
-        - 중앙(bearing=0°): elevation 변화 없음
-        - 끝단(bearing=65°): elevation이 약 cos(65°)≈0.42 배로 압축
-
-        이 함수는 압축을 역보정(확대)하여 모든 bearing에서 균일한 elevation 분포를 얻습니다.
-        역보정: actual_elevation = nominal_elevation / cos(bearing)
-
-        이렇게 하면 평평한 바닥이 모든 bearing에서 동일한 Z값을 가지게 됩니다.
-
-        Args:
-            nominal_vertical_angle: 이미지 row에 대응하는 nominal vertical angle (radians)
-            bearing_angle: 이미지 column에 대응하는 bearing angle (radians)
-
-        Returns:
-            역보정된 elevation angle (radians)
-        """
-        # Edge case: vertical angle이 0이면 bearing과 무관하게 0
-        if abs(nominal_vertical_angle) < 1e-9:
-            return 0.0
-
-        cos_bearing = np.cos(bearing_angle)
-
-        # 극단적인 bearing 값에서 수치 안정성 보장 (cos(90°)=0)
-        if abs(cos_bearing) < 0.1:  # bearing > ~84°
-            cos_bearing = 0.1 * np.sign(cos_bearing) if cos_bearing != 0 else 0.1
-
-        # 역보정: 끝단에서 elevation 확대
-        corrected_angle = nominal_vertical_angle / cos_bearing
-
-        # Clamp to reasonable range (avoid extreme values)
-        max_angle = self.vertical_fov  # 최대 vertical_fov까지 허용
-        corrected_angle = np.clip(corrected_angle, -max_angle, max_angle)
-
-        return corrected_angle
 
     def _compute_first_hit_map(self, polar_image):
         """
@@ -792,16 +745,13 @@ class SonarMapping3D:
                     base_log_odds_free = base_log_odds_free * range_weight
 
                 for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
-                    # Calculate nominal vertical angle within aperture
-                    nominal_vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
+                    # Calculate vertical angle within aperture
+                    vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
 
-                    # No perspective correction needed - Stonefish outputs 3D Euclidean distance
-                    actual_elevation = nominal_vertical_angle
-
-                    # Apply Gaussian weighting if enabled (use nominal angle for weighting)
+                    # Apply Gaussian weighting if enabled
                     if self.enable_gaussian_weighting:
                         # Normalized angle: -1 to +1
-                        normalized_angle = nominal_vertical_angle / half_aperture if half_aperture > 0 else 0
+                        normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
                         # Gaussian: exp(-0.5 * (x/σ)^2), σ = 1/gaussian_sigma_factor
                         gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
                         log_odds_update = base_log_odds_free * gaussian_weight
@@ -809,12 +759,12 @@ class SonarMapping3D:
                         # Uniform weighting (default)
                         log_odds_update = base_log_odds_free
 
-                    # Calculate 3D position in sonar frame using corrected elevation
+                    # Calculate 3D position in sonar frame
                     # Sonar coordinate system: X=forward, Y=right, Z=down (FRD)
                     # Bearing: negative=left, positive=right
-                    x_sonar = range_m * np.cos(actual_elevation) * np.cos(bearing_angle)
-                    y_sonar = range_m * np.cos(actual_elevation) * np.sin(bearing_angle)
-                    z_sonar = range_m * np.sin(actual_elevation)
+                    x_sonar = range_m * np.cos(vertical_angle) * np.cos(bearing_angle)
+                    y_sonar = range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
+                    z_sonar = range_m * np.sin(vertical_angle)
 
                     # Transform to world frame
                     pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])
@@ -877,16 +827,13 @@ class SonarMapping3D:
                 base_log_odds_occupied = base_log_odds_occupied * range_weight
 
             for v_step in range(-num_vertical_steps, num_vertical_steps + 1):
-                # Calculate nominal vertical angle within aperture
-                nominal_vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
+                # Calculate vertical angle within aperture
+                vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
 
-                # No perspective correction needed - Stonefish outputs 3D Euclidean distance
-                actual_elevation = nominal_vertical_angle
-
-                # Apply Gaussian weighting if enabled (use nominal angle for weighting)
+                # Apply Gaussian weighting if enabled
                 if self.enable_gaussian_weighting:
                     # Normalized angle: -1 to +1
-                    normalized_angle = nominal_vertical_angle / half_aperture if half_aperture > 0 else 0
+                    normalized_angle = vertical_angle / half_aperture if half_aperture > 0 else 0
                     # Gaussian: exp(-0.5 * (x/σ)^2), σ = 1/gaussian_sigma_factor
                     gaussian_weight = np.exp(-0.5 * (normalized_angle * self.gaussian_sigma_factor)**2)
                     log_odds_update = base_log_odds_occupied * gaussian_weight
@@ -894,11 +841,11 @@ class SonarMapping3D:
                     # Uniform weighting (default)
                     log_odds_update = base_log_odds_occupied
 
-                # Calculate 3D position in sonar frame using corrected elevation
+                # Calculate 3D position in sonar frame
                 # Bearing: negative=left, positive=right
-                x_sonar = range_m * np.cos(actual_elevation) * np.cos(bearing_angle)
-                y_sonar = range_m * np.cos(actual_elevation) * np.sin(bearing_angle)
-                z_sonar = range_m * np.sin(actual_elevation)
+                x_sonar = range_m * np.cos(vertical_angle) * np.cos(bearing_angle)
+                y_sonar = range_m * np.cos(vertical_angle) * np.sin(bearing_angle)
+                z_sonar = range_m * np.sin(vertical_angle)
 
                 # Transform to world frame
                 pt_sonar = np.array([x_sonar, y_sonar, z_sonar, 1.0])

@@ -5,8 +5,8 @@ slam_node:
     # ==================== Keyframe Selection for SLAM ====================
     # How often to add keyframes (between 1 and 4 meters is best)
     keyframe_duration: 1.0
-    keyframe_translation: 2.0
-    keyframe_rotation: 0.261799  # 30 degrees in radians
+    keyframe_translation: 1.0
+    keyframe_rotation: 0.523599  # 10 degrees in radians
 
     # ==================== SLAM Noise Models ====================
     # [x_sigma_m, y_sigma_m, theta_sigma_rad]

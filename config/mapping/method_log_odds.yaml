@@ -3,11 +3,11 @@
 slam_node:
   ros__parameters:
     mapping_3d:
-      method:
-        log_odds_occupied: 2.0      # Log-odds increment for occupied
-        log_odds_free: -3.0         # Log-odds decrement for free space
-        log_odds_min: -30.0         # Minimum log-odds (clamping)
-        log_odds_max: 20.0          # Maximum log-odds (clamping)
-        adaptive_update: true       # Enable adaptive Bayesian update
-        adaptive_threshold: 0.5     # Probability threshold for protection
-        adaptive_max_ratio: 0.3     # Max update ratio for protected voxels
+      # Log-odds parameters (overrides mapping.yaml)
+      log_odds_occupied: 2.0      # Log-odds increment for occupied
+      log_odds_free: -6.0         # Log-odds decrement for free space
+      log_odds_min: -6.0         # Minimum log-odds (clamping)
+      log_odds_max: 2.0          # Maximum log-odds (clamping)
+      adaptive_update: false       # Enable adaptive Bayesian update
+      adaptive_threshold: 0.5     # Probability threshold for protection
+      adaptive_max_ratio: 0.3     # Max update ratio for protected voxels

@@ -2,31 +2,32 @@
 C++ 확장 모듈 패키지
 
 이 패키지는 pybind11로 빌드된 C++ 확장 모듈을 포함합니다.
+.so 파일은 상위 stonefish_slam 패키지에 설치됩니다.
 """
 
-# C++ 모듈을 현재 디렉토리에서 직접 import
+# C++ 모듈을 상위 패키지에서 import (빌드 시 .so가 상위에 설치됨)
 try:
-    from . import cfar
+    from stonefish_slam import cfar
 except ImportError:
     pass
 
 try:
-    from . import dda_traversal
+    from stonefish_slam import dda_traversal
 except ImportError:
     pass
 
 try:
-    from . import octree_mapping
+    from stonefish_slam import octree_mapping
 except ImportError:
     pass
 
 try:
-    from . import ray_processor
+    from stonefish_slam import ray_processor
 except ImportError:
     pass
 
 try:
-    from . import pcl
+    from stonefish_slam import pcl
 except ImportError:
     pass
 
