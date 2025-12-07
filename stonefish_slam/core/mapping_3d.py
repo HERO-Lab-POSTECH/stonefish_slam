@@ -102,6 +102,10 @@ class SonarMapping3D:
                 from stonefish_slam.cpp import octree_mapping
                 self.cpp_octree = octree_mapping.OctreeMapping(resolution=self.voxel_resolution)
 
+                # Configure log-odds thresholds (CRITICAL: without this, defaults 0.5/-5.0 are used!)
+                self.cpp_octree.set_log_odds_thresholds(self.log_odds_occupied, self.log_odds_free)
+                print(f"[Mapping3D] CPP: log_odds_occupied={self.log_odds_occupied}, log_odds_free={self.log_odds_free}")
+
                 # Configure adaptive protection (unidirectional: Free → Occupied only)
                 self.cpp_octree.set_adaptive_params(
                     enable=self.adaptive_update,
@@ -224,14 +228,12 @@ class SonarMapping3D:
                 size=None  # Auto-calculated
             )
 
-            # Pass all settings to octree
-            self.octree.adaptive_update = self.adaptive_update
-            self.octree.adaptive_threshold = self.adaptive_threshold
-            self.octree.adaptive_max_ratio = self.adaptive_max_ratio
-            self.octree.log_odds_occupied = self.log_odds_occupied
-            self.octree.log_odds_free = self.log_odds_free
-            self.octree.log_odds_min = self.log_odds_min
-            self.octree.log_odds_max = self.log_odds_max
+            # Pass all settings to octree via C++ setter methods
+            # Note: Direct attribute assignment doesn't work with pybind11
+            self.octree.set_log_odds_thresholds(self.log_odds_occupied, self.log_odds_free)
+            self.octree.set_adaptive_params(self.adaptive_update, self.adaptive_threshold, self.adaptive_max_ratio)
+            # Note: log_odds_min/max are set via set_iwlo_params
+            print(f"[Mapping3D] log_odds_occupied={self.log_odds_occupied}, log_odds_free={self.log_odds_free}")
 
         # Frame counter
         self.frame_count = 0
@@ -793,8 +795,8 @@ class SonarMapping3D:
                     # Calculate nominal vertical angle within aperture
                     nominal_vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
 
-                    # Apply perspective projection correction
-                    actual_elevation = self.compute_perspective_elevation(nominal_vertical_angle, bearing_angle)
+                    # No perspective correction needed - Stonefish outputs 3D Euclidean distance
+                    actual_elevation = nominal_vertical_angle
 
                     # Apply Gaussian weighting if enabled (use nominal angle for weighting)
                     if self.enable_gaussian_weighting:
@@ -878,8 +880,8 @@ class SonarMapping3D:
                 # Calculate nominal vertical angle within aperture
                 nominal_vertical_angle = (v_step / max(1, num_vertical_steps)) * half_aperture
 
-                # Apply perspective projection correction
-                actual_elevation = self.compute_perspective_elevation(nominal_vertical_angle, bearing_angle)
+                # No perspective correction needed - Stonefish outputs 3D Euclidean distance
+                actual_elevation = nominal_vertical_angle
 
                 # Apply Gaussian weighting if enabled (use nominal angle for weighting)
                 if self.enable_gaussian_weighting:

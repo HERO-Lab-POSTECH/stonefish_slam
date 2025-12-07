@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Occupied Voxel Elevation 계산 오류** (2025-12-07): bearing 0도 포인트 깊이 불일치 수정
+  - 문제: Occupied voxel 처리 시 불필요한 perspective correction 적용으로 이중 보정 발생
+  - 원인: Stonefish는 이미 3D Euclidean distance를 제공하므로 추가 보정 불필요
+  - 증상: Bearing 0도(정면)에서 생성 포인트가 다른 bearing보다 얕게 표시
+  - 수정: `actual_elevation = nominal_vertical_angle` 로 변경 (perspective correction 제거)
+  - 파일: `stonefish_slam/core/mapping_3d.py`
 - **FLS Perspective Projection 보정** (2025-12-07): 3D 매핑 곡면 왜곡 수정
   - 문제: Stonefish FLS는 perspective projection 사용, 같은 vertical sample이 곡면 형태
   - 기존: 모든 bearing에서 동일한 vertical_angle 적용 (평면 가정)
