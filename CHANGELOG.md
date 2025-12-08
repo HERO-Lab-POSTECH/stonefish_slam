@@ -14,6 +14,10 @@ All notable changes to this project will be documented in this file.
   - 개선: ray_processor에서 계산한 range-weighted log_odds를 octree에 직접 삽입
   - 효과: Free space carving 성능을 log odds 방법과 동등하게 개선
   - 파일: `octree_mapping.h`, `octree_mapping.cpp`, `ray_processor.cpp`
+- **IWLO 강도 가중치 구현** (2025-12-08): Sigmoid 함수 기반 intensity 가중치
+  - 새 함수: `compute_intensity_weight()` 추가
+  - 기능: 높은 강도(>127) → occupied 강한 업데이트, 낮은 강도(<127) → 약한 업데이트
+  - 파일: `core/ray_processor.cpp` (라인 530, 599)
 
 ### Changed
 - **파라미터 이름 통일** (2025-12-08): YAML 설정값 정상 로드 확보
@@ -26,6 +30,21 @@ All notable changes to this project will be documented in this file.
   - 파일: `config/mapping.yaml`, `config/method_iwlo.yaml`
 
 ### Fixed
+- **섀도우 판정 거리 타입 수정** (2025-12-08): 수평 거리 → 슬랜트 거리 (3D 거리)
+  - 문제: floor/ceiling voxel이 자유 공간으로 오표기됨
+  - 원인: 3D 실제 거리가 아닌 2D 수평 거리 비교
+  - 수정: 3D Euclidean distance 사용
+  - 파일: `core/ray_processor.cpp` (라인 439)
+- **find_first_hit() 반복 방향 수정** (2025-12-08): FAR→NEAR → NEAR→FAR
+  - 문제: 가장 가까운 hit를 먼저 찾지 않음
+  - 원인: 거리가 먼 것부터 검사하는 역순 반복
+  - 수정: NEAR→FAR로 변경 (compute_first_hit_map과 일관성 유지)
+  - 파일: `core/ray_processor.cpp` (라인 571)
+- **Occupied 처리 루프 방향 수정** (2025-12-08): first_hit→size() → 0→first_hit
+  - 문제: first_hit 이후의 hit들이 처리되지 않음
+  - 원인: 루프 범위가 first_hit부터 끝까지인데, first_hit 자체와 그 이상 거리의 hit들을 누락
+  - 수정: 0부터 first_hit까지만 반복 (first_hit 포함, 그 이상은 shadow로 처리)
+  - 파일: `core/ray_processor.cpp` (라인 461)
 - **IWLO 섀도우 영역 오탐 수정** (2025-12-08): 고정 bearing width로 인한 섀도우 감지 실패 해결
   - 문제: Multi-hit 광선에서 HIT1과 HIT2 사이의 섀도우 영역이 자유 공간으로 잘못 업데이트됨
   - 원인: `is_voxel_in_shadow()` 함수가 고정 `bearing_half_width` (약 5도)를 사용하여 인접 bearing만 감지
@@ -43,6 +62,19 @@ All notable changes to this project will be documented in this file.
     * `octree_mapping.cpp`: alpha 이중 감쇠 제거 (log odds 방식과 일관성 유지)
   - 효과: IWLO 방식에서 free space carving이 log odds와 동등하게 동작
   - 파일: `ray_processor.cpp`, `octree_mapping.cpp`
+
+### Cleanup
+- **디버그 코드 제거 및 주석 정리** (2025-12-08): 약 64줄의 디버그 통계 및 cerr 출력 제거
+  - 제거 항목: 통계 변수, 성능 프로파일링 cerr 메시지
+  - 간소화: "CRITICAL FIX" 주석 정리
+  - 수정: 미사용 파라미터 경고 처리
+  - 파일: `core/ray_processor.cpp`
+
+---
+
+## [0.3.1] - 2025-12-08
+
+### Fixed
 - **Occupied Voxel Elevation 계산 오류** (2025-12-07): bearing 0도 포인트 깊이 불일치 수정
   - 문제: Occupied voxel 처리 시 불필요한 perspective correction 적용으로 이중 보정 발생
   - 원인: Stonefish는 이미 3D Euclidean distance를 제공하므로 추가 보정 불필요
