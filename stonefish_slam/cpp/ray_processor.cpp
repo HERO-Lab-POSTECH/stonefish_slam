@@ -184,21 +184,20 @@ void RayProcessor::process_sonar_image(
         for (size_t i = 0; i < all_updates.size(); ) {
             VoxelKey current_key = all_updates[i].key;
             double sum = 0.0;
-            double intensity_sum = 0.0;
+            double max_intensity = all_updates[i].intensity_avg;
             int count = 0;
 
             // Accumulate all updates for same voxel
             while (i < all_updates.size() && all_updates[i].key == current_key) {
                 sum += all_updates[i].log_odds;
-                intensity_sum += all_updates[i].intensity_avg;
+                max_intensity = std::max(max_intensity, all_updates[i].intensity_avg);
                 count++;
                 i++;
             }
 
-            // Average intensity: if multiple rays hit same voxel, average their intensities
-            double avg_intensity = intensity_sum / count;
-
-            unique_updates.push_back({current_key, sum, avg_intensity});
+            // Use max intensity: if multiple rays hit same voxel, take the maximum intensity
+            // This prevents free space (intensity=1.0) from diluting occupied regions (intensity=100)
+            unique_updates.push_back({current_key, sum, max_intensity});
         }
 
         size_t unique_count = unique_updates.size();
@@ -382,10 +381,19 @@ void RayProcessor::process_single_ray_internal(
             }
 
             // Add to voxel updates with range weighting
+            // Statistics for shadow region bug tracking
+            static int ray_count = 0;
+            static int total_dda_voxels = 0;
+            static int shadow_skipped = 0;
+            static int free_added = 0;
+
             for (const auto& voxel : voxels) {
+                total_dda_voxels++;
+
                 // SHADOW VALIDATION: Skip voxels in shadow region
                 bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_beams);
                 if (is_shadow) {
+                    shadow_skipped++;
                     continue;  // Voxel is beyond first hit, skip free space update
                 }
 
@@ -425,6 +433,17 @@ void RayProcessor::process_single_ray_internal(
                 }
 
                 voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 1.0});  // 1.0 < intensity_threshold = free space
+                free_added++;
+            }
+
+            // Print statistics every 100 rays
+            ray_count++;
+            if (ray_count % 100 == 0) {
+                std::cerr << "[SHADOW STATS DDA] ray=" << ray_count
+                          << ", dda_voxels=" << total_dda_voxels
+                          << ", shadow_skipped=" << shadow_skipped
+                          << ", free_added=" << free_added
+                          << std::endl;
             }
         }
     }
@@ -433,12 +452,33 @@ void RayProcessor::process_single_ray_internal(
     // After first reflection: only update high intensity (> threshold) as occupied
     // Low intensity regions after first hit = shadow/unknown (NO UPDATE)
     if (first_hit_idx >= 0) {
+        // Statistics for post-hit processing
+        static int ray_count_post = 0;
+        static int total_post_hit_pixels = 0;
+        static int post_hit_occupied = 0;
+        static int post_hit_low_intensity = 0;
+
         std::vector<int> hit_indices;
         for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
+            total_post_hit_pixels++;
+
             if (intensity_profile[i] > config_.intensity_threshold) {
                 hit_indices.push_back(static_cast<int>(i));
+                post_hit_occupied++;
+            } else {
+                // Low intensity (≤ threshold) after first hit: NO UPDATE (shadow region)
+                post_hit_low_intensity++;
             }
-            // Low intensity (≤ threshold) after first hit: NO UPDATE (shadow region)
+        }
+
+        // Print statistics every 100 rays
+        ray_count_post++;
+        if (ray_count_post % 100 == 0) {
+            std::cerr << "[SHADOW STATS POST-HIT] ray=" << ray_count_post
+                      << ", total_post_pixels=" << total_post_hit_pixels
+                      << ", post_hit_occupied=" << post_hit_occupied
+                      << ", post_hit_low_intensity=" << post_hit_low_intensity
+                      << std::endl;
         }
 
         if (!hit_indices.empty()) {
@@ -671,8 +711,6 @@ bool RayProcessor::is_voxel_in_shadow(
     // Pre-compute constants
     double fov_rad = config_.horizontal_fov * M_PI / 180.0;
     double actual_bearing_resolution = fov_rad / (num_beams - 1);
-    // Use vertical aperture for shadow cone width (matches beam physical footprint)
-    double bearing_half_width = config_.vertical_fov / 2.0;  // Half of vertical aperture in radians
 
     // Calculate exclude index if specified
     int exclude_idx = -1;
@@ -685,6 +723,15 @@ bool RayProcessor::is_voxel_in_shadow(
         }
     }
 
+    // Voxel의 angular extent 계산 (range에 따라 동적)
+    double voxel_angular_extent = config_.voxel_resolution / std::max(voxel_range, 1.0);
+    // 최소 2 bearing, 최대 FOV의 10% (안전 마진)
+    double check_half_width = std::max(voxel_angular_extent, actual_bearing_resolution * 2.0);
+    check_half_width = std::min(check_half_width, fov_rad * 0.1);
+
+    // 해당 범위 내 bearing들의 최소 first_hit 찾기
+    double min_first_hit = std::numeric_limits<double>::max();
+
     // Check each bearing in first_hit_map
     for (int b_idx = 0; b_idx < num_beams; ++b_idx) {
         // Skip excluded bearing (for occupied voxels)
@@ -695,15 +742,7 @@ bool RayProcessor::is_voxel_in_shadow(
         // Calculate this bearing's angle
         double bearing_angle = -fov_rad / 2.0 + b_idx * actual_bearing_resolution;
 
-        // Get first hit range for this bearing
-        double first_hit_range = first_hit_map[b_idx];
-
-        // Check if voxel is before this bearing's first hit
-        if (voxel_range < first_hit_range) {
-            continue;  // Voxel is before first hit, not shadow
-        }
-
-        // Voxel is beyond first hit, check if it's in this bearing's angular cone
+        // Calculate angular difference between voxel and this bearing
         double angle_diff = std::abs(voxel_bearing_rad - bearing_angle);
 
         // Handle wraparound (e.g., -179° vs +179°)
@@ -711,15 +750,19 @@ bool RayProcessor::is_voxel_in_shadow(
             angle_diff = 2.0 * M_PI - angle_diff;
         }
 
-        // Check if voxel is within this bearing's cone
-        if (angle_diff <= bearing_half_width) {
-            // Voxel is in this bearing's shadow cone
-            return true;
+        // Voxel이 걸쳐있는 bearing 범위 내에서만 확인
+        if (angle_diff <= check_half_width) {
+            // Get first hit range for this bearing
+            double first_hit_range = first_hit_map[b_idx];
+            min_first_hit = std::min(min_first_hit, first_hit_range);
         }
     }
 
-    // Not in any bearing's shadow
-    return false;
+    // Voxel이 가장 가까운 first_hit보다 뒤에 있으면 shadow
+    if (min_first_hit < std::numeric_limits<double>::max()) {
+        return voxel_range >= min_first_hit;
+    }
+    return false;  // 해당 범위에 bearing이 없으면 shadow 아님
 }
 
 // Internal DDA voxel traversal (simplified version)

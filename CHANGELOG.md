@@ -26,6 +26,13 @@ All notable changes to this project will be documented in this file.
   - 파일: `config/mapping.yaml`, `config/method_iwlo.yaml`
 
 ### Fixed
+- **IWLO 섀도우 영역 오탐 수정** (2025-12-08): 고정 bearing width로 인한 섀도우 감지 실패 해결
+  - 문제: Multi-hit 광선에서 HIT1과 HIT2 사이의 섀도우 영역이 자유 공간으로 잘못 업데이트됨
+  - 원인: `is_voxel_in_shadow()` 함수가 고정 `bearing_half_width` (약 5도)를 사용하여 인접 bearing만 감지
+  - 수정: 거리 기반 동적 각도 범위 계산 (`voxel_angular_extent = config_.voxel_resolution / voxel_range`)
+    * 모든 bearing 내에서 최소 first_hit 확인
+    * `voxel_range >= min_first_hit`이면 섀도우로 표시
+  - 파일: `ray_processor.cpp`
 - **디버그 로그 제거** (2025-12-08): 프로덕션 환경 최적화
   - 파일: `ray_processor.cpp`, `octree_mapping.cpp`
 - **IWLO Free Space Carving 버그** (2025-12-08): Free space intensity 및 alpha 중복 적용 수정
