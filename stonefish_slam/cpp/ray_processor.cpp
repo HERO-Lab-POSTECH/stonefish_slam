@@ -620,6 +620,77 @@ std::vector<double> RayProcessor::compute_first_hit_map(
     return first_hit_map;
 }
 
+// Generate hit map visualization image
+py::array_t<uint8_t> RayProcessor::generate_hit_map_visualization(
+    const py::array_t<uint8_t>& polar_image
+) const {
+    // Extract image dimensions
+    auto img_buf = polar_image.request();
+    if (img_buf.ndim != 2) {
+        throw std::runtime_error("Polar image must be 2D array (num_range_bins × num_beams)");
+    }
+
+    int num_range_bins = img_buf.shape[0];
+    int num_beams = img_buf.shape[1];
+    const uint8_t* img_ptr = static_cast<const uint8_t*>(img_buf.ptr);
+
+    // Compute first_hit_map (same as actual voxel update)
+    std::vector<double> first_hit_map = compute_first_hit_map(polar_image);
+
+    // Create RGB image (num_range_bins x num_beams x 3)
+    py::array_t<uint8_t> vis_image({num_range_bins, num_beams, 3});
+    auto vis_buf = vis_image.mutable_unchecked<3>();
+
+    // Process each bearing
+    for (int b_idx = 0; b_idx < num_beams; ++b_idx) {
+        double first_hit_range = first_hit_map[b_idx];
+
+        // Process each range bin (same logic as process_single_ray_internal)
+        for (int r_idx = 0; r_idx < num_range_bins; ++r_idx) {
+            uint8_t pixel_intensity = img_ptr[r_idx * num_beams + b_idx];
+
+            // Calculate range (FLS convention: row 0 = far, row max = near)
+            double range_m = config_.range_max - r_idx * config_.range_resolution;
+
+            uint8_t r = 0, g = 0, b = 0;
+
+            // Skip invalid range → Black (0, 0, 0)
+            if (range_m <= config_.range_min || range_m > config_.range_max) {
+                // Keep black
+            } else {
+                // SAME LOGIC as process_single_ray_internal (lines 347-353)
+                bool is_hit = (pixel_intensity > config_.intensity_threshold);
+                bool is_shadow = (!is_hit && range_m >= first_hit_range);
+
+                // Check if this is the first hit
+                // First hit is the range bin closest to first_hit_range
+                bool is_first_hit = is_hit &&
+                    std::abs(range_m - first_hit_range) < config_.range_resolution;
+
+                if (is_first_hit) {
+                    // Red: First hit
+                    r = 255; g = 0; b = 0;
+                } else if (is_hit) {
+                    // Yellow: Occupied (hit but not first)
+                    r = 255; g = 255; b = 0;
+                } else if (is_shadow) {
+                    // Blue: Shadow region
+                    r = 0; g = 0; b = 255;
+                } else {
+                    // Green: Free space
+                    r = 0; g = 255; b = 0;
+                }
+            }
+
+            vis_buf(r_idx, b_idx, 0) = r;
+            vis_buf(r_idx, b_idx, 1) = g;
+            vis_buf(r_idx, b_idx, 2) = b;
+        }
+    }
+
+    return vis_image;
+}
+
 // Check if voxel is in shadow region (simplified: global minimum first_hit)
 bool RayProcessor::is_voxel_in_shadow(
     const Eigen::Vector3d& voxel_world,
@@ -809,6 +880,20 @@ PYBIND11_MODULE(ray_processor, m) {
              "    polar_image: 2D NumPy array (num_range_bins × num_beams), uint8\n"
              "Returns:\n"
              "    List of first hit ranges (meters) for each bearing")
+        .def("generate_hit_map_visualization",
+             &RayProcessor::generate_hit_map_visualization,
+             py::arg("polar_image"),
+             "Generate hit map visualization image with same logic as actual voxel update\n\n"
+             "Args:\n"
+             "    polar_image: 2D NumPy array (num_range_bins × num_beams), uint8\n"
+             "Returns:\n"
+             "    RGB image (num_range_bins × num_beams × 3), uint8\n"
+             "Color codes:\n"
+             "    Black (0,0,0): Invalid range\n"
+             "    Red (255,0,0): First hit\n"
+             "    Yellow (255,255,0): Occupied (hit but not first)\n"
+             "    Green (0,255,0): Free space\n"
+             "    Blue (0,0,255): Shadow region")
         .def("is_voxel_in_shadow",
              &RayProcessor::is_voxel_in_shadow,
              py::arg("voxel_world"),

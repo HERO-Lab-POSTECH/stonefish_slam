@@ -187,6 +187,24 @@ public:
     ) const;
 
     /**
+     * @brief Generate hit map visualization image
+     *
+     * Creates RGB visualization image with same logic as actual voxel update
+     * (process_single_ray_internal). Each pixel is colored based on:
+     * - Black (0, 0, 0): Invalid range
+     * - Red (255, 0, 0): First hit
+     * - Yellow (255, 255, 0): Occupied (hit but not first)
+     * - Green (0, 255, 0): Free space
+     * - Blue (0, 0, 255): Shadow region
+     *
+     * @param polar_image 2D NumPy array (num_range_bins × num_beams), uint8
+     * @return RGB image (num_range_bins × num_beams × 3), uint8
+     */
+    py::array_t<uint8_t> generate_hit_map_visualization(
+        const py::array_t<uint8_t>& polar_image
+    ) const;
+
+    /**
      * @brief Check if voxel is in shadow region (simplified: global minimum first_hit)
      *
      * Algorithm:

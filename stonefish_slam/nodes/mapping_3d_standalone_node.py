@@ -211,48 +211,49 @@ class Mapping3DStandaloneNode(Node):
             # Process with mapper (맵 업데이트 먼저)
             self.mapper_3d.process_sonar_image(sonar_image, odom_msg.pose.pose)
 
-            # --- Threshold debugging image generation (맵 업데이트 후) ---
-            threshold_value = self.mapper_3d.intensity_threshold
+            # --- Hit map visualization (C++ ray_processor와 동일한 로직) ---
+            # Use C++ generate_hit_map_visualization() for exact same logic as actual voxel update
+            if self.mapper_3d.cpp_ray_processor is not None:
+                try:
+                    # C++ 함수 호출 (실제 업데이트와 동일한 로직)
+                    # Returns RGB image (num_range_bins x num_beams x 3)
+                    hit_map_rgb = self.mapper_3d.cpp_ray_processor.generate_hit_map_visualization(sonar_image)
 
-            # Black background (B, G, R)
-            threshold_debug = np.zeros((sonar_image.shape[0], sonar_image.shape[1], 3), dtype=np.uint8)
+                    # Convert RGB to BGR for OpenCV/ROS
+                    hit_map_bgr = cv2.cvtColor(hit_map_rgb, cv2.COLOR_RGB2BGR)
 
-            # Color code each bearing column
-            for bearing_idx in range(sonar_image.shape[1]):
-                intensity_column = sonar_image[:, bearing_idx]
-
-                # Bottom→Top scan (near→far, row max → row 0)
-                # Find first hit where intensity > threshold
-                first_hit_idx = -1
-                for row_idx in range(len(intensity_column) - 1, -1, -1):
-                    if intensity_column[row_idx] > threshold_value:
-                        first_hit_idx = row_idx
-                        break
-
-                if first_hit_idx >= 0:
-                    # Green: Free space (bottom to first_hit)
-                    # 실제 업데이트와 일치: first_hit보다 1 row 아래까지만 free로 마킹
-                    free_end = min(first_hit_idx + 1, len(intensity_column) - 1)
-                    for row_idx in range(len(intensity_column) - 1, free_end, -1):
-                        threshold_debug[row_idx, bearing_idx] = [0, 255, 0]  # Green (BGR)
-
-                    # Red: Occupied (first_hit and beyond where intensity > threshold)
-                    for row_idx in range(first_hit_idx, -1, -1):
+                    # ROS2 Image 메시지로 변환 및 publish
+                    threshold_msg = self.bridge.cv2_to_imgmsg(hit_map_bgr, encoding='bgr8')
+                    threshold_msg.header = sonar_msg.header
+                    self.threshold_debug_pub.publish(threshold_msg)
+                except Exception as e:
+                    self.get_logger().error(f'Hit map visualization error: {e}')
+            else:
+                # Fallback: Python-based visualization (may differ from C++ logic)
+                threshold_value = self.mapper_3d.intensity_threshold
+                threshold_debug = np.zeros((sonar_image.shape[0], sonar_image.shape[1], 3), dtype=np.uint8)
+                for bearing_idx in range(sonar_image.shape[1]):
+                    intensity_column = sonar_image[:, bearing_idx]
+                    first_hit_idx = -1
+                    for row_idx in range(len(intensity_column) - 1, -1, -1):
                         if intensity_column[row_idx] > threshold_value:
-                            threshold_debug[row_idx, bearing_idx] = [0, 0, 255]  # Red (BGR)
-                        # else: Black (shadow) - already initialized
-                else:
-                    # No hit: entire range is free space (simulator environment)
-                    # ray_processor.cpp line 264-266: range_to_first_hit = range_max
-                    threshold_debug[:, bearing_idx] = [0, 255, 0]  # Full column Green
-
-            # ROS2 Image 메시지로 변환 및 publish (맵 업데이트와 동기화)
-            try:
-                threshold_msg = self.bridge.cv2_to_imgmsg(threshold_debug, encoding='bgr8')
-                threshold_msg.header = sonar_msg.header
-                self.threshold_debug_pub.publish(threshold_msg)
-            except CvBridgeError as e:
-                self.get_logger().error(f'CV Bridge Error (threshold debug): {e}')
+                            first_hit_idx = row_idx
+                            break
+                    if first_hit_idx >= 0:
+                        free_end = min(first_hit_idx + 1, len(intensity_column) - 1)
+                        for row_idx in range(len(intensity_column) - 1, free_end, -1):
+                            threshold_debug[row_idx, bearing_idx] = [0, 255, 0]
+                        for row_idx in range(first_hit_idx, -1, -1):
+                            if intensity_column[row_idx] > threshold_value:
+                                threshold_debug[row_idx, bearing_idx] = [0, 0, 255]
+                    else:
+                        threshold_debug[:, bearing_idx] = [0, 255, 0]
+                try:
+                    threshold_msg = self.bridge.cv2_to_imgmsg(threshold_debug, encoding='bgr8')
+                    threshold_msg.header = sonar_msg.header
+                    self.threshold_debug_pub.publish(threshold_msg)
+                except CvBridgeError as e:
+                    self.get_logger().error(f'CV Bridge Error (threshold debug): {e}')
 
             # Publish point cloud
             pc_msg = self.mapper_3d.get_pointcloud2_msg(
