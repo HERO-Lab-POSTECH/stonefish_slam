@@ -183,21 +183,32 @@ void RayProcessor::process_sonar_image(
 
         for (size_t i = 0; i < all_updates.size(); ) {
             VoxelKey current_key = all_updates[i].key;
-            double sum = 0.0;
-            double max_intensity = all_updates[i].intensity_avg;
-            int count = 0;
+            double free_sum = 0.0;
+            double occupied_sum = 0.0;
+            double max_occupied_intensity = 0.0;
+            bool has_occupied = false;
 
-            // Accumulate all updates for same voxel
+            // Separate free and occupied updates for same voxel
             while (i < all_updates.size() && all_updates[i].key == current_key) {
-                sum += all_updates[i].log_odds;
-                max_intensity = std::max(max_intensity, all_updates[i].intensity_avg);
-                count++;
+                double intensity = all_updates[i].intensity_avg;
+
+                if (intensity >= config_.intensity_threshold) {
+                    // Occupied update (high intensity)
+                    occupied_sum += all_updates[i].log_odds;
+                    max_occupied_intensity = std::max(max_occupied_intensity, intensity);
+                    has_occupied = true;
+                } else {
+                    // Free update (low intensity)
+                    free_sum += all_updates[i].log_odds;
+                }
                 i++;
             }
 
-            // Use max intensity: if multiple rays hit same voxel, take the maximum intensity
-            // This prevents free space (intensity=1.0) from diluting occupied regions (intensity=100)
-            unique_updates.push_back({current_key, sum, max_intensity});
+            // Select max log_odds between free and occupied
+            // If occupied_sum > free_sum, occupied wins (and vice versa)
+            double final_log_odds = std::max(free_sum, occupied_sum);
+            double final_intensity = has_occupied ? max_occupied_intensity : 1.0;
+            unique_updates.push_back({current_key, final_log_odds, final_intensity});
         }
 
         size_t unique_count = unique_updates.size();
