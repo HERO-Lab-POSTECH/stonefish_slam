@@ -88,40 +88,19 @@ public:
     );
 
     /**
-     * @brief Batch insert point cloud with intensity-based updates
-     *
-     * Supports WEIGHTED_AVERAGE and IWLO update methods that use intensity values.
-     * For LOG_ODDS method, intensity is ignored and behaves like insert_point_cloud.
-     *
-     * @param points Nx3 NumPy array of world coordinates [x, y, z]
-     * @param intensities N-length array of intensity values (0-255)
-     * @param sensor_origin 3-length array [x, y, z] of sensor position
-     *
-     * Update behavior:
-     * - LOG_ODDS: Uses log_odds_occupied_, ignores intensity
-     * - WEIGHTED_AVERAGE: P_new = (n*P_old + w(I))/(n+1)
-     * - IWLO: L_new = L_old + ΔL * w(I) * α(n)
-     */
-    void insert_point_cloud_with_intensity(
-        py::array_t<double> points,
-        py::array_t<double> intensities,
-        py::array_t<double> sensor_origin
-    );
-
-    /**
      * @brief Batch insert point cloud with intensity and pre-computed log-odds
      *
-     * Extended API for IWLO/WEIGHTED_AVG that allows passing pre-computed log-odds
-     * for free space voxels (range-weighted by ray_processor).
+     * Primary API for IWLO/WEIGHTED_AVG update methods. ray_processor computes
+     * the log-odds (ΔL) including range/gaussian weights, octree applies alpha decay.
      *
      * @param points Nx3 NumPy array of world coordinates [x, y, z]
-     * @param intensities N-length array of intensity values (0-255)
-     * @param log_odds N-length array of pre-computed log-odds for free space
+     * @param intensities N-length array of intensity values (for WEIGHTED_AVG mode)
+     * @param log_odds N-length array of pre-computed log-odds (ΔL from ray_processor)
      * @param sensor_origin 3-length array [x, y, z] of sensor position
      *
      * Update behavior:
-     * - Free space (intensity < threshold): ΔL = passed log_odds (no alpha)
-     * - Occupied (intensity >= threshold): ΔL = L_occ * w(I) * α(n)
+     * - IWLO: L_new = clamp(L_old + ΔL × α(n), L_min, L_max)
+     * - WEIGHTED_AVERAGE: P_new = (n*P_old + w(I))/(n+1)
      */
     void insert_point_cloud_with_intensity_and_logodds(
         py::array_t<double> points,
@@ -239,25 +218,6 @@ public:
     void insert_voxels_batch_native(
         const std::vector<Eigen::Vector3d>& points,
         const std::vector<double>& log_odds,
-        const Eigen::Vector3d& sensor_origin
-    );
-
-    /**
-     * @brief C++ native batch insert with intensity (zero NumPy overhead)
-     *
-     * Internal-only method for WEIGHTED_AVERAGE and IWLO update methods.
-     * Bypasses NumPy array creation and Python binding overhead.
-     *
-     * @param points Vector of voxel centers in world coordinates
-     * @param intensities Vector of intensity values (0-255)
-     * @param sensor_origin Sensor position [x, y, z]
-     *
-     * Note: This method is NOT exposed to Python. It is identical in logic
-     *       to insert_point_cloud_with_intensity() but uses pure C++ containers.
-     */
-    void insert_voxels_batch_native_with_intensity(
-        const std::vector<Eigen::Vector3d>& points,
-        const std::vector<double>& intensities,
         const Eigen::Vector3d& sensor_origin
     );
 

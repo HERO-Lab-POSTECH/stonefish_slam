@@ -192,43 +192,17 @@ void RayProcessor::process_sonar_image(
                 i++;
             }
 
-            // Select appropriate log_odds
-            // - If both free and occupied: use max (occupied usually wins)
-            // - If only free: use free_sum
-            // - If only occupied: use occupied_sum
-            double final_log_odds;
-            double final_intensity;
-            if (has_occupied) {
-                // Occupied exists: take max between free and occupied
-                final_log_odds = std::max(free_sum, occupied_sum);
-                final_intensity = max_occupied_intensity;
-            } else {
-                // Only free updates
-                final_log_odds = free_sum;
-                final_intensity = 1.0;
-            }
+            // Merge log_odds: Bayesian update uses additive log-odds
+            // L_total = L_free + L_occupied (log-space addition = probability multiplication)
+            double final_log_odds = free_sum + occupied_sum;
+            double final_intensity = has_occupied ? max_occupied_intensity : 1.0;
             unique_updates.push_back({current_key, final_log_odds, final_intensity});
         }
 
         size_t unique_count = unique_updates.size();
 
-        // NED frame Z filtering: exclude voxels above robot
-        // In NED: Z = Down (positive = underwater)
-        // Filter condition: voxel_z < robot_z → above robot → exclude
-        double robot_z = sonar_origin_world[2];  // Robot Z position in NED frame
-        int robot_grid_z = static_cast<int>(std::floor(robot_z / config_.voxel_resolution));
-
-        // First pass: count valid voxels (at or below robot)
-        size_t filtered_count = 0;
-        for (size_t i = 0; i < unique_count; ++i) {
-            // VoxelKey.z is already in grid units, compare directly
-            if (unique_updates[i].key.z >= robot_grid_z) {  // Keep voxels at or below robot (NED)
-                filtered_count++;
-            }
-        }
-
-        // Allocate NumPy arrays for filtered voxels only
-        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(filtered_count), 3};
+        // Allocate NumPy arrays for all unique voxels (no Z filtering)
+        std::vector<py::ssize_t> points_shape = {static_cast<py::ssize_t>(unique_count), 3};
         py::array_t<double> points_np(points_shape);
         py::array_t<double> origin_np(static_cast<py::ssize_t>(3));
 
@@ -246,39 +220,34 @@ void RayProcessor::process_sonar_image(
 
         if (config_.update_method == 1 || config_.update_method == 2) {
             // Weighted Average OR IWLO: need both intensity and log_odds arrays
-            intensities_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
-            log_odds_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
+            intensities_np = py::array_t<double>(static_cast<py::ssize_t>(unique_count));
+            log_odds_np = py::array_t<double>(static_cast<py::ssize_t>(unique_count));
             auto intensities_buf = intensities_np.request();
             auto log_odds_buf = log_odds_np.request();
             intensities_ptr = static_cast<double*>(intensities_buf.ptr);
             log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
         } else {
             // Log-odds only: use log_odds_sum directly
-            log_odds_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
+            log_odds_np = py::array_t<double>(static_cast<py::ssize_t>(unique_count));
             auto log_odds_buf = log_odds_np.request();
             log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
         }
 
-        // Second pass: fill only valid voxels
-        size_t write_idx = 0;
+        // Fill all unique voxels
         for (size_t i = 0; i < unique_count; ++i) {
-            // VoxelKey is in grid units, compare directly
-            if (unique_updates[i].key.z >= robot_grid_z) {  // Keep voxels at or below robot
-                const auto& update = unique_updates[i];
-                // Convert grid coordinates to world coordinates (voxel center)
-                points_ptr[write_idx * 3 + 0] = (update.key.x + 0.5) * config_.voxel_resolution;
-                points_ptr[write_idx * 3 + 1] = (update.key.y + 0.5) * config_.voxel_resolution;
-                points_ptr[write_idx * 3 + 2] = (update.key.z + 0.5) * config_.voxel_resolution;
+            const auto& update = unique_updates[i];
+            // Convert grid coordinates to world coordinates (voxel center)
+            points_ptr[i * 3 + 0] = (update.key.x + 0.5) * config_.voxel_resolution;
+            points_ptr[i * 3 + 1] = (update.key.y + 0.5) * config_.voxel_resolution;
+            points_ptr[i * 3 + 2] = (update.key.z + 0.5) * config_.voxel_resolution;
 
-                if (config_.update_method == 1 || config_.update_method == 2) {
-                    // Weighted Average OR IWLO: use both intensity and log_odds
-                    intensities_ptr[write_idx] = update.intensity_avg;
-                    log_odds_ptr[write_idx] = update.log_odds;
-                } else {
-                    // Log-odds only: use log_odds_sum
-                    log_odds_ptr[write_idx] = update.log_odds;
-                }
-                write_idx++;
+            if (config_.update_method == 1 || config_.update_method == 2) {
+                // Weighted Average OR IWLO: use both intensity and log_odds
+                intensities_ptr[i] = update.intensity_avg;
+                log_odds_ptr[i] = update.log_odds;
+            } else {
+                // Log-odds only: use log_odds_sum
+                log_odds_ptr[i] = update.log_odds;
             }
         }
 
@@ -331,6 +300,10 @@ void RayProcessor::process_single_ray_internal(
     // Get first hit range for shadow validation
     double first_hit_range = first_hit_map[bearing_idx];
 
+    // Calculate consistent vertical steps based on first_hit_range
+    // All pixels in this bearing will use the same vertical fan size
+    int max_vertical_steps = compute_num_vertical_steps(first_hit_range);
+
     // Process all range bins
     for (int r_idx = 0; r_idx < num_range_bins; ++r_idx) {
         uint8_t pixel_intensity = intensity_profile[r_idx];
@@ -352,8 +325,14 @@ void RayProcessor::process_single_ray_internal(
             continue;
         }
 
-        // Generate vertical fan for this (range, bearing) pixel
-        int num_vertical_steps = compute_num_vertical_steps(range_m);
+        // Use consistent vertical steps based on first_hit_range (not current range)
+        int num_vertical_steps = max_vertical_steps;
+
+        // Generate horizontal spread based on first_hit_range for consistency
+        int num_horizontal_steps = compute_num_horizontal_steps(first_hit_range, config_.bearing_step, num_beams);
+
+        // Compute bearing spread for horizontal offset calculation
+        double bearing_spread_rad = (config_.horizontal_fov * M_PI / 180.0) / num_beams * config_.bearing_step;
 
         // Compute base log-odds update
         double base_log_odds;
@@ -370,37 +349,50 @@ void RayProcessor::process_single_ray_internal(
             base_log_odds *= compute_range_weight(range_m);
         }
 
-        // Process vertical fan
-        for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
-            // Compute vertical angle
-            double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
-
-            // Calculate voxel position in sonar frame
-            double cos_vert = std::cos(vertical_angle);
-            double x_sonar = range_m * cos_vert * std::cos(bearing_angle);
-            double y_sonar = range_m * cos_vert * std::sin(bearing_angle);
-            double z_sonar = range_m * std::sin(vertical_angle);
-
-            // Transform to world frame
-            Eigen::Vector3d point_sonar(x_sonar, y_sonar, z_sonar);
-            Eigen::Vector3d point_world = T_sonar_to_world.block<3, 3>(0, 0) * point_sonar + sonar_origin_world;
-
-            // Apply Gaussian weighting for occupied voxels (optional)
-            double log_odds_update = base_log_odds;
-            if (is_hit && config_.enable_gaussian_weighting && num_vertical_steps > 0) {
-                double normalized_angle = vertical_angle / half_aperture_;
-                double gaussian_weight = std::exp(-0.5 * std::pow(normalized_angle * config_.gaussian_sigma_factor, 2));
-                log_odds_update *= gaussian_weight;
+        // Process horizontal spread: cover full bearing width [-spread/2, +spread/2]
+        // h_step range: [-N, +N] inclusive (2N+1 steps)
+        // When N=0, single center ray; when N=1, steps -1,0,+1 (3 rays covering full width)
+        for (int h_step = -num_horizontal_steps; h_step <= num_horizontal_steps; ++h_step) {
+            // Compute horizontal offset angle
+            double horizontal_offset = 0.0;
+            if (num_horizontal_steps > 0) {
+                // Map h_step [-N, +N] to offset [-spread/2, +spread/2]
+                horizontal_offset = (static_cast<double>(h_step) / num_horizontal_steps) * (bearing_spread_rad / 2.0);
             }
+            double adjusted_bearing = bearing_angle + horizontal_offset;
 
-            // Add voxel update
-            voxel_updates.push_back({
-                point_world.x(),
-                point_world.y(),
-                point_world.z(),
-                log_odds_update,
-                static_cast<double>(pixel_intensity)
-            });
+            // Process vertical fan
+            for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
+                // Compute vertical angle
+                double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
+
+                // Calculate voxel position in sonar frame with adjusted bearing
+                double cos_vert = std::cos(vertical_angle);
+                double x_sonar = range_m * cos_vert * std::cos(adjusted_bearing);
+                double y_sonar = range_m * cos_vert * std::sin(adjusted_bearing);
+                double z_sonar = range_m * std::sin(vertical_angle);
+
+                // Transform to world frame
+                Eigen::Vector3d point_sonar(x_sonar, y_sonar, z_sonar);
+                Eigen::Vector3d point_world = T_sonar_to_world.block<3, 3>(0, 0) * point_sonar + sonar_origin_world;
+
+                // Apply Gaussian weighting for occupied voxels (optional)
+                double log_odds_update = base_log_odds;
+                if (is_hit && config_.enable_gaussian_weighting && num_vertical_steps > 0) {
+                    double normalized_angle = vertical_angle / half_aperture_;
+                    double gaussian_weight = std::exp(-0.5 * std::pow(normalized_angle * config_.gaussian_sigma_factor, 2));
+                    log_odds_update *= gaussian_weight;
+                }
+
+                // Add voxel update
+                voxel_updates.push_back({
+                    point_world.x(),
+                    point_world.y(),
+                    point_world.z(),
+                    log_odds_update,
+                    static_cast<double>(pixel_intensity)
+                });
+            }
         }
     }
 }
@@ -580,6 +572,24 @@ int RayProcessor::compute_num_vertical_steps(double range_m) const {
     int num_steps = static_cast<int>(std::ceil(vertical_spread / config_.voxel_resolution));
 
     // At least 1 step to ensure coverage
+    return std::max(1, num_steps);
+}
+
+// Compute number of horizontal steps for full voxel coverage
+int RayProcessor::compute_num_horizontal_steps(double range_m, int bearing_step, int num_beams) const {
+    // Each bearing covers angular width: (horizontal_fov / num_beams) * bearing_step
+    double bearing_spread_rad = (config_.horizontal_fov * M_PI / 180.0) / num_beams * bearing_step;
+
+    // Total horizontal distance between adjacent processed bearings
+    // This is the full arc length that needs to be covered
+    double total_horizontal_spread = range_m * bearing_spread_rad;  // arc length ≈ r * θ
+
+    // Number of voxels to cover on each side of center
+    // 2x oversampling to ensure all OctoMap grid cells receive at least one sample
+    // Without this, floor(coord/res) quantization causes checkerboard gaps
+    int num_steps = static_cast<int>(std::ceil(total_horizontal_spread / config_.voxel_resolution));
+
+    // At least 1 to ensure minimum coverage
     return std::max(1, num_steps);
 }
 

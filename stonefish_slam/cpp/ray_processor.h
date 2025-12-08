@@ -372,6 +372,20 @@ private:
      */
     int compute_num_vertical_steps(double range_m) const;
 
+    /**
+     * @brief Compute number of horizontal steps for full voxel coverage
+     *
+     * Each bearing covers angular width: (horizontal_fov / num_beams) * bearing_step
+     * horizontal_spread = range × tan(bearing_spread / 2)
+     * num_steps = ceil(horizontal_spread / voxel_resolution)
+     *
+     * @param range_m Range in meters
+     * @param bearing_step Bearing sampling step (e.g., 2 = every 2nd bearing)
+     * @param num_beams Total number of bearings
+     * @return Number of horizontal steps (±N), 0 means single ray
+     */
+    int compute_num_horizontal_steps(double range_m, int bearing_step, int num_beams) const;
+
 private:
     /**
      * @brief Internal DDA voxel traversal
