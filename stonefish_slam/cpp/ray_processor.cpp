@@ -433,8 +433,10 @@ void RayProcessor::process_single_ray_internal(
                 voxel_bearing_idx = std::max(0, std::min(voxel_bearing_idx, num_beams - 1));
 
                 // Check if voxel is in this bearing's shadow
+                // Use slant range (3D distance), not horizontal distance
+                // This ensures floor/ceiling voxels are correctly identified as shadow
                 double first_hit_for_bearing = first_hit_map[voxel_bearing_idx];
-                if (horiz_dist >= first_hit_for_bearing) {
+                if (range >= first_hit_for_bearing) {
                     continue;  // Skip: voxel is in shadow for its bearing
                 }
 
