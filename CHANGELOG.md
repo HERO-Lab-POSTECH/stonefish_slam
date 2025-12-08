@@ -30,6 +30,20 @@ All notable changes to this project will be documented in this file.
   - 파일: `config/mapping.yaml`, `config/method_iwlo.yaml`
 
 ### Fixed
+- **Occupied/Free Space 처리 통합** (2025-12-08): 높은 물체 윗면 업데이트 문제 해결
+  - 문제: 높은 물체의 윗면이 한 프레임에 업데이트되지 않음
+  - 원인: Free space와 Occupied 처리 방식 불일치
+    * Free space: 각 voxel마다 픽셀 확인 O
+    * Occupied: vertical fan 전체를 무조건 occupied (픽셀 확인 X)
+  - 수정: DDA 기반 통합 처리
+    * DDA 범위를 first_hit 포함하도록 확장
+    * 각 voxel에서 (range, bearing) 픽셀 직접 확인
+    * hit 픽셀 → occupied 업데이트
+    * no-hit + range < first_hit → free 업데이트
+    * no-hit + range >= first_hit → shadow (업데이트 안함)
+    * 기존 separate occupied 처리 제거
+  - 효과: 모든 voxel에 동일한 픽셀 검증 로직 적용
+  - 파일: `ray_processor.cpp`
 - **Free Space에서 실제 픽셀 확인** (2025-12-08): Shadow 영역이 free space로 업데이트되는 버그 수정
   - 문제: first_hit_map만 확인하고 실제 픽셀을 확인하지 않아 shadow 영역이 free로 업데이트됨
   - 원인: first_hit 앞이면 무조건 free로 가정 (실제 픽셀의 hit/no-hit 확인 안함)

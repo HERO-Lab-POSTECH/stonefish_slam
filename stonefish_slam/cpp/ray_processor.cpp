@@ -313,19 +313,10 @@ void RayProcessor::process_single_ray_internal(
 ) {
     (void)T_world_to_sonar;  // Reserved for future shadow validation
 
-    // Extract intensity profile for this bearing (for occupied processing)
-    std::vector<uint8_t> intensity_profile(num_range_bins);
-    for (int r = 0; r < num_range_bins; ++r) {
-        intensity_profile[r] = polar_image[r * num_beams + bearing_idx];
-    }
-
     // Compute bearing angle for this ray
     double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
 
-    // 1. Find first hit index for occupied processing
-    int first_hit_idx = find_first_hit(intensity_profile);
-
-    // 2. Free space processing (DDA traversal to first hit or max range)
+    // Unified DDA processing (handles both free and occupied voxels)
     // Use first_hit_map which stores CLOSEST hit range (computed with NEAR→FAR scan)
     // This is more accurate than find_first_hit which scans FAR→NEAR
     double range_to_first_hit = first_hit_map[bearing_idx];
@@ -348,10 +339,10 @@ void RayProcessor::process_single_ray_internal(
         // Use range_to_first_hit for consistent vertical sampling with occupied
         int num_vertical_steps = compute_num_vertical_steps(range_to_first_hit);
 
-        // Safety margin: end 1 voxel before occupied to prevent overlap
-        double safe_range = range_to_first_hit - config_.voxel_resolution;
+        // Extend range to include first_hit (will be handled by pixel check)
+        double safe_range = range_to_first_hit + config_.voxel_resolution;
 
-        if (safe_range <= 0.0) {
+        if (range_to_first_hit <= 0.0) {
             return;  // Skip this bearing if too close
         }
 
@@ -440,45 +431,31 @@ void RayProcessor::process_single_ray_internal(
                 // Look up actual pixel intensity in polar image
                 uint8_t pixel_intensity = polar_image[range_idx * num_beams + voxel_bearing_idx];
 
-                // If pixel is a hit, skip (occupied processing handles it)
                 if (pixel_intensity > config_.intensity_threshold) {
-                    continue;
+                    // Hit pixel → occupied update
+                    double intensity_weight = compute_intensity_weight(pixel_intensity);
+                    double log_odds_update = config_.log_odds_occupied * intensity_weight;
+                    if (config_.use_range_weighting) {
+                        log_odds_update *= compute_range_weight(range);
+                    }
+                    voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, static_cast<double>(pixel_intensity)});
+                } else {
+                    // No-hit pixel: check if in shadow region
+                    double first_hit_for_bearing = first_hit_map[voxel_bearing_idx];
+                    if (range >= first_hit_for_bearing) {
+                        continue;  // Shadow region: do not update
+                    }
+                    // Free space update
+                    double log_odds_update = config_.log_odds_free;
+                    if (config_.use_range_weighting) {
+                        log_odds_update *= compute_range_weight(range);
+                    }
+                    voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 1.0});
                 }
-
-                // No-hit pixel: check if in shadow region
-                double first_hit_for_bearing = first_hit_map[voxel_bearing_idx];
-                if (range >= first_hit_for_bearing) {
-                    continue;  // Shadow region: do not update
-                }
-
-                // Free space update
-                double log_odds_update = config_.log_odds_free;
-                if (config_.use_range_weighting) {
-                    double range_weight = compute_range_weight(range);
-                    log_odds_update *= range_weight;
-                }
-
-                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 1.0});
             }
         }
     }
-
-    // 3. Occupied space processing: all high intensity hits
-    // All hits above threshold are real observations and should be updated
-    // Shadow check only applies to FREE SPACE, not occupied hits
-    if (first_hit_idx >= 0) {
-        std::vector<int> hit_indices;
-        for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
-            if (intensity_profile[i] > config_.intensity_threshold) {
-                hit_indices.push_back(static_cast<int>(i));
-            }
-        }
-
-        if (!hit_indices.empty()) {
-            process_occupied_voxels_internal(hit_indices, intensity_profile, bearing_angle,
-                                            T_sonar_to_world, sonar_origin_world, voxel_updates);
-        }
-    }
+    // Occupied updates are now handled in the unified DDA processing above
 }
 
 
