@@ -520,8 +520,14 @@ void RayProcessor::process_occupied_voxels_internal(
             T_sonar_to_world.block<3, 3>(0, 0) * points_sonar +
             sonar_origin_world.replicate(1, num_vertical_points);
 
-        // Compute base log-odds update with range weighting
+        // Compute base log-odds update with intensity and range weighting
         double base_log_odds = config_.log_odds_occupied;
+
+        // Intensity weighting: w(I) = sigmoid((I - I_mid) / scale)
+        // High intensity → weight > 0.5, stronger update
+        double intensity_weight = compute_intensity_weight(intensity);
+        base_log_odds *= intensity_weight;
+
         if (config_.use_range_weighting) {
             double range_weight = compute_range_weight(range_m);
             base_log_odds *= range_weight;
@@ -582,6 +588,17 @@ double RayProcessor::compute_range_weight(double range_m) const {
     exp_time_ns_.fetch_add(elapsed_ns, std::memory_order_relaxed);
 
     return weight;
+}
+
+// Compute intensity weight using sigmoid function
+// w(I) = sigmoid((I - I_mid) / (sharpness * scale))
+// High intensity (>127) → weight > 0.5 → stronger occupied update
+// Low intensity (<127) → weight < 0.5 → weaker occupied update
+double RayProcessor::compute_intensity_weight(uint8_t intensity) const {
+    double I_mid = config_.intensity_max / 2.0;  // 127.5
+    double scale = config_.intensity_max / 5.0;   // 51.0
+    double x = (static_cast<double>(intensity) - I_mid) / (config_.sharpness * scale);
+    return 1.0 / (1.0 + std::exp(-x));
 }
 
 // Compute vertical angle

@@ -318,6 +318,18 @@ private:
     double compute_bearing_angle(int bearing_idx, int num_beams) const;
 
     /**
+     * @brief Compute intensity-based weighting factor
+     *
+     * Sigmoid function: w(I) = sigmoid((I - I_mid) / (sharpness * scale))
+     * High intensity (>127) → weight > 0.5 → stronger occupied update
+     * Low intensity (<127) → weight < 0.5 → weaker occupied update
+     *
+     * @param intensity Intensity value (0-255)
+     * @return Weight factor (0.0 to 1.0)
+     */
+    double compute_intensity_weight(uint8_t intensity) const;
+
+    /**
      * @brief Compute 3D ray direction from bearing angle
      *
      * Sonar frame convention: X=forward, Y=right, Z=down (FRD)
