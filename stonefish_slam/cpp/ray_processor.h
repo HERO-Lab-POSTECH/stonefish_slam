@@ -239,6 +239,7 @@ private:
      * @param T_sonar_to_world Transformation matrix
      * @param T_world_to_sonar Inverse transformation (for shadow validation)
      * @param sonar_origin_world Sonar origin in world frame (cached)
+     * @param first_hit_map First hit ranges for all bearings (meters)
      * @param voxel_updates Output buffer to collect voxel updates
      */
     void process_single_ray_internal(
@@ -248,6 +249,7 @@ private:
         const Eigen::Matrix4d& T_sonar_to_world,
         const Eigen::Matrix4d& T_world_to_sonar,
         const Eigen::Vector3d& sonar_origin_world,
+        const std::vector<double>& first_hit_map,
         std::vector<VoxelUpdate>& voxel_updates
     );
 

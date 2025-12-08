@@ -142,7 +142,7 @@ void RayProcessor::process_sonar_image(
             // Process this ray (collect voxel updates in local_updates)
             process_single_ray_internal(b_idx, num_beams, intensity_profile,
                                        T_sonar_to_world, T_world_to_sonar,
-                                       sonar_origin_world,
+                                       sonar_origin_world, first_hit_map,
                                        local_updates);
         }
     }  // GIL automatically reacquired here
@@ -322,6 +322,7 @@ void RayProcessor::process_single_ray_internal(
     const Eigen::Matrix4d& T_sonar_to_world,
     const Eigen::Matrix4d& T_world_to_sonar,
     const Eigen::Vector3d& sonar_origin_world,
+    const std::vector<double>& first_hit_map,
     std::vector<VoxelUpdate>& voxel_updates
 ) {
     // Compute bearing angle for this ray
@@ -447,6 +448,24 @@ void RayProcessor::process_single_ray_internal(
                 // (larger cos value = smaller angle)
                 if (cos_diff < cos_half_width) {
                     continue;  // Voxel outside current bearing's angular cone
+                }
+
+                // Per-bearing shadow check: use voxel's actual bearing, not current ray's bearing
+                double voxel_bearing = std::atan2(voxel_in_sonar.y(), voxel_in_sonar.x());
+
+                // Calculate bearing index for this voxel
+                double fov_rad = config_.horizontal_fov * M_PI / 180.0;
+                double bearing_resolution_rad = fov_rad / (num_beams - 1);
+                int voxel_bearing_idx = static_cast<int>((voxel_bearing + fov_rad / 2.0) / bearing_resolution_rad);
+
+                // Clamp to valid range
+                voxel_bearing_idx = std::max(0, std::min(voxel_bearing_idx, num_beams - 1));
+
+                // Check if voxel is in this bearing's shadow
+                double first_hit_for_bearing = first_hit_map[voxel_bearing_idx];
+                if (horiz_dist >= first_hit_for_bearing) {
+                    shadow_skipped++;
+                    continue;  // Skip: voxel is in shadow for its bearing
                 }
 
                 // Range weighting
