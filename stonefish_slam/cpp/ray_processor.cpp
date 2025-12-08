@@ -123,14 +123,9 @@ void RayProcessor::process_sonar_image(
 
             int b_idx = bearing_indices[i];
 
-            // Extract intensity profile for this bearing (column-major access)
-            std::vector<uint8_t> intensity_profile(num_range_bins);
-            for (int r = 0; r < num_range_bins; ++r) {
-                intensity_profile[r] = img_ptr[r * num_beams + b_idx];
-            }
-
             // Process this ray (collect voxel updates in local_updates)
-            process_single_ray_internal(b_idx, num_beams, intensity_profile,
+            // Pass polar image pointer directly for per-voxel pixel lookup
+            process_single_ray_internal(b_idx, num_beams, img_ptr, num_range_bins,
                                        T_sonar_to_world, T_world_to_sonar,
                                        sonar_origin_world, first_hit_map,
                                        local_updates);
@@ -308,7 +303,8 @@ void RayProcessor::process_sonar_image(
 void RayProcessor::process_single_ray_internal(
     int bearing_idx,
     int num_beams,
-    const std::vector<uint8_t>& intensity_profile,
+    const uint8_t* polar_image,
+    int num_range_bins,
     const Eigen::Matrix4d& T_sonar_to_world,
     const Eigen::Matrix4d& T_world_to_sonar,
     const Eigen::Vector3d& sonar_origin_world,
@@ -316,6 +312,12 @@ void RayProcessor::process_single_ray_internal(
     std::vector<VoxelUpdate>& voxel_updates
 ) {
     (void)T_world_to_sonar;  // Reserved for future shadow validation
+
+    // Extract intensity profile for this bearing (for occupied processing)
+    std::vector<uint8_t> intensity_profile(num_range_bins);
+    for (int r = 0; r < num_range_bins; ++r) {
+        intensity_profile[r] = polar_image[r * num_beams + bearing_idx];
+    }
 
     // Compute bearing angle for this ray
     double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
@@ -419,7 +421,7 @@ void RayProcessor::process_single_ray_internal(
                     continue;  // Voxel outside current bearing's angular cone
                 }
 
-                // Per-bearing shadow check: use voxel's actual bearing, not current ray's bearing
+                // Per-bearing: use voxel's actual bearing, not current ray's bearing
                 double voxel_bearing = std::atan2(voxel_in_sonar.y(), voxel_in_sonar.x());
 
                 // Calculate bearing index for this voxel
@@ -430,22 +432,33 @@ void RayProcessor::process_single_ray_internal(
                 // Clamp to valid range
                 voxel_bearing_idx = std::max(0, std::min(voxel_bearing_idx, num_beams - 1));
 
-                // Check if voxel is in this bearing's shadow
-                // Use slant range (3D distance), not horizontal distance
-                // This ensures floor/ceiling voxels are correctly identified as shadow
-                double first_hit_for_bearing = first_hit_map[voxel_bearing_idx];
-                if (range >= first_hit_for_bearing) {
-                    continue;  // Skip: voxel is in shadow for its bearing
+                // Convert voxel range to range bin index
+                // FLS convention: row 0 = far (range_max), row max = near
+                int range_idx = static_cast<int>((config_.range_max - range) / config_.range_resolution);
+                range_idx = std::max(0, std::min(range_idx, num_range_bins - 1));
+
+                // Look up actual pixel intensity in polar image
+                uint8_t pixel_intensity = polar_image[range_idx * num_beams + voxel_bearing_idx];
+
+                // If pixel is a hit, skip (occupied processing handles it)
+                if (pixel_intensity > config_.intensity_threshold) {
+                    continue;
                 }
 
-                // Range weighting
+                // No-hit pixel: check if in shadow region
+                double first_hit_for_bearing = first_hit_map[voxel_bearing_idx];
+                if (range >= first_hit_for_bearing) {
+                    continue;  // Shadow region: do not update
+                }
+
+                // Free space update
                 double log_odds_update = config_.log_odds_free;
                 if (config_.use_range_weighting) {
                     double range_weight = compute_range_weight(range);
                     log_odds_update *= range_weight;
                 }
 
-                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 1.0});  // 1.0 < intensity_threshold = free space
+                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 1.0});
             }
         }
     }

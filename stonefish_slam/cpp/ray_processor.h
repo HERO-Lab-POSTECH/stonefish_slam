@@ -235,7 +235,8 @@ private:
      *
      * @param bearing_idx Bearing index in polar image
      * @param num_beams Total number of bearings (for angle calculation)
-     * @param intensity_profile Intensity values along range (1D array)
+     * @param polar_image Pointer to 2D polar image (num_range_bins x num_beams)
+     * @param num_range_bins Number of range bins in polar image
      * @param T_sonar_to_world Transformation matrix
      * @param T_world_to_sonar Inverse transformation (for shadow validation)
      * @param sonar_origin_world Sonar origin in world frame (cached)
@@ -245,7 +246,8 @@ private:
     void process_single_ray_internal(
         int bearing_idx,
         int num_beams,
-        const std::vector<uint8_t>& intensity_profile,
+        const uint8_t* polar_image,
+        int num_range_bins,
         const Eigen::Matrix4d& T_sonar_to_world,
         const Eigen::Matrix4d& T_world_to_sonar,
         const Eigen::Vector3d& sonar_origin_world,

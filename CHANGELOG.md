@@ -30,6 +30,14 @@ All notable changes to this project will be documented in this file.
   - 파일: `config/mapping.yaml`, `config/method_iwlo.yaml`
 
 ### Fixed
+- **Free Space에서 실제 픽셀 확인** (2025-12-08): Shadow 영역이 free space로 업데이트되는 버그 수정
+  - 문제: first_hit_map만 확인하고 실제 픽셀을 확인하지 않아 shadow 영역이 free로 업데이트됨
+  - 원인: first_hit 앞이면 무조건 free로 가정 (실제 픽셀의 hit/no-hit 확인 안함)
+  - 수정: 각 voxel의 (range, bearing)에 해당하는 polar 이미지 픽셀을 직접 확인
+    * hit 픽셀 → skip (occupied 처리에서 담당)
+    * no-hit + range < first_hit → free
+    * no-hit + range >= first_hit → shadow (업데이트 안함)
+  - 파일: `ray_processor.cpp`, `ray_processor.h`
 - **Occupied 처리 Shadow Check 추가** (2025-12-08): Multi-hit 상황에서 shadow 영역 hit 무시
   - 문제: Multi-hit bearing에서 가장 먼 hit도 occupied로 처리됨
   - 원인: find_first_hit()가 FAR→NEAR 스캔으로 가장 먼 hit 반환, 모든 threshold 이상 hit 처리
