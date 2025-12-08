@@ -313,10 +313,19 @@ void RayProcessor::process_single_ray_internal(
 ) {
     (void)T_world_to_sonar;  // Reserved for future shadow validation
 
+    // Extract intensity profile for this bearing
+    std::vector<uint8_t> intensity_profile(num_range_bins);
+    for (int r = 0; r < num_range_bins; ++r) {
+        intensity_profile[r] = polar_image[r * num_beams + bearing_idx];
+    }
+
     // Compute bearing angle for this ray
     double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
 
-    // Unified DDA processing (handles both free and occupied voxels)
+    // Find first hit index for occupied processing
+    int first_hit_idx = find_first_hit(intensity_profile);
+
+    // Free space processing (DDA traversal)
     // Use first_hit_map which stores CLOSEST hit range (computed with NEAR→FAR scan)
     // This is more accurate than find_first_hit which scans FAR→NEAR
     double range_to_first_hit = first_hit_map[bearing_idx];
@@ -455,7 +464,21 @@ void RayProcessor::process_single_ray_internal(
             }
         }
     }
-    // Occupied updates are now handled in the unified DDA processing above
+
+    // Occupied space processing: vertical fan at hit range
+    if (first_hit_idx >= 0) {
+        std::vector<int> hit_indices;
+        for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
+            if (intensity_profile[i] > config_.intensity_threshold) {
+                hit_indices.push_back(static_cast<int>(i));
+            }
+        }
+
+        if (!hit_indices.empty()) {
+            process_occupied_voxels_internal(hit_indices, intensity_profile, bearing_angle,
+                                            T_sonar_to_world, sonar_origin_world, voxel_updates);
+        }
+    }
 }
 
 
