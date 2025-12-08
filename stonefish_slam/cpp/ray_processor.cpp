@@ -242,13 +242,16 @@ void RayProcessor::process_sonar_image(
         double* log_odds_ptr = nullptr;
         double* intensities_ptr = nullptr;
 
-        if (config_.update_method == 1) {
-            // Weighted Average: need intensity array
+        if (config_.update_method == 1 || config_.update_method == 2) {
+            // Weighted Average OR IWLO: need both intensity and log_odds arrays
             intensities_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
+            log_odds_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
             auto intensities_buf = intensities_np.request();
+            auto log_odds_buf = log_odds_np.request();
             intensities_ptr = static_cast<double*>(intensities_buf.ptr);
+            log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
         } else {
-            // Log-odds or IWLO: use log_odds_sum directly
+            // Log-odds only: use log_odds_sum directly
             log_odds_np = py::array_t<double>(static_cast<py::ssize_t>(filtered_count));
             auto log_odds_buf = log_odds_np.request();
             log_odds_ptr = static_cast<double*>(log_odds_buf.ptr);
@@ -265,11 +268,12 @@ void RayProcessor::process_sonar_image(
                 points_ptr[write_idx * 3 + 1] = (update.key.y + 0.5) * config_.voxel_resolution;
                 points_ptr[write_idx * 3 + 2] = (update.key.z + 0.5) * config_.voxel_resolution;
 
-                if (config_.update_method == 1) {
-                    // Weighted Average: use intensity
+                if (config_.update_method == 1 || config_.update_method == 2) {
+                    // Weighted Average OR IWLO: use both intensity and log_odds
                     intensities_ptr[write_idx] = update.intensity_avg;
+                    log_odds_ptr[write_idx] = update.log_odds;
                 } else {
-                    // Log-odds or IWLO: use log_odds_sum
+                    // Log-odds only: use log_odds_sum
                     log_odds_ptr[write_idx] = update.log_odds;
                 }
                 write_idx++;
