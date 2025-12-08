@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Launch file for independent 3D mapping standalone node."""
 
+import yaml
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -15,10 +16,16 @@ def generate_launch_description():
     pkg_share = Path(get_package_share_directory('stonefish_slam'))
     config_dir = pkg_share / 'config'
 
+    # Read update_method from mapping.yaml
+    mapping_yaml_path = config_dir / 'mapping.yaml'
+    with open(mapping_yaml_path, 'r') as f:
+        mapping_config = yaml.safe_load(f)
+    default_update_method = mapping_config.get('slam_node', {}).get('ros__parameters', {}).get('mapping_3d', {}).get('update_method', 'log_odds')
+
     # Declare launch arguments
     update_method_arg = DeclareLaunchArgument(
         'update_method',
-        default_value='log_odds',
+        default_value=default_update_method,
         description='3D mapping probability update method: log_odds, weighted_avg, iwlo'
     )
 
