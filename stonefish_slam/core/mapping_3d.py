@@ -91,7 +91,7 @@ class SonarMapping3D:
         self.log_odds_min = config['log_odds_min']
         self.log_odds_max = config['log_odds_max']
 
-        print(f"[IWLO CONFIG] log_odds_free={self.log_odds_free}, log_odds_occupied={self.log_odds_occupied}, update_method={config.get('update_method', 'log_odds')}")
+        # print(f"[IWLO CONFIG] log_odds_free={self.log_odds_free}, log_odds_occupied={self.log_odds_occupied}, update_method={config.get('update_method', 'log_odds')}")
 
         # C++ backend initialization
         self.use_cpp_backend = config['use_cpp_backend']
@@ -143,10 +143,10 @@ class SonarMapping3D:
                         L_max=config.get('log_odds_max', 2.0)
                     )
 
-                print(f"[INFO] Using C++ OctoMap backend (resolution: {self.voxel_resolution}m, "
-                      f"method={self.update_method}, "
-                      f"adaptive={self.adaptive_update}, threshold={self.adaptive_threshold}, "
-                      f"max_ratio={self.adaptive_max_ratio}, clamp=[{self.log_odds_min}, {self.log_odds_max}])")
+                # print(f"[INFO] Using C++ OctoMap backend (resolution: {self.voxel_resolution}m, "
+                #       f"method={self.update_method}, "
+                #       f"adaptive={self.adaptive_update}, threshold={self.adaptive_threshold}, "
+                #       f"max_ratio={self.adaptive_max_ratio}, clamp=[{self.log_odds_min}, {self.log_odds_max}])")
                 # No Python octree needed
                 self.octree = None
             except ImportError as e:
@@ -199,7 +199,7 @@ class SonarMapping3D:
 
                 # Create RayProcessor with shared octree
                 self.cpp_ray_processor = RayProcessor(self.cpp_octree, ray_config)
-                print(f"[INFO] C++ RayProcessor initialized (OpenMP enabled, bearing_step={ray_config.bearing_step}, update_method={self.update_method})")
+                # print(f"[INFO] C++ RayProcessor initialized (OpenMP enabled, bearing_step={ray_config.bearing_step}, update_method={self.update_method})")
             except Exception as e:
                 print(f"[WARNING] Failed to initialize C++ RayProcessor: {e}")
                 self.use_cpp_ray_processor = False
@@ -315,36 +315,36 @@ class SonarMapping3D:
         Args:
             config: Configuration dictionary
         """
-        print("=" * 40)
-        print("[Mapping3D] Loaded Parameters")
-        print("=" * 40)
+        print("=" * 40, flush=True)
+        print("[Mapping3D] Loaded Parameters", flush=True)
+        print("=" * 40, flush=True)
 
         # Sonar section
-        print("[Sonar]")
-        print(f"  range_max: {config['range_max']}, sonar_tilt_deg: {config['sonar_tilt_deg']}, fov_deg: {config['horizontal_fov']}")
+        print("[Sonar]", flush=True)
+        print(f"  range_max: {config['range_max']}, sonar_tilt_deg: {config['sonar_tilt_deg']}, fov_deg: {config['horizontal_fov']}", flush=True)
 
         # Grid section
-        print("[Grid]")
-        print(f"  resolution: {config['voxel_resolution']}, grid_size: (auto-expand)")
+        print("[Grid]", flush=True)
+        print(f"  resolution: {config['voxel_resolution']}, grid_size: (auto-expand)", flush=True)
 
         # Update method section
         update_method = config.get('update_method', 'log_odds')
-        print("[Update Method]")
-        print(f"  method: {update_method} (log_odds/iwlo/weighted_avg)")
-        print(f"  log_odds_occupied: {config['log_odds_occupied']}, log_odds_free: {config['log_odds_free']}")
-        print(f"  log_odds_min: {config['log_odds_min']}, log_odds_max: {config['log_odds_max']}")
+        print("[Update Method]", flush=True)
+        print(f"  method: {update_method} (log_odds/iwlo/weighted_avg)", flush=True)
+        print(f"  log_odds_occupied: {config['log_odds_occupied']}, log_odds_free: {config['log_odds_free']}", flush=True)
+        print(f"  log_odds_min: {config['log_odds_min']}, log_odds_max: {config['log_odds_max']}", flush=True)
 
         # IWLO section (if applicable)
         if update_method == 'iwlo':
-            print("[IWLO]")
-            print(f"  intensity_threshold: {config['intensity_threshold']}, sharpness: {config.get('sharpness', 1.0)}")
-            print(f"  decay_rate: {config.get('decay_rate', 0.05)}, min_alpha: {config.get('min_alpha', 0.3)}")
+            print("[IWLO]", flush=True)
+            print(f"  intensity_threshold: {config['intensity_threshold']}, sharpness: {config.get('sharpness', 1.0)}", flush=True)
+            print(f"  decay_rate: {config.get('decay_rate', 0.05)}, min_alpha: {config.get('min_alpha', 0.3)}", flush=True)
 
         # Backend section
-        print("[Backend]")
-        print(f"  use_cpp_backend: {config['use_cpp_backend']}, use_cpp_ray_processor: {config.get('use_cpp_ray_processor', True)}")
+        print("[Backend]", flush=True)
+        print(f"  use_cpp_backend: {config['use_cpp_backend']}, use_cpp_ray_processor: {config.get('use_cpp_ray_processor', True)}", flush=True)
 
-        print("=" * 40)
+        print("=" * 40, flush=True)
 
     def get_voxel_count(self):
         """

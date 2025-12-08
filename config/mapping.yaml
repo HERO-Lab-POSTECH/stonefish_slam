@@ -14,7 +14,7 @@ slam_node:
     mapping_3d:
       # Common parameters (all methods)
       map_3d_voxel_size: 0.1        # 3D octree voxel size (meters)
-      min_probability: 0.8          # minimum probability for occupied voxel
+      min_probability: 0.7          # minimum probability for occupied voxel
       use_cpp_backend: true          # Use C++ backend (DDA + OpenMP)
       use_cpp_ray_processor: true    # Use C++ ray processor backend
       use_dda_traversal: true        # Use DDA ray traversal algorithm
@@ -31,4 +31,4 @@ slam_node:
       enable_gaussian_weighting: true  # Gaussian weighting for bearing-based updates
 
       # Probability update method (method-specific params in method_*.yaml)
-      update_method: 'log_odds'   # Options: 'log_odds', 'weighted_avg', 'iwlo'
+      update_method: 'iwlo'   # Options: 'log_odds', 'weighted_avg', 'iwlo'

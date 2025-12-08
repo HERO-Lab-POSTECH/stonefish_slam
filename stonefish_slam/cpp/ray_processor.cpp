@@ -58,12 +58,12 @@ RayProcessor::RayProcessor(
         throw std::invalid_argument("OctreeMapping pointer cannot be null");
     }
 
-#ifdef _OPENMP
-    std::cerr << "[RayProcessor] OpenMP enabled: " << omp_get_max_threads()
-              << " threads available" << std::endl;
-#else
-    std::cerr << "[RayProcessor] OpenMP not available, single-threaded" << std::endl;
-#endif
+// #ifdef _OPENMP
+//     std::cerr << "[RayProcessor] OpenMP enabled: " << omp_get_max_threads()
+//               << " threads available" << std::endl;
+// #else
+//     std::cerr << "[RayProcessor] OpenMP not available, single-threaded" << std::endl;
+// #endif
 }
 
 // Set configuration
@@ -282,8 +282,10 @@ void RayProcessor::process_sonar_image(
 
         // Single batch insert to octree (select API based on update method)
         if (config_.update_method == 1 || config_.update_method == 2) {
-            // Weighted Average OR IWLO: use intensity-based API
-            octree_->insert_point_cloud_with_intensity(points_np, intensities_np, origin_np);
+            // Weighted Average OR IWLO: use new API with intensity and log-odds
+            octree_->insert_point_cloud_with_intensity_and_logodds(
+                points_np, intensities_np, log_odds_np, origin_np
+            );
         } else {
             // LOG_ODDS ONLY: use log_odds_sum directly
             octree_->insert_point_cloud(points_np, log_odds_np, origin_np);
@@ -309,13 +311,8 @@ void RayProcessor::process_single_ray_internal(
         fn_entry++;
     }
 
-    // FOV EDGE EXCLUSION: Skip outer 5% of horizontal FOV (central 90%)
+    // Compute bearing angle for this ray
     double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
-    double fov_rad = config_.horizontal_fov * M_PI / 180.0;
-    double max_bearing_angle = (fov_rad / 2.0) * 0.9;  // 90% of half FOV
-    if (std::abs(bearing_angle) > max_bearing_angle) {
-        return;  // Skip edge bearings
-    }
 
     // 1. Find first hit only (ignore anything after first reflection)
     int first_hit_idx = find_first_hit(intensity_profile);
@@ -381,12 +378,6 @@ void RayProcessor::process_single_ray_internal(
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             // Compute vertical angle
             double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
-
-            // FOV EDGE EXCLUSION: Skip outer 5% of vertical FOV (central 90%)
-            double max_vertical_angle = half_aperture_ * 0.9;  // 90% of half aperture
-            if (std::abs(vertical_angle) > max_vertical_angle) {
-                continue;  // Skip edge voxels
-            }
 
             // Compute end point in sonar frame (same as occupied calculation)
             // This ensures coordinate consistency when sonar is tilted
@@ -559,12 +550,6 @@ void RayProcessor::process_occupied_voxels_internal(
 
             // Compute vertical angle for edge exclusion and Gaussian weighting
             double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
-
-            // FOV EDGE EXCLUSION: Skip outer 5% of vertical FOV (central 90%)
-            double max_vertical_angle = half_aperture_ * 0.9;  // 90% of half aperture
-            if (std::abs(vertical_angle) > max_vertical_angle) {
-                continue;  // Skip edge voxels
-            }
 
             // NO shadow validation for occupied voxels!
             // Occupied voxels are direct observations, should always be updated

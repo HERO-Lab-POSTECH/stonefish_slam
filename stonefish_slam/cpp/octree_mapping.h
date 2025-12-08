@@ -109,6 +109,28 @@ public:
     );
 
     /**
+     * @brief Batch insert point cloud with intensity and pre-computed log-odds
+     *
+     * Extended API for IWLO/WEIGHTED_AVG that allows passing pre-computed log-odds
+     * for free space voxels (range-weighted by ray_processor).
+     *
+     * @param points Nx3 NumPy array of world coordinates [x, y, z]
+     * @param intensities N-length array of intensity values (0-255)
+     * @param log_odds N-length array of pre-computed log-odds for free space
+     * @param sensor_origin 3-length array [x, y, z] of sensor position
+     *
+     * Update behavior:
+     * - Free space (intensity < threshold): ΔL = passed log_odds (no alpha)
+     * - Occupied (intensity >= threshold): ΔL = L_occ * w(I) * α(n)
+     */
+    void insert_point_cloud_with_intensity_and_logodds(
+        py::array_t<double> points,
+        py::array_t<double> intensities,
+        py::array_t<double> log_odds,
+        py::array_t<double> sensor_origin
+    );
+
+    /**
      * @brief Get all occupied voxels above threshold
      *
      * @param threshold Occupancy probability threshold (0.0 to 1.0, default: 0.5)

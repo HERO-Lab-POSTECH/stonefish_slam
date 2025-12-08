@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **IWLO Free Space Carving 최적화** (2025-12-08): Range-weighted log_odds 직접 사용
+  - 새 API: `insert_point_cloud_with_intensity_and_logodds()` 추가
+  - 개선: ray_processor에서 계산한 range-weighted log_odds를 octree에 직접 삽입
+  - 효과: Free space carving 성능을 log odds 방법과 동등하게 개선
+  - 파일: `octree_mapping.h`, `octree_mapping.cpp`, `ray_processor.cpp`
+
 ### Fixed
 - **Occupied Voxel Elevation 계산 오류** (2025-12-07): bearing 0도 포인트 깊이 불일치 수정
   - 문제: Occupied voxel 처리 시 불필요한 perspective correction 적용으로 이중 보정 발생

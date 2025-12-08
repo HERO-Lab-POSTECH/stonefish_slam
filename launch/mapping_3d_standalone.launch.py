@@ -45,7 +45,7 @@ def generate_launch_description():
                 {
                     # Standalone-specific settings only
                     'resolution': 0.2,
-                    'frame_interval': 5,
+                    'frame_interval': 10,
                     'odom_topic': '/bluerov2/odometry',
                     'sonar_topic': '/bluerov2/fls/image',
                     'update_method': update_method,
