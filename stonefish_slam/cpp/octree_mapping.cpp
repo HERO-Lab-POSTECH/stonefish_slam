@@ -150,16 +150,13 @@ void OctreeMapping::insert_point_cloud(
             const auto& key = batch.keys[i];
             double log_odds_update = batch.log_odds_updates[i];
 
-            // IWLO: Apply learning rate decay based on observation count
+            // IWLO: Apply saturation only (alpha already applied in ray_processor)
             if (update_method_ == UpdateMethod::IWLO) {
                 uint64_t hash = key_to_hash(key);
                 int obs_count = observation_counts_[hash];
                 observation_counts_[hash] = obs_count + 1;
 
-                double alpha = compute_alpha(obs_count);
-                log_odds_update *= alpha;
-
-                // Apply saturation
+                // Apply saturation (NO alpha multiplication here)
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
                 double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + log_odds_update));
@@ -199,16 +196,13 @@ void OctreeMapping::insert_point_cloud(
         // Use updateNode() API for incremental update (enables pruning, lazy_eval=false)
         octomap::OcTreeKey key;
         if (tree_->coordToKeyChecked(endpoint, key)) {
-            // IWLO: Apply learning rate decay based on observation count
+            // IWLO: Apply saturation only (alpha already applied in ray_processor)
             if (update_method_ == UpdateMethod::IWLO) {
                 uint64_t hash = key_to_hash(key);
                 int obs_count = observation_counts_[hash];
                 observation_counts_[hash] = obs_count + 1;
 
-                double alpha = compute_alpha(obs_count);
-                log_odds_update *= alpha;
-
-                // Apply saturation
+                // Apply saturation (NO alpha multiplication here)
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
                 double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + log_odds_update));

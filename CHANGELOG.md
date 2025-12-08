@@ -12,6 +12,14 @@ All notable changes to this project will be documented in this file.
   - 파일: `octree_mapping.h`, `octree_mapping.cpp`, `ray_processor.cpp`
 
 ### Fixed
+- **IWLO Free Space Carving 버그** (2025-12-08): Free space intensity 및 alpha 중복 적용 수정
+  - 문제: IWLO에서 free space carving이 동작하지 않음
+  - 원인: Free space intensity가 0.0으로 설정되어 있고, alpha가 이중으로 적용됨
+  - 수정:
+    * `ray_processor.cpp`: free space intensity를 0.0 → 1.0으로 변경
+    * `octree_mapping.cpp`: alpha 이중 감쇠 제거 (log odds 방식과 일관성 유지)
+  - 효과: IWLO 방식에서 free space carving이 log odds와 동등하게 동작
+  - 파일: `ray_processor.cpp`, `octree_mapping.cpp`
 - **Occupied Voxel Elevation 계산 오류** (2025-12-07): bearing 0도 포인트 깊이 불일치 수정
   - 문제: Occupied voxel 처리 시 불필요한 perspective correction 적용으로 이중 보정 발생
   - 원인: Stonefish는 이미 3D Euclidean distance를 제공하므로 추가 보정 불필요

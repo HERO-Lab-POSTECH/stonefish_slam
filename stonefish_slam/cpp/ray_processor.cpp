@@ -457,7 +457,7 @@ void RayProcessor::process_single_ray_internal(
                               << ", log_odds_update=" << log_odds_update << std::endl;
                     free_debug++;
                 }
-                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 0.0});  // 0.0 < intensity_threshold = free space
+                voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 1.0});  // 1.0 < intensity_threshold = free space
             }
         }
     }
