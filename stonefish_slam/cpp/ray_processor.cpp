@@ -320,19 +320,17 @@ void RayProcessor::process_single_ray_internal(
     // Compute bearing angle for this ray
     double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
 
-    // 1. Find first hit only (ignore anything after first reflection)
+    // 1. Find first hit index for occupied processing
     int first_hit_idx = find_first_hit(intensity_profile);
 
     // 2. Free space processing (DDA traversal to first hit or max range)
-    double range_to_first_hit;
-    if (first_hit_idx < 0) {
-        // No reflection within range_max → entire measured range is free space
-        range_to_first_hit = config_.range_max;
-    } else {
-        // Normal case: free space up to first hit
-        // Range to first hit (FLS convention: row 0 = far, row max = near)
-        // Free space ends one bin before occupied to prevent overlap
-        range_to_first_hit = config_.range_max - (first_hit_idx + 1) * config_.range_resolution;
+    // Use first_hit_map which stores CLOSEST hit range (computed with NEAR→FAR scan)
+    // This is more accurate than find_first_hit which scans FAR→NEAR
+    double range_to_first_hit = first_hit_map[bearing_idx];
+
+    // Subtract one bin to prevent overlap with occupied space
+    if (range_to_first_hit < config_.range_max) {
+        range_to_first_hit -= config_.range_resolution;
     }
 
     // Always perform free space processing (even if no hit found)
@@ -452,17 +450,15 @@ void RayProcessor::process_single_ray_internal(
         }
     }
 
-    // 3. Occupied space processing: first hit and all high intensity beyond
-    // first_hit_idx = closest hit (highest index, near end)
-    // Process from index 0 (far) to first_hit_idx (closest hit)
-    // Beyond first hit (lower indices) = shadow region for low intensity
+    // 3. Occupied space processing: all high intensity hits
+    // All hits above threshold are real observations and should be updated
+    // Shadow check only applies to FREE SPACE, not occupied hits
     if (first_hit_idx >= 0) {
         std::vector<int> hit_indices;
-        for (int i = 0; i <= first_hit_idx; ++i) {
+        for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
             if (intensity_profile[i] > config_.intensity_threshold) {
-                hit_indices.push_back(i);
+                hit_indices.push_back(static_cast<int>(i));
             }
-            // Low intensity (≤ threshold) in this range: NO UPDATE (shadow region)
         }
 
         if (!hit_indices.empty()) {
@@ -565,13 +561,12 @@ void RayProcessor::process_occupied_voxels_internal(
     }
 }
 
-// Find first hit (closest object to sonar)
-// FLS convention: index 0 = far, index max = near
-// Iterate from near to far to find the CLOSEST hit first
+// Find first hit in intensity profile (image scan order: far to near)
+// Returns the first index with intensity above threshold
 int RayProcessor::find_first_hit(const std::vector<uint8_t>& intensity_profile) const {
-    for (int i = static_cast<int>(intensity_profile.size()) - 1; i >= 0; --i) {
+    for (size_t i = 0; i < intensity_profile.size(); ++i) {
         if (intensity_profile[i] > config_.intensity_threshold) {
-            return i;
+            return static_cast<int>(i);
         }
     }
     return -1;  // No hit found

@@ -30,6 +30,12 @@ All notable changes to this project will be documented in this file.
   - 파일: `config/mapping.yaml`, `config/method_iwlo.yaml`
 
 ### Fixed
+- **Occupied 처리 Shadow Check 추가** (2025-12-08): Multi-hit 상황에서 shadow 영역 hit 무시
+  - 문제: Multi-hit bearing에서 가장 먼 hit도 occupied로 처리됨
+  - 원인: find_first_hit()가 FAR→NEAR 스캔으로 가장 먼 hit 반환, 모든 threshold 이상 hit 처리
+  - 수정: 각 hit의 range를 first_hit_map[bearing_idx]와 비교하여 shadow 영역 hit skip
+  - 효과: first hit (가장 가까운 hit) 근처의 hit만 occupied로 처리
+  - 파일: `ray_processor.cpp` (라인 461-472)
 - **섀도우 판정 거리 타입 수정** (2025-12-08): 수평 거리 → 슬랜트 거리 (3D 거리)
   - 문제: floor/ceiling voxel이 자유 공간으로 오표기됨
   - 원인: 3D 실제 거리가 아닌 2D 수평 거리 비교
