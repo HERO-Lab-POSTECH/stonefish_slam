@@ -1111,54 +1111,16 @@ class SonarMapping3D:
 
             num_voxels_updated = 0
 
-            if self.use_cpp_backend:
-                # C++ batch update path
-                if len(all_voxel_updates) > 0:
-                    # Prepare batch arrays
-                    points_list = []
-                    log_odds_list = []
-                    intensities_list = []
+            # Python update path (existing)
+            for voxel_key, update_info in all_voxel_updates.items():
+                # Calculate average update
+                avg_update = update_info['sum'] / update_info['count']
 
-                    for voxel_key, update_info in all_voxel_updates.items():
-                        # Calculate average update
-                        avg_update = update_info['sum'] / update_info['count']
-                        points_list.append(update_info['point'])
-                        log_odds_list.append(avg_update)
-
-                        # Get intensity (if available, otherwise use default)
-                        intensity = update_info.get('intensity', 0.0)
-                        intensities_list.append(intensity)
-
-                    # Convert to numpy arrays
-                    points = np.array(points_list, dtype=np.float64)
-                    log_odds = np.array(log_odds_list, dtype=np.float64)
-                    intensities = np.array(intensities_list, dtype=np.float64)
-
-                    # Get sensor origin from transform
-                    sensor_origin = T_sonar_to_world[:3, 3]
-
-                    # Single batch insert call with method-dependent API
-                    if self.update_method in ['weighted_avg', 'iwlo']:
-                        # Use intensity-aware API
-                        self.cpp_octree.insert_point_cloud_with_intensity(
-                            points, intensities, sensor_origin
-                        )
-                    else:
-                        # Use standard log-odds API
-                        self.cpp_octree.insert_point_cloud(points, log_odds, sensor_origin)
-
-                    num_voxels_updated = len(points)
-            else:
-                # Python update path (existing)
-                for voxel_key, update_info in all_voxel_updates.items():
-                    # Calculate average update
-                    avg_update = update_info['sum'] / update_info['count']
-
-                    # Apply update (adaptive protection for both occupied AND free)
-                    # CRITICAL FIX: Free space should also be protected from rapid changes
-                    adaptive = True  # Always use adaptive protection
-                    self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
-                    num_voxels_updated += 1
+                # Apply update (adaptive protection for both occupied AND free)
+                # CRITICAL FIX: Free space should also be protected from rapid changes
+                adaptive = True  # Always use adaptive protection
+                self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
+                num_voxels_updated += 1
 
             if self.profiling_enabled:
                 t_octree_total = time.perf_counter() - t_octree_start

@@ -511,6 +511,7 @@ double OctreeMapping::query_cell(double x, double y, double z) {
 
 void OctreeMapping::clear() {
     tree_->clear();
+    observation_counts_.clear();
 }
 
 size_t OctreeMapping::get_num_nodes() const {

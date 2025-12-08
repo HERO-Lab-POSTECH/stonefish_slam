@@ -256,7 +256,6 @@ private:
      * @param polar_image Pointer to 2D polar image (num_range_bins x num_beams)
      * @param num_range_bins Number of range bins in polar image
      * @param T_sonar_to_world Transformation matrix
-     * @param T_world_to_sonar Inverse transformation (for shadow validation)
      * @param sonar_origin_world Sonar origin in world frame (cached)
      * @param first_hit_map First hit ranges for all bearings (meters)
      * @param voxel_updates Output buffer to collect voxel updates
@@ -267,36 +266,11 @@ private:
         const uint8_t* polar_image,
         int num_range_bins,
         const Eigen::Matrix4d& T_sonar_to_world,
-        const Eigen::Matrix4d& T_world_to_sonar,
         const Eigen::Vector3d& sonar_origin_world,
         const std::vector<double>& first_hit_map,
         std::vector<VoxelUpdate>& voxel_updates
     );
 
-    /**
-     * @brief Process occupied voxels - internal version (GIL-free, OpenMP-safe)
-     *
-     * Collects occupied voxel updates in C++ buffer.
-     * Used by process_single_ray_internal() in OpenMP parallel region.
-     *
-     * Occupied voxels are direct observations and should always be updated
-     * without shadow validation.
-     *
-     * @param hit_indices Indices of range bins with high intensity
-     * @param intensity_profile Intensity values along range (for IWLO)
-     * @param bearing_angle Horizontal bearing angle (radians)
-     * @param T_sonar_to_world Transformation matrix
-     * @param sonar_origin_world Sonar origin in world frame (cached)
-     * @param voxel_updates Output buffer to collect voxel updates
-     */
-    void process_occupied_voxels_internal(
-        const std::vector<int>& hit_indices,
-        const std::vector<uint8_t>& intensity_profile,
-        double bearing_angle,
-        const Eigen::Matrix4d& T_sonar_to_world,
-        const Eigen::Vector3d& sonar_origin_world,
-        std::vector<VoxelUpdate>& voxel_updates
-    );
 
     /**
      * @brief Find first intensity peak above threshold
@@ -387,18 +361,6 @@ private:
     int compute_num_horizontal_steps(double range_m, int bearing_step, int num_beams) const;
 
 private:
-    /**
-     * @brief Internal DDA voxel traversal
-     *
-     * Simplified version of DDATraversal for internal use only.
-     * Avoids inter-module symbol dependencies.
-     */
-    std::vector<Eigen::Vector3d> traverse_ray_dda(
-        const Eigen::Vector3d& start,
-        const Eigen::Vector3d& end,
-        int max_voxels = 500
-    ) const;
-
     /**
      * @brief Convert world coordinates to voxel key
      */

@@ -83,9 +83,6 @@ void RayProcessor::process_sonar_image(
     // Compute first-hit map for shadow validation (while holding GIL)
     std::vector<double> first_hit_map = compute_first_hit_map(polar_image);
 
-    // Compute inverse transform for shadow validation
-    Eigen::Matrix4d T_world_to_sonar = T_sonar_to_world.inverse();
-
     // Process bearings with step (e.g., every 2nd bearing for performance)
     std::vector<int> bearing_indices;
     for (int b = 0; b < num_beams; b += config_.bearing_step) {
@@ -126,9 +123,8 @@ void RayProcessor::process_sonar_image(
             // Process this ray (collect voxel updates in local_updates)
             // Pass polar image pointer directly for per-voxel pixel lookup
             process_single_ray_internal(b_idx, num_beams, img_ptr, num_range_bins,
-                                       T_sonar_to_world, T_world_to_sonar,
-                                       sonar_origin_world, first_hit_map,
-                                       local_updates);
+                                       T_sonar_to_world, sonar_origin_world,
+                                       first_hit_map, local_updates);
         }
     }  // GIL automatically reacquired here
 
@@ -275,12 +271,10 @@ void RayProcessor::process_single_ray_internal(
     const uint8_t* polar_image,
     int num_range_bins,
     const Eigen::Matrix4d& T_sonar_to_world,
-    const Eigen::Matrix4d& T_world_to_sonar,
     const Eigen::Vector3d& sonar_origin_world,
     const std::vector<double>& first_hit_map,
     std::vector<VoxelUpdate>& voxel_updates
 ) {
-    (void)T_world_to_sonar;  // Reserved for future shadow validation
 
     // Extract intensity profile for this bearing
     std::vector<uint8_t> intensity_profile(num_range_bins);
@@ -398,97 +392,6 @@ void RayProcessor::process_single_ray_internal(
 }
 
 
-// Internal version: collect occupied voxels in C++ buffer (GIL-free, OpenMP-safe)
-void RayProcessor::process_occupied_voxels_internal(
-    const std::vector<int>& hit_indices,
-    const std::vector<uint8_t>& intensity_profile,
-    double bearing_angle,
-    const Eigen::Matrix4d& T_sonar_to_world,
-    const Eigen::Vector3d& sonar_origin_world,
-    std::vector<VoxelUpdate>& voxel_updates
-) {
-    // Process each range bin with high intensity
-    for (int r_idx : hit_indices) {
-        // Get intensity value for this range bin
-        uint8_t intensity = intensity_profile[r_idx];
-        // Calculate range (FLS convention: row 0 = far, row max = near)
-        double range_m = config_.range_max - r_idx * config_.range_resolution;
-
-        // Skip out-of-range
-        if (range_m > config_.range_max) {
-            continue;
-        }
-
-        // Compute number of vertical steps (full coverage)
-        int num_vertical_steps = compute_num_vertical_steps(range_m);
-
-        // Total number of vertical points
-        int num_vertical_points = 2 * num_vertical_steps + 1;
-
-        // Batch create all vertical points in sonar frame (Eigen SIMD optimization)
-        Eigen::Matrix3Xd points_sonar(3, num_vertical_points);
-
-        for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
-            int col_idx = v_step + num_vertical_steps;
-
-            // Compute vertical angle
-            double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
-
-            // Sonar frame coordinates (FRD: X=forward, Y=right, Z=down)
-            // Bearing: 0=forward, positive=right, negative=left
-            double x_sonar = range_m * std::cos(vertical_angle) * std::cos(bearing_angle);
-            double y_sonar = range_m * std::cos(vertical_angle) * std::sin(bearing_angle);
-            double z_sonar = range_m * std::sin(vertical_angle);
-
-            points_sonar.col(col_idx) << x_sonar, y_sonar, z_sonar;
-        }
-
-        // Batch transform to world frame (Eigen SIMD optimization)
-        Eigen::Matrix3Xd points_world =
-            T_sonar_to_world.block<3, 3>(0, 0) * points_sonar +
-            sonar_origin_world.replicate(1, num_vertical_points);
-
-        // Compute base log-odds update with intensity and range weighting
-        double base_log_odds = config_.log_odds_occupied;
-
-        // Intensity weighting: w(I) = sigmoid((I - I_mid) / scale)
-        // High intensity → weight > 0.5, stronger update
-        double intensity_weight = compute_intensity_weight(intensity);
-        base_log_odds *= intensity_weight;
-
-        if (config_.use_range_weighting) {
-            double range_weight = compute_range_weight(range_m);
-            base_log_odds *= range_weight;
-        }
-
-        // Fill voxel updates with Gaussian weighting if enabled
-        for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
-            int idx = v_step + num_vertical_steps;
-
-            // Compute vertical angle for edge exclusion and Gaussian weighting
-            double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
-
-            // NO shadow validation for occupied voxels!
-            // Occupied voxels are direct observations, should always be updated
-
-            // Compute log-odds with optional Gaussian weighting
-            double log_odds_update = base_log_odds;
-            if (config_.enable_gaussian_weighting && num_vertical_steps > 0) {
-                double normalized_angle = vertical_angle / half_aperture_;
-                double gaussian_weight = std::exp(-0.5 * std::pow(normalized_angle * config_.gaussian_sigma_factor, 2));
-                log_odds_update *= gaussian_weight;
-            }
-
-            voxel_updates.push_back({
-                points_world(0, idx),
-                points_world(1, idx),
-                points_world(2, idx),
-                log_odds_update,
-                static_cast<double>(intensity)
-            });
-        }
-    }
-}
 
 // Find first hit in intensity profile (image scan order: far to near)
 // Returns the first index with intensity above threshold
@@ -720,93 +623,6 @@ bool RayProcessor::is_voxel_in_shadow(
     return voxel_range >= global_min_first_hit;
 }
 
-// Internal DDA voxel traversal (simplified version)
-std::vector<Eigen::Vector3d> RayProcessor::traverse_ray_dda(
-    const Eigen::Vector3d& start,
-    const Eigen::Vector3d& end,
-    int max_voxels
-) const {
-    std::vector<Eigen::Vector3d> voxel_centers;
-
-    // Input validation
-    if (max_voxels <= 0 || !start.allFinite() || !end.allFinite()) {
-        return voxel_centers;
-    }
-
-    // Calculate ray direction and length
-    Eigen::Vector3d ray = end - start;
-    double ray_length = ray.norm();
-
-    if (ray_length < 1e-10) {
-        voxel_centers.push_back(start);
-        return voxel_centers;
-    }
-
-    ray.normalize();
-
-    // Get starting and ending voxel keys
-    std::array<int, 3> current_voxel = world_to_voxel_key(start);
-    std::array<int, 3> end_voxel = world_to_voxel_key(end);
-
-    // Add starting voxel center (grid index → world center)
-    Eigen::Vector3d voxel_center(
-        (current_voxel[0] + 0.5) * config_.voxel_resolution,
-        (current_voxel[1] + 0.5) * config_.voxel_resolution,
-        (current_voxel[2] + 0.5) * config_.voxel_resolution
-    );
-    voxel_centers.push_back(voxel_center);
-
-    // Calculate step direction for each axis
-    std::array<int, 3> step;
-    for (int i = 0; i < 3; ++i) {
-        step[i] = (ray[i] > 0) ? 1 : ((ray[i] < 0) ? -1 : 0);
-    }
-
-    // Calculate tMax and tDelta for DDA algorithm
-    Eigen::Vector3d tMax, tDelta;
-
-    for (int i = 0; i < 3; ++i) {
-        if (std::abs(ray[i]) < 1e-10) {
-            tMax[i] = std::numeric_limits<double>::max();
-            tDelta[i] = std::numeric_limits<double>::max();
-        } else {
-            double next_boundary = (step[i] > 0) ?
-                                   (current_voxel[i] + 1) * config_.voxel_resolution :
-                                   current_voxel[i] * config_.voxel_resolution;
-            tMax[i] = (next_boundary - start[i]) / ray[i];
-            tDelta[i] = config_.voxel_resolution / std::abs(ray[i]);
-        }
-    }
-
-    // DDA main loop
-    while (voxel_centers.size() < static_cast<size_t>(max_voxels)) {
-        // Check if we reached the end voxel
-        if (current_voxel[0] == end_voxel[0] &&
-            current_voxel[1] == end_voxel[1] &&
-            current_voxel[2] == end_voxel[2]) {
-            break;
-        }
-
-        // Find axis with minimum tMax (next voxel boundary to cross)
-        int min_axis = 0;
-        if (tMax[1] < tMax[0]) min_axis = 1;
-        if (tMax[2] < tMax[min_axis]) min_axis = 2;
-
-        // Advance along that axis
-        current_voxel[min_axis] += step[min_axis];
-        tMax[min_axis] += tDelta[min_axis];
-
-        // Add new voxel center (grid index → world center)
-        Eigen::Vector3d new_center(
-            (current_voxel[0] + 0.5) * config_.voxel_resolution,
-            (current_voxel[1] + 0.5) * config_.voxel_resolution,
-            (current_voxel[2] + 0.5) * config_.voxel_resolution
-        );
-        voxel_centers.push_back(new_center);
-    }
-
-    return voxel_centers;
-}
 
 // Convert world coordinates to voxel key
 std::array<int, 3> RayProcessor::world_to_voxel_key(const Eigen::Vector3d& point) const {
