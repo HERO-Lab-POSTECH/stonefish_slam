@@ -729,33 +729,25 @@ bool RayProcessor::is_voxel_in_shadow(
     double check_half_width = std::max(voxel_angular_extent, actual_bearing_resolution * 2.0);
     check_half_width = std::min(check_half_width, fov_rad * 0.1);
 
-    // 해당 범위 내 bearing들의 최소 first_hit 찾기
+    // === OPTIMIZED: 직접 bearing index 범위 계산 ===
+    double min_bearing = voxel_bearing_rad - check_half_width;
+    double max_bearing = voxel_bearing_rad + check_half_width;
+
+    double fov_start = -fov_rad / 2.0;
+
+    // Index 계산: b_idx = (bearing_angle - fov_start) / actual_bearing_resolution
+    int start_idx = static_cast<int>(std::floor((min_bearing - fov_start) / actual_bearing_resolution));
+    int end_idx = static_cast<int>(std::ceil((max_bearing - fov_start) / actual_bearing_resolution));
+
+    // Clamp to valid range [0, num_beams-1]
+    start_idx = std::max(0, std::min(start_idx, num_beams - 1));
+    end_idx = std::max(0, std::min(end_idx, num_beams - 1));
+
+    // 해당 범위만 순회 (전체 num_beams 대신)
     double min_first_hit = std::numeric_limits<double>::max();
-
-    // Check each bearing in first_hit_map
-    for (int b_idx = 0; b_idx < num_beams; ++b_idx) {
-        // Skip excluded bearing (for occupied voxels)
-        if (b_idx == exclude_idx) {
-            continue;
-        }
-
-        // Calculate this bearing's angle
-        double bearing_angle = -fov_rad / 2.0 + b_idx * actual_bearing_resolution;
-
-        // Calculate angular difference between voxel and this bearing
-        double angle_diff = std::abs(voxel_bearing_rad - bearing_angle);
-
-        // Handle wraparound (e.g., -179° vs +179°)
-        if (angle_diff > M_PI) {
-            angle_diff = 2.0 * M_PI - angle_diff;
-        }
-
-        // Voxel이 걸쳐있는 bearing 범위 내에서만 확인
-        if (angle_diff <= check_half_width) {
-            // Get first hit range for this bearing
-            double first_hit_range = first_hit_map[b_idx];
-            min_first_hit = std::min(min_first_hit, first_hit_range);
-        }
+    for (int b_idx = start_idx; b_idx <= end_idx; ++b_idx) {
+        if (b_idx == exclude_idx) continue;
+        min_first_hit = std::min(min_first_hit, first_hit_map[b_idx]);
     }
 
     // Voxel이 가장 가까운 first_hit보다 뒤에 있으면 shadow
