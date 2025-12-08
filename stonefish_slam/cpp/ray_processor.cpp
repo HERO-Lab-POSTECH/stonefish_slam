@@ -322,161 +322,86 @@ void RayProcessor::process_single_ray_internal(
     // Compute bearing angle for this ray
     double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
 
-    // Find first hit index for occupied processing
-    int first_hit_idx = find_first_hit(intensity_profile);
+    // Pixel-based unified processing: iterate over all range bins
+    // For each (range, bearing) pixel:
+    //   - Check pixel intensity
+    //   - Generate vertical fan
+    //   - Update as occupied/free based on pixel value and shadow region
 
-    // Free space processing (DDA traversal)
-    // Use first_hit_map which stores CLOSEST hit range (computed with NEAR→FAR scan)
-    // This is more accurate than find_first_hit which scans FAR→NEAR
-    double range_to_first_hit = first_hit_map[bearing_idx];
+    // Get first hit range for shadow validation
+    double first_hit_range = first_hit_map[bearing_idx];
 
-    // Subtract one bin to prevent overlap with occupied space
-    if (range_to_first_hit < config_.range_max) {
-        range_to_first_hit -= config_.range_resolution;
-    }
+    // Process all range bins
+    for (int r_idx = 0; r_idx < num_range_bins; ++r_idx) {
+        uint8_t pixel_intensity = intensity_profile[r_idx];
 
-    // Always perform free space processing (even if no hit found)
-    {
-        // Horizontal ray direction (in sonar frame)
-        Eigen::Vector3d ray_direction_sonar = compute_ray_direction(bearing_angle);
+        // Calculate range (FLS convention: row 0 = far, row max = near)
+        double range_m = config_.range_max - r_idx * config_.range_resolution;
 
-        // Transform to world frame
-        Eigen::Vector3d ray_direction_world = T_sonar_to_world.block<3, 3>(0, 0) * ray_direction_sonar;
-        ray_direction_world.normalize();
-
-        // Compute vertical steps for free space (full coverage)
-        // Use range_to_first_hit for consistent vertical sampling with occupied
-        int num_vertical_steps = compute_num_vertical_steps(range_to_first_hit);
-
-        // Extend range to include first_hit (will be handled by pixel check)
-        double safe_range = range_to_first_hit + config_.voxel_resolution;
-
-        if (range_to_first_hit <= 0.0) {
-            return;  // Skip this bearing if too close
+        // Skip invalid range
+        if (range_m <= config_.range_min || range_m > config_.range_max) {
+            continue;
         }
 
-        // Pre-compute constants (outside vertical loop for efficiency)
-        const double cos_bear = std::cos(bearing_angle);
-        const double sin_bear = std::sin(bearing_angle);
-        // 실제 bearing 해상도 기반 cone width 계산 (0.5 = 각 bearing 책임 영역만)
-        double actual_bearing_resolution = (config_.horizontal_fov * M_PI / 180.0) / (num_beams - 1);
-        const double bearing_half_width = actual_bearing_resolution * config_.bearing_step * 0.5;
-        const double cos_half_width = std::cos(bearing_half_width);
-        const Eigen::Matrix3d R_world_to_sonar = T_sonar_to_world.block<3, 3>(0, 0).transpose();
+        // Determine pixel status
+        bool is_hit = (pixel_intensity > config_.intensity_threshold);
+        bool is_shadow = (!is_hit && range_m >= first_hit_range);
 
-        // Process free space with vertical fan (internal DDA traversal)
-        // Sonar frame coordinates for consistency with occupied space
+        // Skip shadow region (no update)
+        if (is_shadow) {
+            continue;
+        }
+
+        // Generate vertical fan for this (range, bearing) pixel
+        int num_vertical_steps = compute_num_vertical_steps(range_m);
+
+        // Compute base log-odds update
+        double base_log_odds;
+        if (is_hit) {
+            // Occupied update with intensity weighting
+            double intensity_weight = compute_intensity_weight(pixel_intensity);
+            base_log_odds = config_.log_odds_occupied * intensity_weight;
+        } else {
+            // Free space update
+            base_log_odds = config_.log_odds_free;
+        }
+
+        // Apply range weighting if enabled
+        if (config_.use_range_weighting) {
+            base_log_odds *= compute_range_weight(range_m);
+        }
+
+        // Process vertical fan
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             // Compute vertical angle
             double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
 
-            // Compute end point in sonar frame (same as occupied calculation)
-            // This ensures coordinate consistency when sonar is tilted
-            // Optimized: pre-computed cos_bear/sin_bear outside loop
+            // Calculate voxel position in sonar frame
             double cos_vert = std::cos(vertical_angle);
-            double horizontal_range = safe_range * cos_vert;
-            double x_sonar = horizontal_range * cos_bear;
-            double y_sonar = horizontal_range * sin_bear;
-            double z_sonar = safe_range * std::sin(vertical_angle);
-            Eigen::Vector3d end_point_sonar(x_sonar, y_sonar, z_sonar);
+            double x_sonar = range_m * cos_vert * std::cos(bearing_angle);
+            double y_sonar = range_m * cos_vert * std::sin(bearing_angle);
+            double z_sonar = range_m * std::sin(vertical_angle);
 
-            // Transform to world frame (same transform as occupied)
-            Eigen::Vector3d end_point = T_sonar_to_world.block<3, 3>(0, 0) * end_point_sonar + sonar_origin_world;
+            // Transform to world frame
+            Eigen::Vector3d point_sonar(x_sonar, y_sonar, z_sonar);
+            Eigen::Vector3d point_world = T_sonar_to_world.block<3, 3>(0, 0) * point_sonar + sonar_origin_world;
 
-            // DDA traversal (pure C++)
-            std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, 500);
-
-            // End voxel 제외로 occupied 영역 보호
-            if (!voxels.empty()) {
-                voxels.pop_back();
+            // Apply Gaussian weighting for occupied voxels (optional)
+            double log_odds_update = base_log_odds;
+            if (is_hit && config_.enable_gaussian_weighting && num_vertical_steps > 0) {
+                double normalized_angle = vertical_angle / half_aperture_;
+                double gaussian_weight = std::exp(-0.5 * std::pow(normalized_angle * config_.gaussian_sigma_factor, 2));
+                log_odds_update *= gaussian_weight;
             }
 
-            // Add to voxel updates with range weighting
-            for (const auto& voxel : voxels) {
-                // Compute range from sonar origin
-                double range = (voxel - sonar_origin_world).norm();
-
-                // Angular cone filtering: only update voxels within bearing's responsibility
-                // Optimized: Use cos/sin dot product instead of atan2 for 50% performance gain
-                Eigen::Vector3d voxel_in_sonar = R_world_to_sonar * (voxel - sonar_origin_world);
-
-                // Compute horizontal distance (ignore Z for bearing calculation)
-                double horiz_dist = std::sqrt(voxel_in_sonar.x() * voxel_in_sonar.x() +
-                                               voxel_in_sonar.y() * voxel_in_sonar.y());
-
-                if (horiz_dist < 1e-6) {
-                    continue;  // Skip voxels at origin
-                }
-
-                // Normalize to get unit direction vector
-                double voxel_cos = voxel_in_sonar.x() / horiz_dist;
-                double voxel_sin = voxel_in_sonar.y() / horiz_dist;
-
-                // Dot product: cos(angle_diff) = cos(a)*cos(b) + sin(a)*sin(b)
-                double cos_diff = voxel_cos * cos_bear + voxel_sin * sin_bear;
-
-                // Check if within cone: cos(angle_diff) > cos(half_width)
-                // (larger cos value = smaller angle)
-                if (cos_diff < cos_half_width) {
-                    continue;  // Voxel outside current bearing's angular cone
-                }
-
-                // Per-bearing: use voxel's actual bearing, not current ray's bearing
-                double voxel_bearing = std::atan2(voxel_in_sonar.y(), voxel_in_sonar.x());
-
-                // Calculate bearing index for this voxel
-                double fov_rad = config_.horizontal_fov * M_PI / 180.0;
-                double bearing_resolution_rad = fov_rad / (num_beams - 1);
-                int voxel_bearing_idx = static_cast<int>((voxel_bearing + fov_rad / 2.0) / bearing_resolution_rad);
-
-                // Clamp to valid range
-                voxel_bearing_idx = std::max(0, std::min(voxel_bearing_idx, num_beams - 1));
-
-                // Convert voxel range to range bin index
-                // FLS convention: row 0 = far (range_max), row max = near
-                int range_idx = static_cast<int>((config_.range_max - range) / config_.range_resolution);
-                range_idx = std::max(0, std::min(range_idx, num_range_bins - 1));
-
-                // Look up actual pixel intensity in polar image
-                uint8_t pixel_intensity = polar_image[range_idx * num_beams + voxel_bearing_idx];
-
-                if (pixel_intensity > config_.intensity_threshold) {
-                    // Hit pixel → occupied update
-                    double intensity_weight = compute_intensity_weight(pixel_intensity);
-                    double log_odds_update = config_.log_odds_occupied * intensity_weight;
-                    if (config_.use_range_weighting) {
-                        log_odds_update *= compute_range_weight(range);
-                    }
-                    voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, static_cast<double>(pixel_intensity)});
-                } else {
-                    // No-hit pixel: check if in shadow region
-                    double first_hit_for_bearing = first_hit_map[voxel_bearing_idx];
-                    if (range >= first_hit_for_bearing) {
-                        continue;  // Shadow region: do not update
-                    }
-                    // Free space update
-                    double log_odds_update = config_.log_odds_free;
-                    if (config_.use_range_weighting) {
-                        log_odds_update *= compute_range_weight(range);
-                    }
-                    voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 1.0});
-                }
-            }
-        }
-    }
-
-    // Occupied space processing: vertical fan at hit range
-    if (first_hit_idx >= 0) {
-        std::vector<int> hit_indices;
-        for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
-            if (intensity_profile[i] > config_.intensity_threshold) {
-                hit_indices.push_back(static_cast<int>(i));
-            }
-        }
-
-        if (!hit_indices.empty()) {
-            process_occupied_voxels_internal(hit_indices, intensity_profile, bearing_angle,
-                                            T_sonar_to_world, sonar_origin_world, voxel_updates);
+            // Add voxel update
+            voxel_updates.push_back({
+                point_world.x(),
+                point_world.y(),
+                point_world.z(),
+                log_odds_update,
+                static_cast<double>(pixel_intensity)
+            });
         }
     }
 }
