@@ -3,8 +3,9 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 from pathlib import Path
 
@@ -21,8 +22,13 @@ def generate_launch_description():
         description='3D mapping probability update method: log_odds, weighted_avg, iwlo'
     )
 
-    # Build method config path
+    # Build method config path dynamically
     update_method = LaunchConfiguration('update_method')
+    method_config_path = PathJoinSubstitution([
+        FindPackageShare('stonefish_slam'),
+        'config', 'mapping',
+        ['method_', update_method, '.yaml']
+    ])
 
     return LaunchDescription([
         update_method_arg,
@@ -35,8 +41,7 @@ def generate_launch_description():
                 str(config_dir / 'sonar.yaml'),    # Sonar parameters
                 str(config_dir / 'mapping.yaml'),  # Mapping parameters
                 str(config_dir / 'slam.yaml'),     # General SLAM params
-                # Method-specific config - use method_iwlo.yaml for IWLO testing
-                str(config_dir / 'mapping' / 'method_iwlo.yaml'),
+                method_config_path,                # Dynamic: method_{log_odds|weighted_avg|iwlo}.yaml
                 {
                     # Standalone-specific settings only
                     'resolution': 0.2,

@@ -273,6 +273,9 @@ class SonarMapping3D:
         if self.enable_profiling:
             self.profiler.start()
 
+        # Print all loaded parameters (한번만 출력)
+        self._print_all_parameters(config)
+
         # Gaussian weighting settings for vertical aperture
         self.enable_gaussian_weighting = config['enable_gaussian_weighting']
         self.gaussian_sigma_factor = config.get('gaussian_sigma_factor', 2.5)
@@ -304,6 +307,44 @@ class SonarMapping3D:
             except ImportError as e:
                 self.use_dda = False
                 print(f"[WARN] C++ DDA module not found ({e}), using Python traversal")
+
+    def _print_all_parameters(self, config):
+        """
+        Print all loaded parameters in organized sections (called once during initialization)
+
+        Args:
+            config: Configuration dictionary
+        """
+        print("=" * 40)
+        print("[Mapping3D] Loaded Parameters")
+        print("=" * 40)
+
+        # Sonar section
+        print("[Sonar]")
+        print(f"  range_max: {config['range_max']}, sonar_tilt_deg: {config['sonar_tilt_deg']}, fov_deg: {config['horizontal_fov']}")
+
+        # Grid section
+        print("[Grid]")
+        print(f"  resolution: {config['voxel_resolution']}, grid_size: (auto-expand)")
+
+        # Update method section
+        update_method = config.get('update_method', 'log_odds')
+        print("[Update Method]")
+        print(f"  method: {update_method} (log_odds/iwlo/weighted_avg)")
+        print(f"  log_odds_occupied: {config['log_odds_occupied']}, log_odds_free: {config['log_odds_free']}")
+        print(f"  log_odds_min: {config['log_odds_min']}, log_odds_max: {config['log_odds_max']}")
+
+        # IWLO section (if applicable)
+        if update_method == 'iwlo':
+            print("[IWLO]")
+            print(f"  intensity_threshold: {config['intensity_threshold']}, sharpness: {config.get('sharpness', 1.0)}")
+            print(f"  decay_rate: {config.get('decay_rate', 0.05)}, min_alpha: {config.get('min_alpha', 0.3)}")
+
+        # Backend section
+        print("[Backend]")
+        print(f"  use_cpp_backend: {config['use_cpp_backend']}, use_cpp_ray_processor: {config.get('use_cpp_ray_processor', True)}")
+
+        print("=" * 40)
 
     def get_voxel_count(self):
         """
@@ -1144,13 +1185,13 @@ class SonarMapping3D:
         # Increment frame counter
         self.frame_count += 1
 
-        # Print detailed profiling statistics every csv_sample_interval frames
-        if self.profiling_enabled and self.frame_count % self.csv_sample_interval == 0:
-            if len(self.profiling_data['frame_total']) >= self.csv_sample_interval:
-                self._print_profiling_stats()
-                # Keep only last csv_sample_interval frames
-                for key in self.profiling_data:
-                    self.profiling_data[key] = self.profiling_data[key][-self.csv_sample_interval:]
+        # Print detailed profiling statistics every csv_sample_interval frames (주석 처리 - iteration 로그 제거)
+        # if self.profiling_enabled and self.frame_count % self.csv_sample_interval == 0:
+        #     if len(self.profiling_data['frame_total']) >= self.csv_sample_interval:
+        #         self._print_profiling_stats()
+        #         # Keep only last csv_sample_interval frames
+        #         for key in self.profiling_data:
+        #             self.profiling_data[key] = self.profiling_data[key][-self.csv_sample_interval:]
 
         # Performance profiling statistics (legacy - keep for compatibility)
         if self.enable_profiling:

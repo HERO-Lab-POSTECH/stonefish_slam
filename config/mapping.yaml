@@ -31,4 +31,4 @@ slam_node:
       enable_gaussian_weighting: true  # Gaussian weighting for bearing-based updates
 
       # Probability update method (method-specific params in method_*.yaml)
-      update_method: 'iwlo'   # Options: 'log_odds', 'weighted_avg', 'iwlo'
+      update_method: 'log_odds'   # Options: 'log_odds', 'weighted_avg', 'iwlo'

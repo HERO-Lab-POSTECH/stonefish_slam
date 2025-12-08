@@ -202,7 +202,7 @@ class Mapping3DStandaloneNode(Node):
         if self.frame_count % self.frame_interval != 0:
             return
 
-        self.get_logger().info(f'Processing frame #{self.frame_count}')
+        # (iteration 로그 제거)
 
         try:
             # Convert sonar image
@@ -263,21 +263,7 @@ class Mapping3DStandaloneNode(Node):
             if pc_msg.width > 0:
                 self.pc_pub.publish(pc_msg)
 
-                # DEBUG: Check voxel z range vs robot z
-                result = self.mapper_3d.get_point_cloud(include_free=False)
-                if len(result['points']) > 0:
-                    z_min = result['points'][:, 2].min()
-                    z_max = result['points'][:, 2].max()
-                    robot_z = odom_msg.pose.pose.position.z
-                    self.get_logger().info(
-                        f'Published {pc_msg.width} points, {self.mapper_3d.get_voxel_count()} total voxels | '
-                        f'Robot z={robot_z:.2f}m, Voxel z=[{z_min:.2f}, {z_max:.2f}]m'
-                    )
-                else:
-                    self.get_logger().info(
-                        f'Published {pc_msg.width} points, '
-                        f'{self.mapper_3d.get_voxel_count()} total voxels'
-                    )
+                # (iteration 로그 제거)
             else:
                 self.get_logger().warn(
                     f'Empty point cloud (frame #{self.frame_count})'
