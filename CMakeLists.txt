@@ -102,10 +102,14 @@ install(PROGRAMS
 )
 
 # Build pybind11 modules
+# Get Python include directories
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+
+# Dynamic Python install path (works with any Python version)
+set(PYTHON_INSTALL_DIR "local/lib/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/dist-packages/${PROJECT_NAME}")
+
 # CFAR module (only needs Eigen)
 if(pybind11_FOUND AND EIGEN3_FOUND)
-  # Get Python include directories
-  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
   # Manual library creation for ROS2
   add_library(cfar MODULE stonefish_slam/cpp/cfar.cpp)
@@ -131,7 +135,7 @@ if(pybind11_FOUND AND EIGEN3_FOUND)
 
   # Install to Python package directory
   install(TARGETS cfar
-    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
+    LIBRARY DESTINATION ${PYTHON_INSTALL_DIR}
   )
 
   message(STATUS "CFAR module will be built with Python ${Python3_VERSION}")
@@ -141,9 +145,6 @@ endif()
 
 # DDA Traversal module (only needs Eigen)
 if(pybind11_FOUND AND EIGEN3_FOUND)
-  # Get Python include directories
-  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-
   # Manual library creation for ROS2
   add_library(dda_traversal MODULE stonefish_slam/cpp/dda_traversal.cpp)
 
@@ -168,7 +169,7 @@ if(pybind11_FOUND AND EIGEN3_FOUND)
 
   # Install to Python package directory
   install(TARGETS dda_traversal
-    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
+    LIBRARY DESTINATION ${PYTHON_INSTALL_DIR}
   )
 
   message(STATUS "DDA Traversal module will be built with Python ${Python3_VERSION}")
@@ -178,9 +179,6 @@ endif()
 
 # Octree Mapping module (OctoMap-based)
 if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND)
-  # Get Python include directories
-  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-
   # First create a static library for OctreeMapping (for use by other modules)
   add_library(octree_mapping_core STATIC stonefish_slam/cpp/octree_mapping.cpp)
   target_link_libraries(octree_mapping_core PUBLIC
@@ -238,7 +236,7 @@ if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND)
 
   # Install to Python package directory
   install(TARGETS octree_mapping
-    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
+    LIBRARY DESTINATION ${PYTHON_INSTALL_DIR}
   )
 
   message(STATUS "Octree Mapping module will be built with OctoMap and Python ${Python3_VERSION}")
@@ -248,9 +246,6 @@ endif()
 
 # Ray Processor module (High-performance sonar ray processing)
 if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND AND TARGET octree_mapping_core)
-  # Get Python include directories
-  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-
   # Manual library creation for ROS2
   add_library(ray_processor MODULE stonefish_slam/cpp/ray_processor.cpp)
 
@@ -287,7 +282,7 @@ if(pybind11_FOUND AND EIGEN3_FOUND AND octomap_FOUND AND TARGET octree_mapping_c
 
   # Install to Python package directory
   install(TARGETS ray_processor
-    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
+    LIBRARY DESTINATION ${PYTHON_INSTALL_DIR}
   )
 
   message(STATUS "Ray Processor module will be built with Eigen, OctoMap and Python ${Python3_VERSION}")
@@ -298,9 +293,6 @@ endif()
 # PCL module for fast ICP
 if(libpointmatcher_FOUND AND PCL_FOUND AND pybind11_FOUND)
   message(STATUS "Building PCL module with libpointmatcher and PCL")
-
-  # Get Python include directories
-  find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
   add_library(pcl_module MODULE stonefish_slam/cpp/pcl.cpp)
 
@@ -329,7 +321,7 @@ if(libpointmatcher_FOUND AND PCL_FOUND AND pybind11_FOUND)
   )
 
   install(TARGETS pcl_module
-    LIBRARY DESTINATION local/lib/python3.10/dist-packages/${PROJECT_NAME}/cpp
+    LIBRARY DESTINATION ${PYTHON_INSTALL_DIR}
   )
 
   message(STATUS "PCL module will be built with libpointmatcher and PCL ${PCL_VERSION}")

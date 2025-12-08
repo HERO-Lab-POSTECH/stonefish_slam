@@ -198,13 +198,6 @@ void RayProcessor::process_sonar_image(
             // Average intensity: if multiple rays hit same voxel, average their intensities
             double avg_intensity = intensity_sum / count;
 
-            // DEBUG: Log free/occupied count
-            static int debug_count = 0;
-            if (debug_count < 5 && sum < 0) {
-                std::cerr << "[DEBUG] Free voxel: log_odds_sum=" << sum << ", avg_intensity=" << avg_intensity << std::endl;
-                debug_count++;
-            }
-
             unique_updates.push_back({current_key, sum, avg_intensity});
         }
 
@@ -308,13 +301,6 @@ void RayProcessor::process_single_ray_internal(
     const std::vector<double>& first_hit_map,
     std::vector<VoxelUpdate>& voxel_updates
 ) {
-    // DEBUG: Function entry
-    static int fn_entry = 0;
-    if (fn_entry < 3) {
-        std::cerr << "[DEBUG FN] process_single_ray_internal called, bearing_idx=" << bearing_idx << std::endl;
-        fn_entry++;
-    }
-
     // Compute bearing angle for this ray
     double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
 
@@ -355,15 +341,6 @@ void RayProcessor::process_single_ray_internal(
         // Safety margin: end 1 voxel before occupied to prevent overlap
         double safe_range = range_to_first_hit - config_.voxel_resolution;
 
-        // DEBUG: Check free space entry
-        static int entry_debug = 0;
-        if (entry_debug < 5) {
-            std::cerr << "[DEBUG ENTRY] range_to_first_hit=" << range_to_first_hit
-                      << ", safe_range=" << safe_range
-                      << ", voxel_res=" << config_.voxel_resolution << std::endl;
-            entry_debug++;
-        }
-
         if (safe_range <= 0.0) {
             return;  // Skip this bearing if too close
         }
@@ -398,13 +375,6 @@ void RayProcessor::process_single_ray_internal(
 
             // DDA traversal (pure C++)
             std::vector<Eigen::Vector3d> voxels = traverse_ray_dda(sonar_origin_world, end_point, 500);
-
-            // DEBUG: Check DDA result
-            static int dda_debug = 0;
-            if (dda_debug < 3) {
-                std::cerr << "[DEBUG DDA] voxels.size()=" << voxels.size() << ", range_to_first_hit=" << range_to_first_hit << std::endl;
-                dda_debug++;
-            }
 
             // End voxel 제외로 occupied 영역 보호
             if (!voxels.empty()) {
@@ -454,13 +424,6 @@ void RayProcessor::process_single_ray_internal(
                     log_odds_update *= range_weight;
                 }
 
-                // DEBUG: Check free space generation
-                static int free_debug = 0;
-                if (free_debug < 3) {
-                    std::cerr << "[DEBUG FREE] log_odds_free=" << config_.log_odds_free
-                              << ", log_odds_update=" << log_odds_update << std::endl;
-                    free_debug++;
-                }
                 voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 1.0});  // 1.0 < intensity_threshold = free space
             }
         }

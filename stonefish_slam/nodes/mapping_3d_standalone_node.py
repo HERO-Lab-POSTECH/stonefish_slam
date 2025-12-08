@@ -70,7 +70,7 @@ class Mapping3DStandaloneNode(Node):
         self.declare_parameter('mapping_3d.update_method', 'iwlo')
 
         # Additional parameters
-        self.declare_parameter('intensity_threshold', 50)
+        self.declare_parameter('mapping_3d.intensity_threshold', 35)
         self.declare_parameter('max_frames', 0)  # 0 = unlimited (was 1000, caused hang at frame #1300)
         self.declare_parameter('dynamic_expansion', True)
         self.declare_parameter('gaussian_sigma_factor', 2.5)
@@ -102,7 +102,7 @@ class Mapping3DStandaloneNode(Node):
             # 3D mapping (from mapping_3d.* parameters)
             'voxel_resolution': resolution,  # Use test-specific override
             'min_probability': self.get_parameter('mapping_3d.min_probability').value,
-            'intensity_threshold': self.get_parameter('intensity_threshold').value,
+            'intensity_threshold': self.get_parameter('mapping_3d.intensity_threshold').value,
             'max_frames': self.get_parameter('max_frames').value,
             'dynamic_expansion': self.get_parameter('dynamic_expansion').value,
             'log_odds_occupied': self.get_parameter('mapping_3d.log_odds_occupied').value,

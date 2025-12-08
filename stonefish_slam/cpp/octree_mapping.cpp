@@ -461,6 +461,7 @@ void OctreeMapping::insert_point_cloud_with_intensity_and_logodds(
     }
 
     size_t num_points = points_buf.shape[0];
+
     if (intensities_buf.shape[0] != static_cast<ssize_t>(num_points)) {
         throw std::runtime_error("Points and intensities must have same length");
     }
