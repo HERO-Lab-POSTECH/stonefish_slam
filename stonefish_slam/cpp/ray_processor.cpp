@@ -358,9 +358,8 @@ void RayProcessor::process_single_ray_internal(
         // Compute base log-odds update
         double base_log_odds;
         if (is_hit) {
-            // Occupied update with intensity weighting
-            double intensity_weight = compute_intensity_weight(pixel_intensity);
-            base_log_odds = config_.log_odds_occupied * intensity_weight;
+            // Occupied update (no intensity weighting)
+            base_log_odds = config_.log_odds_occupied;
         } else {
             // Free space update
             base_log_odds = config_.log_odds_free;
