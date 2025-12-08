@@ -187,40 +187,31 @@ public:
     ) const;
 
     /**
-     * @brief Check if voxel is in shadow region
+     * @brief Check if voxel is in shadow region (simplified: global minimum first_hit)
      *
-     * Algorithm: For each bearing in first_hit_map:
-     * 1. Calculate bearing's angle
-     * 2. Check if voxel is beyond this bearing's first hit
-     * 3. Check if voxel is within this bearing's angular cone (±0.5 bearing width)
-     * 4. If both conditions are met, voxel is in shadow
+     * Algorithm:
+     * 1. Transform voxel to sonar frame
+     * 2. Calculate horizontal range (ignore Z)
+     * 3. Compare with global minimum first_hit across all bearings
+     * 4. If voxel_range >= global_min_first_hit, it's in shadow
      *
-     * This ensures ALL bearings' shadows are detected, not just nearby bearings.
+     * This simplified approach uses a single global minimum instead of per-bearing checks,
+     * reducing computational complexity from O(num_beams) to O(1) per voxel.
      *
      * Example:
-     *   Bearing 0°: first_hit = 5m (wall)
-     *   Voxel at (10m, bearing=30°):
-     *     - For bearing 0°: voxel_range (10m) > first_hit (5m) ✓
-     *       angle_diff = |30° - 0°| = 30° > 0.088° (512 bearings)
-     *       → Not in bearing 0°'s cone → Not shadow ✓
-     *     - For bearing 30°: first_hit = 20m
-     *       voxel_range (10m) < first_hit (20m) → Skip
-     *     → Result: Not shadow → Free space update ✓
+     *   Global min first_hit = 5m (closest obstacle across all bearings)
+     *   Voxel at horizontal range 6m → 6m >= 5m → Shadow ✓
+     *   Voxel at horizontal range 4m → 4m < 5m → Not shadow ✓
      *
      * @param voxel_world Voxel center in world frame
      * @param T_world_to_sonar Inverse transformation (world → sonar)
-     * @param first_hit_map First hit ranges for all bearings (from compute_first_hit_map)
-     * @param num_beams Total number of bearings (for index calculation)
-     * @param exclude_bearing_rad Bearing angle to exclude from shadow check (for occupied voxels)
-     *                            Default -999.0 means no exclusion (for free space)
-     * @return True if voxel is in ANY bearing's shadow (should skip update)
+     * @param global_min_first_hit Global minimum first hit range across all bearings (meters)
+     * @return True if voxel is in shadow (should skip update)
      */
     bool is_voxel_in_shadow(
         const Eigen::Vector3d& voxel_world,
         const Eigen::Matrix4d& T_world_to_sonar,
-        const std::vector<double>& first_hit_map,
-        int num_beams,
-        double exclude_bearing_rad = -999.0
+        double global_min_first_hit
     ) const;
 
 private:
@@ -248,7 +239,6 @@ private:
      * @param T_sonar_to_world Transformation matrix
      * @param T_world_to_sonar Inverse transformation (for shadow validation)
      * @param sonar_origin_world Sonar origin in world frame (cached)
-     * @param first_hit_map First hit ranges for all bearings (for shadow validation)
      * @param voxel_updates Output buffer to collect voxel updates
      */
     void process_single_ray_internal(
@@ -258,7 +248,6 @@ private:
         const Eigen::Matrix4d& T_sonar_to_world,
         const Eigen::Matrix4d& T_world_to_sonar,
         const Eigen::Vector3d& sonar_origin_world,
-        const std::vector<double>& first_hit_map,
         std::vector<VoxelUpdate>& voxel_updates
     );
 
@@ -268,8 +257,8 @@ private:
      * Collects occupied voxel updates in C++ buffer.
      * Used by process_single_ray_internal() in OpenMP parallel region.
      *
-     * Shadow validation: Occupied voxels use shadow check but EXCLUDE their
-     * own bearing, allowing self-updates while being protected from other bearings.
+     * Occupied voxels are direct observations and should always be updated
+     * without shadow validation.
      *
      * @param hit_indices Indices of range bins with high intensity
      * @param intensity_profile Intensity values along range (for IWLO)
@@ -277,9 +266,6 @@ private:
      * @param T_sonar_to_world Transformation matrix
      * @param sonar_origin_world Sonar origin in world frame (cached)
      * @param voxel_updates Output buffer to collect voxel updates
-     * @param T_world_to_sonar Inverse transformation for shadow validation (optional)
-     * @param first_hit_map First hit ranges for shadow validation (optional)
-     * @param num_beams Number of bearings for shadow validation (optional)
      */
     void process_occupied_voxels_internal(
         const std::vector<int>& hit_indices,
@@ -287,10 +273,7 @@ private:
         double bearing_angle,
         const Eigen::Matrix4d& T_sonar_to_world,
         const Eigen::Vector3d& sonar_origin_world,
-        std::vector<VoxelUpdate>& voxel_updates,
-        const Eigen::Matrix4d* T_world_to_sonar = nullptr,
-        const std::vector<double>* first_hit_map = nullptr,
-        int num_beams = 0
+        std::vector<VoxelUpdate>& voxel_updates
     );
 
     /**

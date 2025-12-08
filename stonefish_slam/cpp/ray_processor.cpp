@@ -90,6 +90,9 @@ void RayProcessor::process_sonar_image(
     // Compute first-hit map for shadow validation (while holding GIL)
     std::vector<double> first_hit_map = compute_first_hit_map(polar_image);
 
+    // REMOVED: global_min_first_hit shadow check (too conservative, prevents proper free space carving)
+    // double global_min_first_hit = *std::min_element(first_hit_map.begin(), first_hit_map.end());
+
     // Compute inverse transform for shadow validation
     Eigen::Matrix4d T_world_to_sonar = T_sonar_to_world.inverse();
 
@@ -139,7 +142,7 @@ void RayProcessor::process_sonar_image(
             // Process this ray (collect voxel updates in local_updates)
             process_single_ray_internal(b_idx, num_beams, intensity_profile,
                                        T_sonar_to_world, T_world_to_sonar,
-                                       sonar_origin_world, first_hit_map,
+                                       sonar_origin_world,
                                        local_updates);
         }
     }  // GIL automatically reacquired here
@@ -204,10 +207,21 @@ void RayProcessor::process_sonar_image(
                 i++;
             }
 
-            // Select max log_odds between free and occupied
-            // If occupied_sum > free_sum, occupied wins (and vice versa)
-            double final_log_odds = std::max(free_sum, occupied_sum);
-            double final_intensity = has_occupied ? max_occupied_intensity : 1.0;
+            // Select appropriate log_odds
+            // - If both free and occupied: use max (occupied usually wins)
+            // - If only free: use free_sum
+            // - If only occupied: use occupied_sum
+            double final_log_odds;
+            double final_intensity;
+            if (has_occupied) {
+                // Occupied exists: take max between free and occupied
+                final_log_odds = std::max(free_sum, occupied_sum);
+                final_intensity = max_occupied_intensity;
+            } else {
+                // Only free updates
+                final_log_odds = free_sum;
+                final_intensity = 1.0;
+            }
             unique_updates.push_back({current_key, final_log_odds, final_intensity});
         }
 
@@ -308,7 +322,6 @@ void RayProcessor::process_single_ray_internal(
     const Eigen::Matrix4d& T_sonar_to_world,
     const Eigen::Matrix4d& T_world_to_sonar,
     const Eigen::Vector3d& sonar_origin_world,
-    const std::vector<double>& first_hit_map,
     std::vector<VoxelUpdate>& voxel_updates
 ) {
     // Compute bearing angle for this ray
@@ -401,12 +414,12 @@ void RayProcessor::process_single_ray_internal(
             for (const auto& voxel : voxels) {
                 total_dda_voxels++;
 
-                // SHADOW VALIDATION: Skip voxels in shadow region
-                bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, first_hit_map, num_beams);
-                if (is_shadow) {
-                    shadow_skipped++;
-                    continue;  // Voxel is beyond first hit, skip free space update
-                }
+                // REMOVED: global_min_first_hit shadow check (DDA range already limited by current ray's first_hit)
+                // bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, global_min_first_hit);
+                // if (is_shadow) {
+                //     shadow_skipped++;
+                //     continue;
+                // }
 
                 // Compute range from sonar origin
                 double range = (voxel - sonar_origin_world).norm();
@@ -495,8 +508,7 @@ void RayProcessor::process_single_ray_internal(
         if (!hit_indices.empty()) {
             double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
             process_occupied_voxels_internal(hit_indices, intensity_profile, bearing_angle,
-                                            T_sonar_to_world, sonar_origin_world, voxel_updates,
-                                            &T_world_to_sonar, &first_hit_map, num_beams);
+                                            T_sonar_to_world, sonar_origin_world, voxel_updates);
         }
     }
 }
@@ -509,10 +521,7 @@ void RayProcessor::process_occupied_voxels_internal(
     double bearing_angle,
     const Eigen::Matrix4d& T_sonar_to_world,
     const Eigen::Vector3d& sonar_origin_world,
-    std::vector<VoxelUpdate>& voxel_updates,
-    const Eigen::Matrix4d* T_world_to_sonar,
-    const std::vector<double>* first_hit_map,
-    int num_beams
+    std::vector<VoxelUpdate>& voxel_updates
 ) {
     // Process each range bin with high intensity
     for (int r_idx : hit_indices) {
@@ -698,74 +707,24 @@ std::vector<double> RayProcessor::compute_first_hit_map(
     return first_hit_map;
 }
 
-// Check if voxel is in shadow region
+// Check if voxel is in shadow region (simplified: global minimum first_hit)
 bool RayProcessor::is_voxel_in_shadow(
     const Eigen::Vector3d& voxel_world,
     const Eigen::Matrix4d& T_world_to_sonar,
-    const std::vector<double>& first_hit_map,
-    int num_beams,
-    double exclude_bearing_rad
+    double global_min_first_hit
 ) const {
     // Transform voxel to sonar frame
     Eigen::Vector4d voxel_world_homo(voxel_world.x(), voxel_world.y(), voxel_world.z(), 1.0);
     Eigen::Vector4d voxel_sonar = T_world_to_sonar * voxel_world_homo;
 
-    double x_s = voxel_sonar.x();
-    double y_s = voxel_sonar.y();
+    double x_s = voxel_sonar[0];
+    double y_s = voxel_sonar[1];
 
-    // Calculate HORIZONTAL range only (ignore Z)
+    // Calculate HORIZONTAL range only (ignore Z for 2D horizontal range)
     double voxel_range = std::sqrt(x_s * x_s + y_s * y_s);
 
-    // Calculate voxel's bearing angle
-    double voxel_bearing_rad = std::atan2(y_s, x_s);
-
-    // Pre-compute constants
-    double fov_rad = config_.horizontal_fov * M_PI / 180.0;
-    double actual_bearing_resolution = fov_rad / (num_beams - 1);
-
-    // Calculate exclude index if specified
-    int exclude_idx = -1;
-    if (exclude_bearing_rad > -900.0) {
-        double exclude_normalized = (exclude_bearing_rad + fov_rad / 2.0) / fov_rad;
-        exclude_idx = static_cast<int>(exclude_normalized * num_beams);
-        // Clamp to valid range
-        if (exclude_idx < 0 || exclude_idx >= num_beams) {
-            exclude_idx = -1;
-        }
-    }
-
-    // Voxel의 angular extent 계산 (range에 따라 동적)
-    double voxel_angular_extent = config_.voxel_resolution / std::max(voxel_range, 1.0);
-    // 최소 2 bearing, 최대 FOV의 10% (안전 마진)
-    double check_half_width = std::max(voxel_angular_extent, actual_bearing_resolution * 2.0);
-    check_half_width = std::min(check_half_width, fov_rad * 0.1);
-
-    // === OPTIMIZED: 직접 bearing index 범위 계산 ===
-    double min_bearing = voxel_bearing_rad - check_half_width;
-    double max_bearing = voxel_bearing_rad + check_half_width;
-
-    double fov_start = -fov_rad / 2.0;
-
-    // Index 계산: b_idx = (bearing_angle - fov_start) / actual_bearing_resolution
-    int start_idx = static_cast<int>(std::floor((min_bearing - fov_start) / actual_bearing_resolution));
-    int end_idx = static_cast<int>(std::ceil((max_bearing - fov_start) / actual_bearing_resolution));
-
-    // Clamp to valid range [0, num_beams-1]
-    start_idx = std::max(0, std::min(start_idx, num_beams - 1));
-    end_idx = std::max(0, std::min(end_idx, num_beams - 1));
-
-    // 해당 범위만 순회 (전체 num_beams 대신)
-    double min_first_hit = std::numeric_limits<double>::max();
-    for (int b_idx = start_idx; b_idx <= end_idx; ++b_idx) {
-        if (b_idx == exclude_idx) continue;
-        min_first_hit = std::min(min_first_hit, first_hit_map[b_idx]);
-    }
-
-    // Voxel이 가장 가까운 first_hit보다 뒤에 있으면 shadow
-    if (min_first_hit < std::numeric_limits<double>::max()) {
-        return voxel_range >= min_first_hit;
-    }
-    return false;  // 해당 범위에 bearing이 없으면 shadow 아님
+    // Simple: if voxel is beyond global minimum first_hit, it's in shadow
+    return voxel_range >= global_min_first_hit;
 }
 
 // Internal DDA voxel traversal (simplified version)
@@ -941,16 +900,12 @@ PYBIND11_MODULE(ray_processor, m) {
              &RayProcessor::is_voxel_in_shadow,
              py::arg("voxel_world"),
              py::arg("T_world_to_sonar"),
-             py::arg("first_hit_map"),
-             py::arg("num_beams"),
-             py::arg("exclude_bearing_rad") = -999.0,
-             "Check if voxel is in shadow region\n\n"
+             py::arg("global_min_first_hit"),
+             "Check if voxel is in shadow region (simplified: global minimum first_hit)\n\n"
              "Args:\n"
              "    voxel_world: Voxel position in world frame (3D)\n"
              "    T_world_to_sonar: Inverse transformation matrix (world → sonar)\n"
-             "    first_hit_map: List of first hit ranges for all bearings\n"
-             "    num_beams: Total number of bearings\n"
-             "    exclude_bearing_rad: Bearing to exclude from shadow check (default: -999.0, no exclusion)\n"
+             "    global_min_first_hit: Global minimum first hit range across all bearings (meters)\n"
              "Returns:\n"
              "    True if voxel is in shadow (should skip update)")
         .def("set_config",
