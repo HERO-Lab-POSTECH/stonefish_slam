@@ -57,13 +57,6 @@ RayProcessor::RayProcessor(
     if (!octree_) {
         throw std::invalid_argument("OctreeMapping pointer cannot be null");
     }
-
-// #ifdef _OPENMP
-//     std::cerr << "[RayProcessor] OpenMP enabled: " << omp_get_max_threads()
-//               << " threads available" << std::endl;
-// #else
-//     std::cerr << "[RayProcessor] OpenMP not available, single-threaded" << std::endl;
-// #endif
 }
 
 // Set configuration
@@ -89,9 +82,6 @@ void RayProcessor::process_sonar_image(
 
     // Compute first-hit map for shadow validation (while holding GIL)
     std::vector<double> first_hit_map = compute_first_hit_map(polar_image);
-
-    // REMOVED: global_min_first_hit shadow check (too conservative, prevents proper free space carving)
-    // double global_min_first_hit = *std::min_element(first_hit_map.begin(), first_hit_map.end());
 
     // Compute inverse transform for shadow validation
     Eigen::Matrix4d T_world_to_sonar = T_sonar_to_world.inverse();
@@ -325,6 +315,8 @@ void RayProcessor::process_single_ray_internal(
     const std::vector<double>& first_hit_map,
     std::vector<VoxelUpdate>& voxel_updates
 ) {
+    (void)T_world_to_sonar;  // Reserved for future shadow validation
+
     // Compute bearing angle for this ray
     double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
 
@@ -339,17 +331,12 @@ void RayProcessor::process_single_ray_internal(
     } else {
         // Normal case: free space up to first hit
         // Range to first hit (FLS convention: row 0 = far, row max = near)
-        // CRITICAL FIX: Use (first_hit_idx + 1) to prevent free space from overlapping
-        // with occupied bin. DDA includes end voxel, so free space must end BEFORE
-        // occupied bin's far boundary: [range_max - (idx+1)*res, range_max - idx*res]
+        // Free space ends one bin before occupied to prevent overlap
         range_to_first_hit = config_.range_max - (first_hit_idx + 1) * config_.range_resolution;
     }
 
     // Always perform free space processing (even if no hit found)
     {
-        // Compute bearing angle (use num_beams, not intensity_profile.size())
-        double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
-
         // Horizontal ray direction (in sonar frame)
         Eigen::Vector3d ray_direction_sonar = compute_ray_direction(bearing_angle);
 
@@ -358,8 +345,7 @@ void RayProcessor::process_single_ray_internal(
         ray_direction_world.normalize();
 
         // Compute vertical steps for free space (full coverage)
-        // CRITICAL FIX: Use range_to_first_hit (not mid_range) to match occupied vertical sampling
-        // This ensures identical vertical angle distribution between free/occupied updates
+        // Use range_to_first_hit for consistent vertical sampling with occupied
         int num_vertical_steps = compute_num_vertical_steps(range_to_first_hit);
 
         // Safety margin: end 1 voxel before occupied to prevent overlap
@@ -379,7 +365,7 @@ void RayProcessor::process_single_ray_internal(
         const Eigen::Matrix3d R_world_to_sonar = T_sonar_to_world.block<3, 3>(0, 0).transpose();
 
         // Process free space with vertical fan (internal DDA traversal)
-        // CRITICAL FIX: Use same coordinate calculation as occupied space (sonar frame)
+        // Sonar frame coordinates for consistency with occupied space
         for (int v_step = -num_vertical_steps; v_step <= num_vertical_steps; ++v_step) {
             // Compute vertical angle
             double vertical_angle = compute_vertical_angle(v_step, num_vertical_steps);
@@ -406,26 +392,11 @@ void RayProcessor::process_single_ray_internal(
             }
 
             // Add to voxel updates with range weighting
-            // Statistics for shadow region bug tracking
-            static int ray_count = 0;
-            static int total_dda_voxels = 0;
-            static int shadow_skipped = 0;
-            static int free_added = 0;
-
             for (const auto& voxel : voxels) {
-                total_dda_voxels++;
-
-                // REMOVED: global_min_first_hit shadow check (DDA range already limited by current ray's first_hit)
-                // bool is_shadow = is_voxel_in_shadow(voxel, T_world_to_sonar, global_min_first_hit);
-                // if (is_shadow) {
-                //     shadow_skipped++;
-                //     continue;
-                // }
-
                 // Compute range from sonar origin
                 double range = (voxel - sonar_origin_world).norm();
 
-                // CRITICAL FIX: Only update voxels within current bearing's angular cone
+                // Angular cone filtering: only update voxels within bearing's responsibility
                 // Optimized: Use cos/sin dot product instead of atan2 for 50% performance gain
                 Eigen::Vector3d voxel_in_sonar = R_world_to_sonar * (voxel - sonar_origin_world);
 
@@ -464,7 +435,6 @@ void RayProcessor::process_single_ray_internal(
                 // Check if voxel is in this bearing's shadow
                 double first_hit_for_bearing = first_hit_map[voxel_bearing_idx];
                 if (horiz_dist >= first_hit_for_bearing) {
-                    shadow_skipped++;
                     continue;  // Skip: voxel is in shadow for its bearing
                 }
 
@@ -476,17 +446,6 @@ void RayProcessor::process_single_ray_internal(
                 }
 
                 voxel_updates.push_back({voxel.x(), voxel.y(), voxel.z(), log_odds_update, 1.0});  // 1.0 < intensity_threshold = free space
-                free_added++;
-            }
-
-            // Print statistics every 100 rays
-            ray_count++;
-            if (ray_count % 100 == 0) {
-                std::cerr << "[SHADOW STATS DDA] ray=" << ray_count
-                          << ", dda_voxels=" << total_dda_voxels
-                          << ", shadow_skipped=" << shadow_skipped
-                          << ", free_added=" << free_added
-                          << std::endl;
             }
         }
     }
@@ -495,37 +454,15 @@ void RayProcessor::process_single_ray_internal(
     // After first reflection: only update high intensity (> threshold) as occupied
     // Low intensity regions after first hit = shadow/unknown (NO UPDATE)
     if (first_hit_idx >= 0) {
-        // Statistics for post-hit processing
-        static int ray_count_post = 0;
-        static int total_post_hit_pixels = 0;
-        static int post_hit_occupied = 0;
-        static int post_hit_low_intensity = 0;
-
         std::vector<int> hit_indices;
         for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
-            total_post_hit_pixels++;
-
             if (intensity_profile[i] > config_.intensity_threshold) {
                 hit_indices.push_back(static_cast<int>(i));
-                post_hit_occupied++;
-            } else {
-                // Low intensity (≤ threshold) after first hit: NO UPDATE (shadow region)
-                post_hit_low_intensity++;
             }
-        }
-
-        // Print statistics every 100 rays
-        ray_count_post++;
-        if (ray_count_post % 100 == 0) {
-            std::cerr << "[SHADOW STATS POST-HIT] ray=" << ray_count_post
-                      << ", total_post_pixels=" << total_post_hit_pixels
-                      << ", post_hit_occupied=" << post_hit_occupied
-                      << ", post_hit_low_intensity=" << post_hit_low_intensity
-                      << std::endl;
+            // Low intensity (≤ threshold) after first hit: NO UPDATE (shadow region)
         }
 
         if (!hit_indices.empty()) {
-            double bearing_angle = compute_bearing_angle(bearing_idx, num_beams);
             process_occupied_voxels_internal(hit_indices, intensity_profile, bearing_angle,
                                             T_sonar_to_world, sonar_origin_world, voxel_updates);
         }
@@ -711,12 +648,14 @@ std::vector<double> RayProcessor::compute_first_hit_map(
 
     // Process each bearing
     for (int b_idx = 0; b_idx < num_beams; ++b_idx) {
-        // Find first pixel above threshold
-        for (int r_idx = 0; r_idx < num_range_bins; ++r_idx) {
+        // Find first hit from near to far (closest object first)
+        // FLS convention: row 0 = far, row max = near
+        // So we iterate from row max (near) to row 0 (far)
+        for (int r_idx = num_range_bins - 1; r_idx >= 0; --r_idx) {
             uint8_t intensity = img_ptr[r_idx * num_beams + b_idx];
 
             if (intensity > config_.intensity_threshold) {
-                // Calculate horizontal range (FLS: row 0 = far, row max = near)
+                // Calculate horizontal range
                 first_hit_map[b_idx] = config_.range_max - r_idx * config_.range_resolution;
                 break;
             }
