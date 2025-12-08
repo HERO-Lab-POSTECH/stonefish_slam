@@ -452,16 +452,17 @@ void RayProcessor::process_single_ray_internal(
         }
     }
 
-    // 3. Occupied space processing: all high intensity after first hit
-    // After first reflection: only update high intensity (> threshold) as occupied
-    // Low intensity regions after first hit = shadow/unknown (NO UPDATE)
+    // 3. Occupied space processing: first hit and all high intensity beyond
+    // first_hit_idx = closest hit (highest index, near end)
+    // Process from index 0 (far) to first_hit_idx (closest hit)
+    // Beyond first hit (lower indices) = shadow region for low intensity
     if (first_hit_idx >= 0) {
         std::vector<int> hit_indices;
-        for (size_t i = first_hit_idx; i < intensity_profile.size(); ++i) {
+        for (int i = 0; i <= first_hit_idx; ++i) {
             if (intensity_profile[i] > config_.intensity_threshold) {
-                hit_indices.push_back(static_cast<int>(i));
+                hit_indices.push_back(i);
             }
-            // Low intensity (≤ threshold) after first hit: NO UPDATE (shadow region)
+            // Low intensity (≤ threshold) in this range: NO UPDATE (shadow region)
         }
 
         if (!hit_indices.empty()) {
@@ -564,11 +565,13 @@ void RayProcessor::process_occupied_voxels_internal(
     }
 }
 
-// Find first hit
+// Find first hit (closest object to sonar)
+// FLS convention: index 0 = far, index max = near
+// Iterate from near to far to find the CLOSEST hit first
 int RayProcessor::find_first_hit(const std::vector<uint8_t>& intensity_profile) const {
-    for (size_t i = 0; i < intensity_profile.size(); ++i) {
+    for (int i = static_cast<int>(intensity_profile.size()) - 1; i >= 0; --i) {
         if (intensity_profile[i] > config_.intensity_threshold) {
-            return static_cast<int>(i);
+            return i;
         }
     }
     return -1;  // No hit found
