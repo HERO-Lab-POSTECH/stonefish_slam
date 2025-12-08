@@ -667,7 +667,7 @@ py::array_t<uint8_t> RayProcessor::generate_hit_map_visualization(
             if (range_m <= config_.range_min || range_m > config_.range_max) {
                 // Keep black
             } else {
-                // SAME LOGIC as process_single_ray_internal (lines 347-353)
+                // SAME LOGIC as process_single_ray_internal
                 bool is_hit = (pixel_intensity > config_.intensity_threshold);
                 bool is_shadow = (!is_hit && range_m >= first_hit_range);
 
@@ -683,7 +683,7 @@ py::array_t<uint8_t> RayProcessor::generate_hit_map_visualization(
                     // Yellow: Occupied (hit but not first)
                     r = 255; g = 255; b = 0;
                 } else if (is_shadow) {
-                    // Blue: Shadow region
+                    // Blue: Shadow region (behind first hit)
                     r = 0; g = 0; b = 255;
                 } else {
                     // Green: Free space

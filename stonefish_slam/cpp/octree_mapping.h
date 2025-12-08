@@ -203,6 +203,12 @@ public:
     MapStats get_map_stats() const;
 
     /**
+     * @brief Serialize OcTree to binary data for octomap_msgs
+     * @return Binary data as Python bytes object
+     */
+    py::bytes serialize_to_binary();
+
+    /**
      * @brief C++ native batch insert (zero NumPy overhead)
      *
      * Internal-only method for use by C++ components (e.g., ray_processor).

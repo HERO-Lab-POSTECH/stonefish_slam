@@ -14,8 +14,8 @@ import rclpy
 from rclpy.node import Node
 import message_filters
 from sensor_msgs.msg import Image
-from sensor_msgs.msg import PointCloud2
 from nav_msgs.msg import Odometry
+from octomap_msgs.msg import Octomap
 from cv_bridge import CvBridge, CvBridgeError
 import numpy as np
 import cv2
@@ -165,7 +165,7 @@ class Mapping3DStandaloneNode(Node):
         self.ts.registerCallback(self.sync_callback)
 
         # Publishers
-        self.pc_pub = self.create_publisher(PointCloud2, '/mapping_3d_standalone/pointcloud', 10)
+        self.octomap_pub = self.create_publisher(Octomap, '/mapping_3d_standalone/octomap', 10)
         self.threshold_debug_pub = self.create_publisher(
             Image,
             '/mapping_3d_standalone/threshold_debug',
@@ -255,14 +255,13 @@ class Mapping3DStandaloneNode(Node):
                 except CvBridgeError as e:
                     self.get_logger().error(f'CV Bridge Error (threshold debug): {e}')
 
-            # Publish point cloud
-            pc_msg = self.mapper_3d.get_pointcloud2_msg(
+            # Publish octomap
+            octomap_msg = self.mapper_3d.get_octomap_msg(
                 frame_id='world_ned',
                 stamp=self.get_clock().now().to_msg()
             )
-
-            if pc_msg.width > 0:
-                self.pc_pub.publish(pc_msg)
+            if len(octomap_msg.data) > 0:
+                self.octomap_pub.publish(octomap_msg)
 
                 # (iteration 로그 제거)
             else:

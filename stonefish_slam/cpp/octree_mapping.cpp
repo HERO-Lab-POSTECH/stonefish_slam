@@ -386,7 +386,7 @@ void OctreeMapping::insert_point_cloud_with_intensity_and_logodds(
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
                 double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
 
-                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), true);
+                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
             }
         }
     }
@@ -448,7 +448,7 @@ void OctreeMapping::insert_point_cloud_with_intensity_and_logodds(
                 double current_log_odds = node ? node->getLogOdds() : 0.0;
                 double new_log_odds = std::max(L_min_, std::min(L_max_, current_log_odds + delta_L));
 
-                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), true);
+                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
             }
         }
     }
@@ -613,6 +613,14 @@ double OctreeMapping::intensity_to_weight(double intensity) const {
 // IWLO adaptive learning rate
 double OctreeMapping::compute_alpha(int obs_count) const {
     return std::max(min_alpha_, 1.0 / (1.0 + decay_rate_ * obs_count));
+}
+
+// Serialize OcTree to binary data for octomap_msgs
+py::bytes OctreeMapping::serialize_to_binary() {
+    std::stringstream ss;
+    tree_->writeBinaryData(ss);
+    std::string data = ss.str();
+    return py::bytes(data);
 }
 
 // C++ native batch insert (zero NumPy overhead)
@@ -825,5 +833,8 @@ PYBIND11_MODULE(octree_mapping, m) {
              "Set IWLO-specific parameters")
         .def("get_map_stats",
              &OctreeMapping::get_map_stats,
-             "Get map statistics (P3.2 profiling)");
+             "Get map statistics (P3.2 profiling)")
+        .def("serialize_to_binary",
+             &OctreeMapping::serialize_to_binary,
+             "Serialize OcTree to binary data for octomap_msgs");
 }

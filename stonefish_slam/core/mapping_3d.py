@@ -1389,6 +1389,42 @@ class SonarMapping3D:
 
         return msg
 
+    def get_octomap_msg(self, frame_id='world_ned', stamp=None):
+        """
+        Generate ROS2 Octomap message for visualization
+
+        Args:
+            frame_id: Coordinate frame (default 'world_ned')
+            stamp: ROS timestamp (optional)
+
+        Returns:
+            octomap_msgs/Octomap message
+        """
+        from octomap_msgs.msg import Octomap
+        from std_msgs.msg import Header
+
+        msg = Octomap()
+        msg.header = Header()
+        msg.header.frame_id = frame_id
+        if stamp:
+            msg.header.stamp = stamp
+
+        # OctoMap binary format
+        msg.binary = True
+        msg.id = "OcTree"  # Standard OcTree type
+        msg.resolution = self.voxel_resolution
+
+        if self.use_cpp_backend:
+            # Get binary data from C++ OcTree
+            binary_data = self.cpp_octree.serialize_to_binary()
+            # Convert unsigned bytes (0-255) to signed int8 (-128 to 127)
+            msg.data = [b if b < 128 else b - 256 for b in binary_data]
+        else:
+            # Python backend not supported for octomap_msgs
+            msg.data = []
+
+        return msg
+
     def reset_map(self):
         """Reset the probabilistic map"""
         if self.use_cpp_backend:
