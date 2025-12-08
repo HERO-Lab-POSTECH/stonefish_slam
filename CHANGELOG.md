@@ -5,13 +5,29 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Python 버전 호환성 개선** (2025-12-08): 동적 Python 버전 감지로 모든 Python 버전 지원
+  - 변경: CMakeLists.txt에서 하드코딩된 python3.10 → `${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}` 사용
+  - 효과: .so 파일 설치 경로 자동 결정
+  - 파일: `CMakeLists.txt`
 - **IWLO Free Space Carving 최적화** (2025-12-08): Range-weighted log_odds 직접 사용
   - 새 API: `insert_point_cloud_with_intensity_and_logodds()` 추가
   - 개선: ray_processor에서 계산한 range-weighted log_odds를 octree에 직접 삽입
   - 효과: Free space carving 성능을 log odds 방법과 동등하게 개선
   - 파일: `octree_mapping.h`, `octree_mapping.cpp`, `ray_processor.cpp`
 
+### Changed
+- **파라미터 이름 통일** (2025-12-08): YAML 설정값 정상 로드 확보
+  - 변경: `intensity_threshold` → `mapping_3d.intensity_threshold`
+  - 파일: `mapping_3d_standalone_node.py`
+- **Standalone 매핑 노드 개선** (2025-12-08): 설정 파일에서 업데이트 메소드 읽기
+  - 변경: 하드코딩된 update_method → mapping.yaml에서 동적 로드
+  - 파일: `launch/mapping_3d_standalone.launch.py`
+- **IWLO 파라미터 최적화** (2025-12-08): 성능 및 안정성 개선
+  - 파일: `config/mapping.yaml`, `config/method_iwlo.yaml`
+
 ### Fixed
+- **디버그 로그 제거** (2025-12-08): 프로덕션 환경 최적화
+  - 파일: `ray_processor.cpp`, `octree_mapping.cpp`
 - **IWLO Free Space Carving 버그** (2025-12-08): Free space intensity 및 alpha 중복 적용 수정
   - 문제: IWLO에서 free space carving이 동작하지 않음
   - 원인: Free space intensity가 0.0으로 설정되어 있고, alpha가 이중으로 적용됨
