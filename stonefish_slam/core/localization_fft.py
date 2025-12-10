@@ -188,9 +188,11 @@ class FFTLocalizer:
             range_resolution = self.oculus.range_max / rows
 
             # Cache for translation estimation
-            # CRITICAL: Cartesian image is horizontal projection, so use horizontal range resolution
-            # horizontal_range = slant_range * cos(tilt), so horizontal_resolution = slant_resolution * cos(tilt)
-            self.cart_range_resolution = range_resolution * np.cos(self.oculus.tilt_angle_rad)
+            # CRITICAL: Cartesian image sampling uses range_resolution directly (see line 234)
+            # x_proj = horizontal_range_max - range_resolution * YY
+            # Therefore, 1 pixel = range_resolution meters (NOT multiplied by cos(tilt))
+            # The tilt correction is already applied in the coordinate transformation, not the resolution
+            self.cart_range_resolution = range_resolution
 
             # Apply tilt correction: project slant range to horizontal range
             # When sonar is tilted down, measured range is slant range
