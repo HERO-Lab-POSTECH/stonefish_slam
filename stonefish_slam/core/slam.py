@@ -733,11 +733,6 @@ class SLAMNode(Node):
 
                         if fft_valid:
                             # FFT valid - use FFT result
-                            self.get_logger().info(
-                                f"FFT OK: trans=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m, "
-                                f"rot={fft_result['rotation']:.2f}°",
-                                throttle_duration_sec=1.0
-                            )
                             frame.fft_transform = n2g(
                                 (fft_result['translation'][0],
                                  fft_result['translation'][1],
@@ -1312,10 +1307,9 @@ class SLAMNode(Node):
             # Use FFT transform instead of ICP
             ret2.estimated_transform = keyframe.fft_transform
             ret2.status.description = "FFT"
+            t = ret2.estimated_transform
             self.get_logger().info(
-                f"Using FFT transform: tx={ret2.estimated_transform.x():.2f}m, "
-                f"ty={ret2.estimated_transform.y():.2f}m, "
-                f"rot={np.degrees(ret2.estimated_transform.theta()):.1f}deg"
+                f"FFT ({t.x():.2f},{t.y():.2f},{np.degrees(t.theta()):.1f}°)"
             )
         else:
             # Compute ICP
