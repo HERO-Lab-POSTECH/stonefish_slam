@@ -742,6 +742,16 @@ class SLAMNode(Node):
                             frame.fft_covariance = fft_result.get('covariance', None)
                             frame.fft_success = True
                             frame.fft_is_dr_fallback = False
+
+                            # Log FFT with DR comparison
+                            if val_info:
+                                fft = val_info['fft']
+                                dr = val_info['dr']
+                                self.get_logger().info(
+                                    f"FFT ({fft[0]:.2f},{fft[1]:.2f},{fft[2]:.1f}°) "
+                                    f"DR({dr[0]:.2f},{dr[1]:.2f},{dr[2]:.1f}°) "
+                                    f"Δ({val_info['pos_err']:.2f}m,{val_info['rot_err_deg']:.1f}°)"
+                                )
                         else:
                             # FFT invalid - fallback to DR (odometry)
                             # Build rejection reason string
@@ -1307,10 +1317,6 @@ class SLAMNode(Node):
             # Use FFT transform instead of ICP
             ret2.estimated_transform = keyframe.fft_transform
             ret2.status.description = "FFT"
-            t = ret2.estimated_transform
-            self.get_logger().info(
-                f"FFT ({t.x():.2f},{t.y():.2f},{np.degrees(t.theta()):.1f}°)"
-            )
         else:
             # Compute ICP
             with CodeTimer("SLAM - sequential scan matching - ICP"):
