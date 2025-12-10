@@ -39,7 +39,7 @@ class FFTLocalizer:
                  dft_refinement_enable: bool = True,
                  periodic_decomp_enable: bool = True,
                  roi_threshold: float = 10.0,
-                 use_roi: bool = True,
+                 use_roi: bool = False,
                  verbose: bool = False):
         """
         Initialize FFT Localizer.
@@ -413,13 +413,9 @@ class FFTLocalizer:
             img1 = self._periodic_decomposition(img1)
             img2 = self._periodic_decomposition(img2)
 
-        # Compute 2D FFT
+        # Compute 2D FFT (no fftshift - standard phase correlation)
         F1 = np.fft.fft2(img1)
         F2 = np.fft.fft2(img2)
-
-        # Shift zero frequency to center
-        F1 = np.fft.fftshift(F1)
-        F2 = np.fft.fftshift(F2)
 
         # Compute cross power spectrum
         cross_power = F1 * np.conj(F2)
@@ -429,9 +425,10 @@ class FFTLocalizer:
         cross_power_spectrum = cross_power / (np.abs(cross_power) + eps)
 
         # Inverse FFT to get PCM
+        # fftshift applied AFTER ifft2 for peak detection at center
         pcm = np.fft.ifft2(cross_power_spectrum)
-        pcm = np.fft.ifftshift(pcm)
         pcm = np.abs(pcm)
+        pcm = np.fft.fftshift(pcm)
 
         if return_cross_power:
             # Return cross_power_spectrum BEFORE ifftshift (needed for DFT refinement)
@@ -520,7 +517,7 @@ class FFTLocalizer:
         This is much faster than upsampling the entire cross-power spectrum.
 
         Args:
-            cross_power_spectrum: Normalized cross-power spectrum (fftshifted)
+            cross_power_spectrum: Normalized cross-power spectrum (non-shifted)
             upsample_factor: Upsampling factor (e.g., 100)
             row_offset: Row offset from center (pixels)
             col_offset: Column offset from center (pixels)
@@ -533,23 +530,24 @@ class FFTLocalizer:
         # Define upsampled region size (1.5 pixels at original resolution)
         region_size = int(np.ceil(1.5 * upsample_factor))
 
-        # Calculate DFT sample positions
-        # Center the upsampled region around the specified offset
-        row_center = h // 2 + row_offset
-        col_center = w // 2 + col_offset
+        # Generate upsampled sample positions centered around initial offset
+        # Guizar-Sicairos 2008: sample DFT at positions around the initial estimate
+        upsampled_grid = np.arange(region_size) - region_size // 2
 
-        # Generate sample coordinates
-        row_samples = np.arange(region_size) - region_size // 2
-        col_samples = np.arange(region_size) - region_size // 2
+        # Sample positions in original pixel coordinates (centered at offset)
+        row_positions = row_offset + upsampled_grid / upsample_factor
+        col_positions = col_offset + upsampled_grid / upsample_factor
 
-        row_freq = row_samples / (upsample_factor * h)
-        col_freq = col_samples / (upsample_factor * w)
+        # Frequency indices for non-shifted spectrum (0, 1, ..., N/2, -N/2+1, ..., -1)
+        row_freq_idx = np.fft.fftfreq(h) * h  # Returns: 0, 1, ..., h/2, -h/2+1, ..., -1
+        col_freq_idx = np.fft.fftfreq(w) * w
 
-        # Create frequency grids centered at the offset
-        row_kernel = np.exp(-1j * 2 * np.pi * np.outer(row_freq, np.arange(h) - h // 2))
-        col_kernel = np.exp(-1j * 2 * np.pi * np.outer(col_freq, np.arange(w) - w // 2))
+        # DFT kernel: exp(-2πi * position * freq_idx / N)
+        # For each sample position, compute contribution from all frequency components
+        row_kernel = np.exp(-1j * 2 * np.pi * np.outer(row_positions, row_freq_idx) / h)
+        col_kernel = np.exp(-1j * 2 * np.pi * np.outer(col_positions, col_freq_idx) / w)
 
-        # Matrix multiply DFT
+        # Matrix multiply: upsampled_region[i,j] = sum over all freq of kernel * spectrum
         upsampled_region = row_kernel @ cross_power_spectrum @ col_kernel.T
 
         return upsampled_region
@@ -562,7 +560,7 @@ class FFTLocalizer:
         Refine subpixel offset using upsampled DFT (Guizar-Sicaros et al. 2008).
 
         Args:
-            cross_power_spectrum: Normalized cross-power spectrum (fftshifted)
+            cross_power_spectrum: Normalized cross-power spectrum (non-shifted)
             row_offset_init: Initial row offset from parabolic fitting (pixels)
             col_offset_init: Initial column offset from parabolic fitting (pixels)
 

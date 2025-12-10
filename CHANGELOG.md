@@ -42,6 +42,21 @@ All notable changes to this project will be documented in this file.
   - 파일: `config/mapping.yaml`, `config/method_iwlo.yaml`
 
 ### Fixed
+- **FFT Phase Correlation fftshift 순서 오류** (2025-12-10): 위상 정보 왜곡 수정
+  - 문제: `compute_phase_correlation()`에서 fft2 직후 fftshift 적용으로 위상 정보 왜곡
+  - 원인: fftshift를 잘못된 시점에 적용하여 표준 phase correlation 구현에서 벗어남
+  - 수정: fftshift를 ifft2 이후에만 적용 (표준 FFT phase correlation 구현에 따름)
+  - 효과: 회전/병진 추정 정확도 향상
+  - 파일: `localization_fft.py` (라인 420-431)
+- **DFT Upsampling 좌표 계산 버그** (2025-12-10): Subpixel refinement 정밀도 향상
+  - 문제: `_upsampled_dft()`에서 row_center/col_center를 계산하고 사용하지 않음
+  - 원인: DFT가 항상 원점 근처를 샘플링하여 subpixel 위치 정확도 저하
+  - 수정: Guizar-Sicairos 2008 논문에 따라 초기 offset 중심으로 DFT 샘플링하도록 수정
+    * row_center, col_center를 이용한 올바른 좌표 변환 적용
+    * DFT 샘플링 범위를 offset 주변으로 정확하게 계산
+  - 효과: Subpixel refinement 정확도 향상 (회전/병진 모두)
+  - 파일: `localization_fft.py` (라인 533-551)
+  - 참고: Guizar-Sicairos, M., Thurman, S. T., & Sinclair, G. (2008) "Efficient subpixel image registration algorithms", Opt. Lett.
 - **Occupied/Free Space 처리 통합** (2025-12-08): 높은 물체 윗면 업데이트 문제 해결
   - 문제: 높은 물체의 윗면이 한 프레임에 업데이트되지 않음
   - 원인: Free space와 Occupied 처리 방식 불일치

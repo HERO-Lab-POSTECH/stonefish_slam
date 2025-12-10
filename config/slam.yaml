@@ -30,6 +30,6 @@ slam_node:
       # Validation parameters (compare FFT with odometry)
       validate_with_odom: true   # Enable DR vs FFT comparison
       max_position_error: 0.5    # Max allowed position difference (meters)
-      max_rotation_error: 0.5236   # Max allowed rotation difference (radians, ~20°)
+      max_rotation_error: 0.0872665   # Max allowed rotation difference (radians, ~20°)
       min_ppr: 1.05              # Minimum Peak-to-Peak Ratio threshold (1.0 = no check)
       reject_on_failure: true   # If true, reject FFT result when validation fails
