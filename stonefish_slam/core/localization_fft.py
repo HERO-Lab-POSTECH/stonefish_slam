@@ -182,17 +182,18 @@ class FFTLocalizer:
             if self.verbose:
                 print("Building polar-to-cartesian transformation maps (one-time setup)...")
 
-            # Calculate range resolution
+            # Calculate range resolution (slant range basis)
             # CRITICAL: Stonefish polar images cover FULL range from 0 to range_max
             # range_min is only used for masking unreliable near-field data
             range_resolution = self.oculus.range_max / rows
 
-            # Cache for translation estimation
-            # CRITICAL: Cartesian image sampling uses range_resolution directly (see line 234)
-            # x_proj = horizontal_range_max - range_resolution * YY
-            # Therefore, 1 pixel = range_resolution meters (NOT multiplied by cos(tilt))
-            # The tilt correction is already applied in the coordinate transformation, not the resolution
-            self.cart_range_resolution = range_resolution
+            # Calculate horizontal range resolution (for cartesian coordinate calculation)
+            horizontal_range_resolution = range_resolution * np.cos(self.oculus.tilt_angle_rad)
+
+            # Cache for translation estimation (horizontal plane)
+            # CRITICAL: Cartesian coordinates are on horizontal plane
+            # Therefore, 1 pixel = horizontal_range_resolution meters
+            self.cart_range_resolution = horizontal_range_resolution
 
             # Apply tilt correction: project slant range to horizontal range
             # When sonar is tilted down, measured range is slant range
@@ -203,8 +204,8 @@ class FFTLocalizer:
             horizontal_fov_deg = np.rad2deg(self.oculus.horizontal_fov)
             max_lateral = horizontal_range_max * np.sin(np.radians(horizontal_fov_deg / 2.0))
 
-            # Cartesian image dimensions (same resolution as range)
-            cart_width = int(np.ceil(2 * max_lateral / range_resolution))
+            # Cartesian image dimensions (same resolution as horizontal range)
+            cart_width = int(np.ceil(2 * max_lateral / horizontal_range_resolution))
             cart_height = rows
 
             # Create bearing angle array for each column
@@ -233,15 +234,15 @@ class FFTLocalizer:
             # Stonefish: row=0 (top) is FAR range, row=max (bottom) is NEAR range
             # Cartesian: YY=0 (top) should be FAR, YY=max (bottom) should be NEAR
             # These are PROJECTED coordinates on horizontal plane
-            x_proj = horizontal_range_max - range_resolution * YY
-            y_proj = range_resolution * (-cart_width / 2.0 + XX + 0.5)
+            x_proj = horizontal_range_max - horizontal_range_resolution * YY
+            y_proj = horizontal_range_resolution * (-cart_width / 2.0 + XX + 0.5)
 
             # Compute horizontal range and bearing from projected coordinates
             horizontal_range = np.sqrt(np.square(x_proj) + np.square(y_proj))
             bearing_polar = np.arctan2(y_proj, x_proj)
 
-            # Convert horizontal range back to slant range (reverse tilt projection)
-            # slant_range = horizontal_range / cos(tilt)
+            # Convert horizontal range back to slant range for polar image indexing
+            # Polar image rows are indexed by slant range, not horizontal range
             cos_tilt = np.cos(self.oculus.tilt_angle_rad)
             r_polar = horizontal_range / cos_tilt if cos_tilt > 1e-6 else horizontal_range
 
