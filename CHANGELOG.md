@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **FFT Localization - Periodic Decomposition** (2025-12-10): Moisan 2011 기반 spectral leakage 제거
+  - 기능: `_periodic_decomposition()` 메서드로 Moisan periodic-plus-smooth decomposition 구현
+  - 효과: Border effect 제거로 FFT 수행 전 spectral leakage 감소
+  - 변경: `compute_phase_correlation()`에 `apply_periodic_decomp` 파라미터 추가
+  - 새 파라미터: `slam.yaml`에 `periodic_decomposition.enable` (기본값: true)
+  - 참고: Moisan, L. "Periodic Plus Smooth Image Decomposition", J Math Imaging Vis 39, 161-179 (2011)
+  - 파일: `localization_fft.py`, `config/slam.yaml`
 - **DFT Subpixel Refinement 구현** (2025-12-10): Guizar-Sicairos 2008 기반 국소 최적화
   - 기능: DFT를 이용한 FFT correlation peak의 subpixel 정밀 위치 계산
   - 효과: subpixel 정밀도 0.1 pixel → 0.01 pixel 향상 (10배 개선)

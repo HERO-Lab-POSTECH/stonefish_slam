@@ -37,6 +37,7 @@ class FFTLocalizer:
                  max_expected_rotation: float = 30.0,
                  dft_upsample_factor: int = 100,
                  dft_refinement_enable: bool = True,
+                 periodic_decomp_enable: bool = True,
                  verbose: bool = False):
         """
         Initialize FFT Localizer.
@@ -53,6 +54,7 @@ class FFTLocalizer:
             max_expected_rotation: Maximum expected rotation in degrees (for padding)
             dft_upsample_factor: Upsampling factor for DFT subpixel refinement (default: 100)
             dft_refinement_enable: Enable DFT subpixel refinement (default: True)
+            periodic_decomp_enable: Enable periodic decomposition (Moisan 2011, default: True)
             verbose: Enable debug output
         """
         self.oculus = oculus
@@ -75,6 +77,9 @@ class FFTLocalizer:
         # DFT subpixel refinement parameters
         self.dft_upsample_factor = dft_upsample_factor
         self.dft_refinement_enable = dft_refinement_enable
+
+        # Periodic decomposition (Moisan 2011)
+        self.periodic_decomp_enable = periodic_decomp_enable
 
         # Cache for polar_to_cartesian conversion (performance optimization)
         self.p2c_cache = None
@@ -281,10 +286,44 @@ class FFTLocalizer:
 
         return cartesian_image
 
+    def _periodic_decomposition(self, image: np.ndarray) -> np.ndarray:
+        """
+        Moisan (2011) periodic-plus-smooth decomposition.
+        경계 불연속으로 인한 spectral leakage 제거.
+
+        Reference: Moisan, L. "Periodic Plus Smooth Image Decomposition"
+                   J Math Imaging Vis 39, 161-179 (2011)
+        """
+        u = image.astype(np.float64)
+        M, N = u.shape
+
+        # Step 1: Compute boundary jump image v
+        v = np.zeros_like(u)
+        v[0, :] = u[-1, :] - u[0, :]      # Top row: bottom - top
+        v[-1, :] = u[0, :] - u[-1, :]     # Bottom row: top - bottom
+        v[:, 0] += u[:, -1] - u[:, 0]     # Left col: right - left
+        v[:, -1] += u[:, 0] - u[:, -1]    # Right col: left - right
+
+        # Step 2: Solve Poisson equation via FFT
+        v_fft = np.fft.fft2(v)
+
+        q = np.arange(M).reshape(M, 1)
+        r = np.arange(N).reshape(1, N)
+        divisor = 2 * np.cos(2 * np.pi * q / M) + 2 * np.cos(2 * np.pi * r / N) - 4
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            s_fft = np.divide(v_fft, divisor, out=np.zeros_like(v_fft), where=divisor != 0)
+        s_fft[0, 0] = 0  # DC component is zero
+
+        # Step 3: Periodic = original - smooth
+        s = np.real(np.fft.ifft2(s_fft))
+        return u - s
+
     def compute_phase_correlation(self,
                                   img1: np.ndarray,
                                   img2: np.ndarray,
-                                  return_cross_power: bool = False):
+                                  return_cross_power: bool = False,
+                                  apply_periodic_decomp: bool = None):
         """
         Compute phase correlation between two images.
 
@@ -292,10 +331,19 @@ class FFTLocalizer:
             img1: First image
             img2: Second image
             return_cross_power: If True, return (pcm, cross_power_spectrum) tuple
+            apply_periodic_decomp: Apply periodic decomposition (default: self.periodic_decomp_enable)
 
         Returns:
             Phase Correlation Matrix (PCM), or (PCM, cross_power_spectrum) if return_cross_power=True
         """
+        # Apply periodic decomposition to reduce spectral leakage
+        if apply_periodic_decomp is None:
+            apply_periodic_decomp = self.periodic_decomp_enable
+
+        if apply_periodic_decomp:
+            img1 = self._periodic_decomposition(img1)
+            img2 = self._periodic_decomposition(img2)
+
         # Compute 2D FFT
         F1 = np.fft.fft2(img1)
         F2 = np.fft.fft2(img2)
