@@ -38,6 +38,8 @@ class FFTLocalizer:
                  dft_upsample_factor: int = 100,
                  dft_refinement_enable: bool = True,
                  periodic_decomp_enable: bool = True,
+                 roi_threshold: float = 10.0,
+                 use_roi: bool = True,
                  verbose: bool = False):
         """
         Initialize FFT Localizer.
@@ -55,6 +57,8 @@ class FFTLocalizer:
             dft_upsample_factor: Upsampling factor for DFT subpixel refinement (default: 100)
             dft_refinement_enable: Enable DFT subpixel refinement (default: True)
             periodic_decomp_enable: Enable periodic decomposition (Moisan 2011, default: True)
+            roi_threshold: Pixel intensity threshold for ROI computation (default: 10.0)
+            use_roi: Enable ROI-based FFT processing (default: True)
             verbose: Enable debug output
         """
         self.oculus = oculus
@@ -80,6 +84,10 @@ class FFTLocalizer:
 
         # Periodic decomposition (Moisan 2011)
         self.periodic_decomp_enable = periodic_decomp_enable
+
+        # ROI-based FFT parameters
+        self.roi_threshold = roi_threshold
+        self.use_roi = use_roi
 
         # Cache for polar_to_cartesian conversion (performance optimization)
         self.p2c_cache = None
@@ -155,6 +163,62 @@ class FFTLocalizer:
         mask = gaussian_filter(shrink, sigma=gaussian_sigma, truncate=gaussian_truncate)
 
         return image * mask
+
+    def _compute_roi(self, image: np.ndarray, threshold: float = None) -> Tuple[int, int, int, int]:
+        """
+        Compute bounding box containing all pixels above threshold.
+
+        Args:
+            image: Input image
+            threshold: Pixel intensity threshold (default: self.roi_threshold)
+
+        Returns:
+            (row_min, row_max, col_min, col_max)
+        """
+        if threshold is None:
+            threshold = self.roi_threshold
+
+        mask = image > threshold
+        rows = np.any(mask, axis=1)
+        cols = np.any(mask, axis=0)
+
+        if not np.any(rows) or not np.any(cols):
+            # No valid pixels, return full image bounds
+            return 0, image.shape[0], 0, image.shape[1]
+
+        row_indices = np.where(rows)[0]
+        col_indices = np.where(cols)[0]
+        row_min, row_max = row_indices[0], row_indices[-1] + 1
+        col_min, col_max = col_indices[0], col_indices[-1] + 1
+
+        return row_min, row_max, col_min, col_max
+
+    def _apply_roi(self, img1: np.ndarray, img2: np.ndarray,
+                   threshold: float = None) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int, int, int]]:
+        """
+        Compute common ROI for two images and crop both.
+
+        Args:
+            img1: First image
+            img2: Second image
+            threshold: Pixel intensity threshold
+
+        Returns:
+            (img1_roi, img2_roi, roi_bounds)
+        """
+        roi1 = self._compute_roi(img1, threshold)
+        roi2 = self._compute_roi(img2, threshold)
+
+        # Union of both ROIs (include both)
+        row_min = min(roi1[0], roi2[0])
+        row_max = max(roi1[1], roi2[1])
+        col_min = min(roi1[2], roi2[2])
+        col_max = max(roi1[3], roi2[3])
+
+        img1_roi = img1[row_min:row_max, col_min:col_max]
+        img2_roi = img2[row_min:row_max, col_min:col_max]
+
+        return img1_roi, img2_roi, (row_min, row_max, col_min, col_max)
 
     def polar_to_cartesian(self, polar_image: np.ndarray) -> np.ndarray:
         """
@@ -709,6 +773,13 @@ class FFTLocalizer:
             gaussian_truncate=self.rot_gaussian_truncate
         )
 
+        # Apply ROI to reduce computation
+        if self.use_roi:
+            img1_masked, img2_masked, roi_bounds = self._apply_roi(img1_masked, img2_masked)
+            if self.verbose:
+                print(f"[ROI] Rotation: {img1_polar.shape} -> {img1_masked.shape} "
+                      f"(rows: {roi_bounds[0]}:{roi_bounds[1]}, cols: {roi_bounds[2]}:{roi_bounds[3]})")
+
         # Phase correlation with DFT refinement
         pcm, cross_power = self.compute_phase_correlation(img1_masked, img2_masked, return_cross_power=True)
         row_offset, col_offset, peak_value = self.detect_peak(pcm, cross_power_spectrum=cross_power)
@@ -806,11 +877,21 @@ class FFTLocalizer:
             if self.verbose:
                 print(f"Applied rotation compensation: {-rotation:.2f}°")
 
+        # Apply ROI to reduce computation
+        if self.use_roi:
+            img1_roi, img2_roi, roi_bounds = self._apply_roi(img1_padded, img2_rotated)
+            if self.verbose:
+                print(f"[ROI] Translation: {img1_padded.shape} -> {img1_roi.shape} "
+                      f"(rows: {roi_bounds[0]}:{roi_bounds[1]}, cols: {roi_bounds[2]}:{roi_bounds[3]})")
+        else:
+            img1_roi = img1_padded
+            img2_roi = img2_rotated
+
         # Phase correlation with DFT refinement
         # NOTE: Disable periodic decomposition for Cartesian images (fan-shaped with large zero regions)
         # Moisan (2011) assumes full image data; zero-padded regions cause artifacts
         pcm, cross_power = self.compute_phase_correlation(
-            img1_padded, img2_rotated,
+            img1_roi, img2_roi,
             return_cross_power=True,
             apply_periodic_decomp=False
         )
