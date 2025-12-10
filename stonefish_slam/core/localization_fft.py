@@ -15,7 +15,6 @@ from typing import Tuple, Dict, Any, Optional
 import warnings
 
 from stonefish_slam.utils.sonar import OculusProperty
-from skimage.registration import phase_cross_correlation
 
 
 class FFTLocalizer:
@@ -39,7 +38,6 @@ class FFTLocalizer:
                  dft_upsample_factor: int = 100,
                  dft_refinement_enable: bool = True,
                  periodic_decomp_enable: bool = True,
-                 use_masked_correlation: bool = True,
                  verbose: bool = False):
         """
         Initialize FFT Localizer.
@@ -57,7 +55,6 @@ class FFTLocalizer:
             dft_upsample_factor: Upsampling factor for DFT subpixel refinement (default: 100)
             dft_refinement_enable: Enable DFT subpixel refinement (default: True)
             periodic_decomp_enable: Enable periodic decomposition (Moisan 2011, default: True)
-            use_masked_correlation: Enable scikit-image masked phase correlation (default: True)
             verbose: Enable debug output
         """
         self.oculus = oculus
@@ -83,9 +80,6 @@ class FFTLocalizer:
 
         # Periodic decomposition (Moisan 2011)
         self.periodic_decomp_enable = periodic_decomp_enable
-
-        # Masked phase correlation (scikit-image)
-        self.use_masked_correlation = use_masked_correlation
 
         # Cache for polar_to_cartesian conversion (performance optimization)
         self.p2c_cache = None
@@ -161,76 +155,6 @@ class FFTLocalizer:
         mask = gaussian_filter(shrink, sigma=gaussian_sigma, truncate=gaussian_truncate)
 
         return image * mask
-
-    def _create_data_mask(self, image: np.ndarray, threshold: float = 10.0) -> np.ndarray:
-        """
-        Create data validity mask (excludes black/near-black regions).
-
-        Args:
-            image: Input image (0~255 scale)
-            threshold: Valid data threshold (default: 10.0 to exclude
-                       low-intensity background noise)
-
-        Returns:
-            Boolean mask (True = valid data)
-        """
-        return image > threshold
-
-    def _masked_phase_correlation(self,
-                                   img1: np.ndarray,
-                                   img2: np.ndarray,
-                                   mask1: np.ndarray = None,
-                                   mask2: np.ndarray = None) -> Tuple[float, float, float]:
-        """
-        scikit-image based Masked Phase Correlation.
-
-        NOTE: When using masks, subpixel refinement is not available (integer pixel precision).
-
-        Args:
-            img1, img2: Input images
-            mask1, mask2: Boolean masks (True = valid region)
-
-        Returns:
-            (row_shift, col_shift, error)
-        """
-        # Create data-based masks if not provided
-        if mask1 is None:
-            mask1 = self._create_data_mask(img1)
-        if mask2 is None:
-            mask2 = self._create_data_mask(img2)
-
-        # Use scikit-image phase_cross_correlation
-        # NOTE: upsample_factor is ignored when masks are used
-        shift, error, _ = phase_cross_correlation(
-            img1, img2,
-            reference_mask=mask1,
-            moving_mask=mask2,
-            overlap_ratio=0.3
-        )
-
-        return shift[0], shift[1], error
-
-    def _calculate_ppr(self, pcm: np.ndarray) -> float:
-        """
-        Calculate Peak-to-Peak Ratio from PCM.
-
-        Args:
-            pcm: Phase Correlation Matrix
-
-        Returns:
-            PPR value
-        """
-        peak = pcm.max()
-        # Find second peak excluding 7x7 region around first peak
-        peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
-        pcm_copy = pcm.copy()
-        # Mask 7x7 region around peak
-        r, c = peak_loc
-        r_min, r_max = max(0, r-3), min(pcm.shape[0], r+4)
-        c_min, c_max = max(0, c-3), min(pcm.shape[1], c+4)
-        pcm_copy[r_min:r_max, c_min:c_max] = 0
-        second_peak = pcm_copy.max()
-        return peak / (second_peak + 1e-10)
 
     def polar_to_cartesian(self, polar_image: np.ndarray) -> np.ndarray:
         """
@@ -793,23 +717,9 @@ class FFTLocalizer:
             gaussian_truncate=self.rot_gaussian_truncate
         )
 
-        # Compute phase correlation with optional masking
-        if self.use_masked_correlation:
-            # Masked correlation (integer pixel precision)
-            mask1 = self._create_data_mask(img1_masked)
-            mask2 = self._create_data_mask(img2_masked)
-            row_offset, col_offset, _ = self._masked_phase_correlation(
-                img1_masked, img2_masked, mask1, mask2
-            )
-            # Generate PCM for PPR calculation using existing method
-            pcm = self.compute_phase_correlation(img1_masked, img2_masked, return_cross_power=False)
-            peak_value = pcm.max()
-            ppr = self._calculate_ppr(pcm)
-        else:
-            # Original method (DFT refinement enabled)
-            pcm, cross_power = self.compute_phase_correlation(img1_masked, img2_masked, return_cross_power=True)
-            # Detect peak (with PPR and DFT refinement)
-            row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm, cross_power_spectrum=cross_power)
+        # Phase correlation with DFT refinement
+        pcm, cross_power = self.compute_phase_correlation(img1_masked, img2_masked, return_cross_power=True)
+        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm, cross_power_spectrum=cross_power)
 
         # Convert column offset to rotation angle
         # Phase correlation: col_offset > 0 means CW rotation (positive angle)
@@ -907,29 +817,15 @@ class FFTLocalizer:
             if self.verbose:
                 print(f"Applied rotation compensation: {-rotation:.2f}°")
 
-        # Compute phase correlation with optional masking
+        # Phase correlation with DFT refinement
         # NOTE: Disable periodic decomposition for Cartesian images (fan-shaped with large zero regions)
         # Moisan (2011) assumes full image data; zero-padded regions cause artifacts
-        if self.use_masked_correlation:
-            # Masked correlation (integer pixel precision)
-            mask1 = self._create_data_mask(img1_padded)
-            mask2 = self._create_data_mask(img2_rotated)
-            row_offset, col_offset, _ = self._masked_phase_correlation(
-                img1_padded, img2_rotated, mask1, mask2
-            )
-            # Generate PCM for PPR calculation using existing method
-            pcm = self.compute_phase_correlation(img1_padded, img2_rotated, return_cross_power=False, apply_periodic_decomp=False)
-            peak_value = pcm.max()
-            ppr = self._calculate_ppr(pcm)
-        else:
-            # Original method (DFT refinement enabled)
-            pcm, cross_power = self.compute_phase_correlation(
-                img1_padded, img2_rotated,
-                return_cross_power=True,
-                apply_periodic_decomp=False
-            )
-            # Detect peak (with PPR and DFT refinement)
-            row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm, cross_power_spectrum=cross_power)
+        pcm, cross_power = self.compute_phase_correlation(
+            img1_padded, img2_rotated,
+            return_cross_power=True,
+            apply_periodic_decomp=False
+        )
+        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm, cross_power_spectrum=cross_power)
 
         # Compute translation variance
         peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
