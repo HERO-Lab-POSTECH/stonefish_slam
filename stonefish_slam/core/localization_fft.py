@@ -162,13 +162,14 @@ class FFTLocalizer:
 
         return image * mask
 
-    def _create_data_mask(self, image: np.ndarray, threshold: float = 0.0) -> np.ndarray:
+    def _create_data_mask(self, image: np.ndarray, threshold: float = 0.01) -> np.ndarray:
         """
-        Create data validity mask (excludes black regions).
+        Create data validity mask (excludes black/near-black regions).
 
         Args:
-            image: Input image
-            threshold: Valid data threshold (default: 0.0)
+            image: Input image (assumed normalized 0~1)
+            threshold: Valid data threshold (default: 0.01 to exclude
+                       near-zero values from Gaussian smoothing at edges)
 
         Returns:
             Boolean mask (True = valid data)
