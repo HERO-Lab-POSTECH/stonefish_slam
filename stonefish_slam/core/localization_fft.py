@@ -820,7 +820,13 @@ class FFTLocalizer:
                 print(f"Applied rotation compensation: {-rotation:.2f}°")
 
         # Compute phase correlation
-        pcm, cross_power = self.compute_phase_correlation(img1_padded, img2_rotated, return_cross_power=True)
+        # NOTE: Disable periodic decomposition for Cartesian images (fan-shaped with large zero regions)
+        # Moisan (2011) assumes full image data; zero-padded regions cause artifacts
+        pcm, cross_power = self.compute_phase_correlation(
+            img1_padded, img2_rotated,
+            return_cross_power=True,
+            apply_periodic_decomp=False
+        )
 
         # Detect peak (with PPR and DFT refinement)
         row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm, cross_power_spectrum=cross_power)
