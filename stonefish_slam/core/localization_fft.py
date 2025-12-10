@@ -65,6 +65,9 @@ class FFTLocalizer:
         self.range_min = range_min
         self.verbose = verbose
 
+        if self.verbose:
+            print(f"[FFTLocalizer] Initialized with verbose=True, tilt={oculus.tilt_angle_deg}°", flush=True)
+
         # Rotation erosion mask parameters
         self.rot_erosion_iterations = rot_erosion_iterations
         self.rot_gaussian_sigma = rot_gaussian_sigma
@@ -260,9 +263,10 @@ class FFTLocalizer:
             horizontal_range_resolution = range_resolution * np.cos(self.oculus.tilt_angle_rad)
 
             # Cache for translation estimation (horizontal plane)
-            # CRITICAL: Cartesian coordinates are on horizontal plane
-            # Therefore, 1 pixel = horizontal_range_resolution meters
-            self.cart_range_resolution = horizontal_range_resolution
+            # NOTE: Use slant range_resolution for translation calculation
+            # The Cartesian remap preserves polar row indexing, so pixel movement
+            # corresponds to slant range, not horizontal range
+            self.cart_range_resolution = range_resolution
 
             # Apply tilt correction: project slant range to horizontal range
             # When sonar is tilted down, measured range is slant range
@@ -778,8 +782,22 @@ class FFTLocalizer:
                 print(f"[ROI] Rotation: {img1_polar.shape} -> {img1_masked.shape} "
                       f"(rows: {roi_bounds[0]}:{roi_bounds[1]}, cols: {roi_bounds[2]}:{roi_bounds[3]})")
 
+        # Normalize images to 0~255 uint8 for CLAHE
+        import cv2
+        img1_u8 = (img1_masked / img1_masked.max() * 255).astype(np.uint8) if img1_masked.max() > 0 else img1_masked.astype(np.uint8)
+        img2_u8 = (img2_masked / img2_masked.max() * 255).astype(np.uint8) if img2_masked.max() > 0 else img2_masked.astype(np.uint8)
+
+        # Apply CLAHE
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        img1_clahe = clahe.apply(img1_u8)
+        img2_clahe = clahe.apply(img2_u8)
+
+        # Normalize to 0~1 for FFT
+        img1_norm = img1_clahe.astype(np.float64) / 255.0
+        img2_norm = img2_clahe.astype(np.float64) / 255.0
+
         # Phase correlation with DFT refinement
-        pcm, cross_power = self.compute_phase_correlation(img1_masked, img2_masked, return_cross_power=True)
+        pcm, cross_power = self.compute_phase_correlation(img1_norm, img2_norm, return_cross_power=True)
         row_offset, col_offset, peak_value = self.detect_peak(pcm, cross_power_spectrum=cross_power)
 
         # Convert column offset to rotation angle
@@ -798,14 +816,25 @@ class FFTLocalizer:
         var_theta = np.deg2rad(np.sqrt(var_col)) ** 2
 
         if self.verbose:
-            # Detailed debug output for rotation estimation
-            print(f"[Rotation Debug]")
-            print(f"  PCM shape: {pcm.shape}")
-            print(f"  Peak loc: row={peak_loc[0]}, col={peak_loc[1]}")
-            print(f"  Peak value: {peak_value:.4f}")
-            print(f"  col_offset: {col_offset:.2f} pixels")
-            print(f"  angular_resolution: {np.rad2deg(self.oculus.angular_resolution):.4f}°/pixel")
-            print(f"  rotation_deg: {rotation_deg:.2f}°")
+            import os
+            print(f"[Rotation Debug]", flush=True)
+            print(f"  PCM shape: {pcm.shape}", flush=True)
+            print(f"  Peak loc: row={peak_loc[0]}, col={peak_loc[1]}", flush=True)
+            print(f"  Peak value: {peak_value:.4f}", flush=True)
+            print(f"  col_offset: {col_offset:.2f} pixels", flush=True)
+            print(f"  angular_resolution: {np.rad2deg(self.oculus.angular_resolution):.4f}°/pixel", flush=True)
+            print(f"  rotation_deg: {rotation_deg:.2f}°", flush=True)
+            # Save debug images
+            debug_dir = "/tmp/fft_debug"
+            os.makedirs(debug_dir, exist_ok=True)
+            cv2.imwrite(f"{debug_dir}/rot_polar1.png", (img1_polar / img1_polar.max() * 255).astype(np.uint8) if img1_polar.max() > 0 else img1_polar.astype(np.uint8))
+            cv2.imwrite(f"{debug_dir}/rot_polar2.png", (img2_polar / img2_polar.max() * 255).astype(np.uint8) if img2_polar.max() > 0 else img2_polar.astype(np.uint8))
+            cv2.imwrite(f"{debug_dir}/rot_norm1.png", (img1_norm * 255).astype(np.uint8))
+            cv2.imwrite(f"{debug_dir}/rot_norm2.png", (img2_norm * 255).astype(np.uint8))
+            cv2.imwrite(f"{debug_dir}/rot_pcm.png", (pcm / pcm.max() * 255).astype(np.uint8) if pcm.max() > 0 else pcm.astype(np.uint8))
+            np.save(f"{debug_dir}/rot_img1.npy", img1_norm)
+            np.save(f"{debug_dir}/rot_img2.npy", img2_norm)
+            print(f"  Debug images saved to {debug_dir}", flush=True)
 
         return {
             'rotation': rotation_deg,
@@ -836,6 +865,8 @@ class FFTLocalizer:
                 'variance_y': float (meters^2)
                 'success': bool
         """
+        import cv2
+
         # Apply erosion mask
         img1_masked = self.apply_erosion_mask(
             img1_cart,
@@ -885,11 +916,24 @@ class FFTLocalizer:
             img1_roi = img1_padded
             img2_roi = img2_rotated
 
+        # Normalize images to 0~255 uint8 for CLAHE
+        img1_u8 = (img1_roi / img1_roi.max() * 255).astype(np.uint8) if img1_roi.max() > 0 else img1_roi.astype(np.uint8)
+        img2_u8 = (img2_roi / img2_roi.max() * 255).astype(np.uint8) if img2_roi.max() > 0 else img2_roi.astype(np.uint8)
+
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        img1_clahe = clahe.apply(img1_u8)
+        img2_clahe = clahe.apply(img2_u8)
+
+        # Normalize to 0~1 for FFT
+        img1_norm = img1_clahe.astype(np.float64) / 255.0
+        img2_norm = img2_clahe.astype(np.float64) / 255.0
+
         # Phase correlation with DFT refinement
         # NOTE: Disable periodic decomposition for Cartesian images (fan-shaped with large zero regions)
         # Moisan (2011) assumes full image data; zero-padded regions cause artifacts
         pcm, cross_power = self.compute_phase_correlation(
-            img1_roi, img2_roi,
+            img1_norm, img2_norm,
             return_cross_power=True,
             apply_periodic_decomp=False
         )
@@ -912,9 +956,6 @@ class FFTLocalizer:
         # Cartesian image already in horizontal plane, no additional tilt correction needed
         tx = -row_offset * self.cart_range_resolution  # Forward (meters)
         ty = col_offset * self.cart_range_resolution   # Left (meters)
-
-        if self.verbose:
-            print(f"Translation: ({tx:.2f}, {ty:.2f}) m (peak={peak_value:.4f})")
 
         return {
             'translation': [tx, ty],

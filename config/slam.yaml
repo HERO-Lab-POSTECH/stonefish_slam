@@ -20,6 +20,10 @@ slam_node:
     fft_localization:
       enable: true    # Enable FFT-based rotation/translation estimation
       range_min: 0.5   # Minimum reliable range (meters)
+      verbose: true    # Enable debug output for FFT localization
+      trans_erosion_iterations: 2  # Erosion iterations for translation mask (0=disabled)
+      trans_gaussian_sigma: 2.0    # Gaussian sigma for edge smoothing (default: 4.0)
+      trans_gaussian_truncate: 3.0 # Gaussian kernel truncation factor (default: 4.0)
       # DFT subpixel refinement (Guizar-Sicairos 2008)
       dft_refinement:
         enable: true           # Enable DFT subpixel refinement (0.01 pixel accuracy)

@@ -187,6 +187,10 @@ class SLAMNode(Node):
         # FFT localization parameters
         self.declare_parameter('fft_localization.enable', False)
         self.declare_parameter('fft_localization.range_min', 0.5)
+        self.declare_parameter('fft_localization.verbose', False)
+        self.declare_parameter('fft_localization.trans_erosion_iterations', 4)
+        self.declare_parameter('fft_localization.trans_gaussian_sigma', 4.0)
+        self.declare_parameter('fft_localization.trans_gaussian_truncate', 4.0)
 
         # FFT validation parameters
         self.declare_parameter('fft_localization.validate_with_odom', True)
@@ -438,9 +442,17 @@ class SLAMNode(Node):
                 self.localization.oculus.tilt_angle_deg = sonar_tilt_deg
                 self.localization.oculus.tilt_angle_rad = np.deg2rad(sonar_tilt_deg)
 
+                fft_verbose = self.get_parameter('fft_localization.verbose').value
+                fft_erosion = self.get_parameter('fft_localization.trans_erosion_iterations').value
+                fft_gaussian_sigma = self.get_parameter('fft_localization.trans_gaussian_sigma').value
+                fft_gaussian_truncate = self.get_parameter('fft_localization.trans_gaussian_truncate').value
                 self.fft_localizer = FFTLocalizer(
                     oculus=self.localization.oculus,
-                    range_min=fft_range_min
+                    range_min=fft_range_min,
+                    verbose=fft_verbose,
+                    trans_erosion_iterations=fft_erosion,
+                    trans_gaussian_sigma=fft_gaussian_sigma,
+                    trans_gaussian_truncate=fft_gaussian_truncate
                 )
                 self.get_logger().info(f"FFT localization enabled (tilt={sonar_tilt_deg}°)")
 
@@ -719,7 +731,10 @@ class SLAMNode(Node):
                     polar_prev = self.prev_polar_sonar.copy()
                     polar_curr = polar_sonar.copy()
 
-                    fft_result = self.fft_localizer.estimate_transform(polar_prev, polar_curr)
+                    # Use FFT rotation estimation (not DR)
+                    fft_result = self.fft_localizer.estimate_transform(
+                        polar_prev, polar_curr
+                    )
 
                     if fft_result['success']:
                         # Validate with odometry if enabled
