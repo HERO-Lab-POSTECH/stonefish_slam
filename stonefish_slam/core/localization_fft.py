@@ -284,6 +284,11 @@ class FFTLocalizer:
             borderValue=0  # Black border instead of white
         )
 
+        # Apply valid mask to explicitly mark FOV boundary
+        # This ensures erosion mask correctly identifies FOV edges
+        valid_mask_float = self.p2c_cache['valid_mask'].astype(np.float32) / 255.0
+        cartesian_image = cartesian_image * valid_mask_float
+
         return cartesian_image
 
     def _periodic_decomposition(self, image: np.ndarray) -> np.ndarray:
