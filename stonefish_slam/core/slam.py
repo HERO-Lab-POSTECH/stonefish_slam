@@ -626,7 +626,9 @@ class SLAMNode(Node):
             'fft': (fft_tx, fft_ty, np.degrees(fft_theta)),
             'dr': (dr_tx, dr_ty, np.degrees(dr_theta)),
             'pos_err': pos_error,
-            'rot_err': np.degrees(rot_error),
+            'rot_err_deg': np.degrees(rot_error),
+            'pos_threshold': self.fft_max_pos_error,
+            'rot_threshold_deg': np.degrees(self.fft_max_rot_error),
             'reasons': []
         }
 
@@ -747,14 +749,20 @@ class SLAMNode(Node):
                             frame.fft_is_dr_fallback = False
                         else:
                             # FFT invalid - fallback to DR (odometry)
-                            # Single log with all relevant info
+                            # Build rejection reason string
+                            reasons = []
+                            if 'pos' in val_info['reasons']:
+                                reasons.append(f"pos {val_info['pos_err']:.2f}>{val_info['pos_threshold']:.2f}m")
+                            if 'rot' in val_info['reasons']:
+                                reasons.append(f"rot {val_info['rot_err_deg']:.1f}>{val_info['rot_threshold_deg']:.1f}°")
+                            reason_str = ', '.join(reasons)
+
                             fft = val_info['fft']
                             dr = val_info['dr']
                             self.get_logger().warn(
-                                f"FFT rejected ({'|'.join(val_info['reasons'])}): "
-                                f"FFT=({fft[0]:.2f},{fft[1]:.2f})m/{fft[2]:.1f}° vs "
-                                f"DR=({dr[0]:.2f},{dr[1]:.2f})m/{dr[2]:.1f}° "
-                                f"[Δpos={val_info['pos_err']:.2f}m, Δrot={val_info['rot_err']:.1f}°] → using DR",
+                                f"FFT→DR [{reason_str}] "
+                                f"FFT({fft[0]:.2f},{fft[1]:.2f},{fft[2]:.1f}°) "
+                                f"DR({dr[0]:.2f},{dr[1]:.2f},{dr[2]:.1f}°)",
                                 throttle_duration_sec=1.0
                             )
                             frame.fft_transform = dr_transform
