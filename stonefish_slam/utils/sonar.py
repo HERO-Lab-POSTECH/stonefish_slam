@@ -79,7 +79,7 @@ class OculusProperty(object):
                      0.    , 0.    , 0.    , 0.    , 0.    , 0.    , 0.    , 0.    ]])
     # fmt: on
 
-    def __init__(self):
+    def __init__(self, tilt_angle_deg: float = 0.0):
         # model
         self.model = ""
 
@@ -101,6 +101,10 @@ class OculusProperty(object):
         self.angular_resolution = None
         # rad
         self.vertical_fov = None
+
+        # Tilt angle for FLS (Forward Looking Sonar)
+        self.tilt_angle_deg = tilt_angle_deg
+        self.tilt_angle_rad = np.deg2rad(tilt_angle_deg)
 
         ##################################################
         # polar <-> Cartesian

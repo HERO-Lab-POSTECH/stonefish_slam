@@ -263,12 +263,6 @@ class Mapping3DStandaloneNode(Node):
             if len(octomap_msg.data) > 0:
                 self.octomap_pub.publish(octomap_msg)
 
-                # (iteration 로그 제거)
-            else:
-                self.get_logger().warn(
-                    f'Empty point cloud (frame #{self.frame_count})'
-                )
-
         except Exception as e:
             import traceback
             self.get_logger().error(f'Processing failed: {e}\n{traceback.format_exc()}')

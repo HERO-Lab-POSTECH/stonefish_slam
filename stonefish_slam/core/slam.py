@@ -12,6 +12,7 @@ from message_filters import Subscriber, ApproximateTimeSynchronizer
 from sensor_msgs.msg import PointCloud2, Image
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from typing import Tuple
 
 # stonefish_slam imports
 from stonefish_slam.utils.io import *
@@ -186,6 +187,13 @@ class SLAMNode(Node):
         # FFT localization parameters
         self.declare_parameter('fft_localization.enable', False)
         self.declare_parameter('fft_localization.range_min', 0.5)
+
+        # FFT validation parameters
+        self.declare_parameter('fft_localization.validate_with_odom', True)
+        self.declare_parameter('fft_localization.max_position_error', 2.0)  # meters
+        self.declare_parameter('fft_localization.max_rotation_error', 0.35)  # radians (~20 deg)
+        self.declare_parameter('fft_localization.min_ppr', 1.5)  # minimum PPR threshold
+        self.declare_parameter('fft_localization.reject_on_failure', False)
 
         # Initialize SLAM modules (composition instead of inheritance)
         self.fg = FactorGraph()
@@ -424,11 +432,24 @@ class SLAMNode(Node):
         if self.fft_enable:
             if self.localization is not None:
                 fft_range_min = self.get_parameter('fft_localization.range_min').value
+
+                # Pass sonar tilt angle to OculusProperty
+                sonar_tilt_deg = self.get_parameter('sonar.sonar_tilt_deg').value
+                self.localization.oculus.tilt_angle_deg = sonar_tilt_deg
+                self.localization.oculus.tilt_angle_rad = np.deg2rad(sonar_tilt_deg)
+
                 self.fft_localizer = FFTLocalizer(
                     oculus=self.localization.oculus,
                     range_min=fft_range_min
                 )
-                self.get_logger().info("FFT localization enabled")
+                self.get_logger().info(f"FFT localization enabled (tilt={sonar_tilt_deg}°)")
+
+                # FFT validation parameters
+                self.fft_validate = self.get_parameter('fft_localization.validate_with_odom').value
+                self.fft_max_pos_error = self.get_parameter('fft_localization.max_position_error').value
+                self.fft_max_rot_error = self.get_parameter('fft_localization.max_rotation_error').value
+                self.fft_min_ppr = self.get_parameter('fft_localization.min_ppr').value
+                self.fft_reject_on_failure = self.get_parameter('fft_localization.reject_on_failure').value
 
                 # Previous polar sonar image storage
                 self.prev_polar_sonar = None
@@ -572,6 +593,52 @@ class SLAMNode(Node):
         # Set noise models in factor graph
         self.fg.set_noise_models(prior_model, odom_model, icp_odom_model)
 
+    def validate_fft_with_odom(self, fft_result: dict, dr_transform):
+        """
+        Validate FFT result against dead reckoning odometry.
+
+        Args:
+            fft_result: FFT estimate_transform result with covariance
+            dr_transform: Dead reckoning transform (gtsam.Pose2)
+
+        Returns:
+            (is_valid, message)
+        """
+        # FFT transform
+        fft_tx = fft_result['translation'][0]
+        fft_ty = fft_result['translation'][1]
+        fft_theta = np.radians(fft_result['rotation'])
+
+        # DR transform
+        dr_tx = dr_transform.x()
+        dr_ty = dr_transform.y()
+        dr_theta = dr_transform.theta()
+
+        # Position error
+        pos_error = np.sqrt((fft_tx - dr_tx)**2 + (fft_ty - dr_ty)**2)
+
+        # Rotation error (wrap to [-pi, pi])
+        rot_error = abs(fft_theta - dr_theta)
+        rot_error = min(rot_error, 2*np.pi - rot_error)
+
+        # PPR check
+        ppr_rot = fft_result.get('ppr_rot', float('inf'))
+        ppr_trans = fft_result.get('ppr_trans', float('inf'))
+        min_ppr = min(ppr_rot, ppr_trans)
+
+        # Validation
+        reasons = []
+        if pos_error > self.fft_max_pos_error:
+            reasons.append(f"pos_err={pos_error:.2f}m > {self.fft_max_pos_error}m")
+        if rot_error > self.fft_max_rot_error:
+            reasons.append(f"rot_err={np.degrees(rot_error):.1f}° > {np.degrees(self.fft_max_rot_error):.1f}°")
+        if min_ppr < self.fft_min_ppr:
+            reasons.append(f"PPR={min_ppr:.2f} < {self.fft_min_ppr}")
+
+        if reasons:
+            return False, "; ".join(reasons)
+        return True, "OK"
+
     def SLAM_callback_integrated(self, sonar_msg: Image, odom_msg: Odometry) -> None:
         """Integrated SLAM callback with internal feature extraction.
 
@@ -654,19 +721,50 @@ class SLAMNode(Node):
                     fft_result = self.fft_localizer.estimate_transform(polar_prev, polar_curr)
 
                     if fft_result['success']:
-                        self.get_logger().info(
-                            f"FFT: rotation={fft_result['rotation']:.2f}deg, "
-                            f"translation=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m",
-                            throttle_duration_sec=1.0
-                        )
-                        # Store FFT transform in frame
-                        frame.fft_transform = n2g(
-                            (fft_result['translation'][0],
-                             fft_result['translation'][1],
-                             np.radians(fft_result['rotation'])),
-                            "Pose2"
-                        )
-                        frame.fft_success = True
+                        # Validate with odometry if enabled
+                        fft_valid = True
+                        validation_msg = ""
+
+                        if self.fft_validate and self.fg.keyframes:
+                            # Get DR transform between keyframes
+                            dr_transform = self.fg.current_keyframe.dr_pose.between(frame.dr_pose)
+                            fft_valid, validation_msg = self.validate_fft_with_odom(fft_result, dr_transform)
+
+                            if not fft_valid:
+                                self.get_logger().warn(
+                                    f"FFT validation failed: {validation_msg}",
+                                    throttle_duration_sec=1.0
+                                )
+
+                        if fft_valid:
+                            # FFT valid - use FFT result
+                            self.get_logger().info(
+                                f"FFT: rot={fft_result['rotation']:.2f}°, "
+                                f"trans=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m, "
+                                f"PPR=({fft_result.get('ppr_rot', 0):.1f}, {fft_result.get('ppr_trans', 0):.1f})",
+                                throttle_duration_sec=1.0
+                            )
+                            frame.fft_transform = n2g(
+                                (fft_result['translation'][0],
+                                 fft_result['translation'][1],
+                                 np.radians(fft_result['rotation'])),
+                                "Pose2"
+                            )
+                            frame.fft_covariance = fft_result.get('covariance', None)
+                            frame.fft_success = True
+                            frame.fft_is_dr_fallback = False
+                        else:
+                            # FFT invalid - fallback to DR (odometry)
+                            self.get_logger().warn(
+                                f"FFT validation failed ({validation_msg}), using DR: "
+                                f"trans=({dr_transform.x():.2f}, {dr_transform.y():.2f})m, "
+                                f"rot={np.degrees(dr_transform.theta()):.2f}°",
+                                throttle_duration_sec=1.0
+                            )
+                            frame.fft_transform = dr_transform
+                            frame.fft_covariance = None
+                            frame.fft_success = True  # Still mark as success to use DR transform
+                            frame.fft_is_dr_fallback = True  # Flag for DR fallback
                     else:
                         self.get_logger().warn("FFT localization failed", throttle_duration_sec=2.0)
                         frame.fft_success = False

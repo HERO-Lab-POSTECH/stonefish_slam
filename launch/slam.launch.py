@@ -45,8 +45,8 @@ def launch_setup(context, *args, **kwargs):
     param_dict = {
         'icp_config': icp_config,
         'mode': mode,
-        'enable_2d_mapping': enable_2d_mapping,
-        'enable_3d_mapping': enable_3d_mapping,
+        'enable_2d_mapping': enable_2d_mapping.lower() == 'true',
+        'enable_3d_mapping': enable_3d_mapping.lower() == 'true',
         'update_method': update_method,
         'vehicle_name': vehicle_name
     }

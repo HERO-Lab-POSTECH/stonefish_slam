@@ -179,12 +179,19 @@ class FFTLocalizer:
             # range_min is only used for masking unreliable near-field data
             range_resolution = self.oculus.range_max / rows
 
-            # Cache for translation estimation (CRITICAL: same scale factor as cart conversion)
-            self.cart_range_resolution = range_resolution
+            # Cache for translation estimation
+            # CRITICAL: Cartesian image is horizontal projection, so use horizontal range resolution
+            # horizontal_range = slant_range * cos(tilt), so horizontal_resolution = slant_resolution * cos(tilt)
+            self.cart_range_resolution = range_resolution * np.cos(self.oculus.tilt_angle_rad)
 
-            # Maximum lateral extent based on FOV
+            # Apply tilt correction: project slant range to horizontal range
+            # When sonar is tilted down, measured range is slant range
+            # Horizontal range = slant range * cos(tilt_angle)
+            horizontal_range_max = self.oculus.range_max * np.cos(self.oculus.tilt_angle_rad)
+
+            # Maximum lateral extent based on FOV (use horizontal range)
             horizontal_fov_deg = np.rad2deg(self.oculus.horizontal_fov)
-            max_lateral = self.oculus.range_max * np.sin(np.radians(horizontal_fov_deg / 2.0))
+            max_lateral = horizontal_range_max * np.sin(np.radians(horizontal_fov_deg / 2.0))
 
             # Cartesian image dimensions (same resolution as range)
             cart_width = int(np.ceil(2 * max_lateral / range_resolution))
@@ -211,18 +218,22 @@ class FFTLocalizer:
             # Build cartesian meshgrid (pixel indices)
             XX, YY = np.meshgrid(range(cart_width), range(cart_height))
 
-            # Convert pixel indices to metric coordinates
+            # Convert pixel indices to metric coordinates (projected horizontal plane)
             # IMPORTANT: Stonefish FLS row convention is OPPOSITE of Oculus
             # Stonefish: row=0 (top) is FAR range, row=max (bottom) is NEAR range
             # Cartesian: YY=0 (top) should be FAR, YY=max (bottom) should be NEAR
-            x_meters = self.oculus.range_max - range_resolution * YY
+            # These are PROJECTED coordinates on horizontal plane
+            x_proj = horizontal_range_max - range_resolution * YY
+            y_proj = range_resolution * (-cart_width / 2.0 + XX + 0.5)
 
-            # Y: lateral distance - centered at 0
-            y_meters = range_resolution * (-cart_width / 2.0 + XX + 0.5)
+            # Compute horizontal range and bearing from projected coordinates
+            horizontal_range = np.sqrt(np.square(x_proj) + np.square(y_proj))
+            bearing_polar = np.arctan2(y_proj, x_proj)
 
-            # Convert cartesian (x, y) to polar (r, bearing)
-            r_polar = np.sqrt(np.square(x_meters) + np.square(y_meters))
-            bearing_polar = np.arctan2(y_meters, x_meters)
+            # Convert horizontal range back to slant range (reverse tilt projection)
+            # slant_range = horizontal_range / cos(tilt)
+            cos_tilt = np.cos(self.oculus.tilt_angle_rad)
+            r_polar = horizontal_range / cos_tilt if cos_tilt > 1e-6 else horizontal_range
 
             # Map polar coordinates to image indices
             # Range to row index (distance in meters to pixel row)
@@ -296,7 +307,7 @@ class FFTLocalizer:
 
     def detect_peak(self,
                     pcm: np.ndarray,
-                    subpixel: bool = True) -> Tuple[float, float, float]:
+                    subpixel: bool = True) -> Tuple[float, float, float, float]:
         """
         Detect peak in Phase Correlation Matrix.
 
@@ -305,14 +316,26 @@ class FFTLocalizer:
             subpixel: Enable subpixel accuracy using parabolic fitting
 
         Returns:
-            (row_offset, col_offset, peak_value)
+            (row_offset, col_offset, peak_value, ppr)
         """
-        # Find maximum
+        # Find maximum (1st peak)
         peak_value = np.max(pcm)
         peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
 
-        # Convert to offset from center
+        # Detect 2nd peak for PPR calculation
+        pcm_masked = pcm.copy()
+        r, c = peak_loc
         h, w = pcm.shape
+        # Mask 5x5 region around 1st peak
+        r_min, r_max = max(0, r-2), min(h, r+3)
+        c_min, c_max = max(0, c-2), min(w, c+3)
+        pcm_masked[r_min:r_max, c_min:c_max] = 0
+        second_peak = np.max(pcm_masked)
+
+        # Calculate PPR (Peak-to-Peak Ratio)
+        ppr = peak_value / (second_peak + 1e-10)
+
+        # Convert to offset from center
         row_offset = peak_loc[0] - h // 2
         col_offset = peak_loc[1] - w // 2
 
@@ -343,7 +366,57 @@ class FFTLocalizer:
                 if self.verbose:
                     print(f"Subpixel refinement failed: {e}")
 
-        return row_offset, col_offset, peak_value
+        return row_offset, col_offset, peak_value, ppr
+
+    def compute_peak_variance(self,
+                              pcm: np.ndarray,
+                              peak_loc: Tuple[int, int],
+                              resolution: float) -> Tuple[float, float]:
+        """
+        Compute variance around peak using weighted second moment.
+
+        Based on Hurtós et al. (2015) methodology.
+
+        Args:
+            pcm: Phase correlation matrix
+            peak_loc: (row, col) of peak
+            resolution: meters per pixel (or degrees per pixel for rotation)
+
+        Returns:
+            (variance_row, variance_col) in resolution^2 units
+        """
+        r, c = peak_loc
+        h, w = pcm.shape
+
+        # Extract 7x7 neighborhood (or smaller at edges)
+        size = 3  # 7x7 window
+        r_min, r_max = max(0, r-size), min(h, r+size+1)
+        c_min, c_max = max(0, c-size), min(w, c+size+1)
+
+        neighborhood = pcm[r_min:r_max, c_min:c_max]
+
+        # Threshold at 50% of peak (Hurtós method)
+        threshold = 0.5 * np.max(neighborhood)
+        mask = neighborhood > threshold
+
+        if np.sum(mask) < 3:
+            # Not enough points, return default variance
+            return (resolution * 2) ** 2, (resolution * 2) ** 2
+
+        # Weighted variance calculation
+        weights = neighborhood[mask]
+        weights = weights / np.sum(weights)
+
+        rows, cols = np.where(mask)
+        center_r = r - r_min
+        center_c = c - c_min
+
+        var_r = np.sum(weights * (rows - center_r) ** 2) * (resolution ** 2)
+        var_c = np.sum(weights * (cols - center_c) ** 2) * (resolution ** 2)
+
+        # Minimum variance (prevent zero)
+        min_var = (resolution * 0.5) ** 2
+        return max(var_r, min_var), max(var_c, min_var)
 
     def _calculate_padding_size(self,
                                 image_shape: Tuple[int, int],
@@ -452,6 +525,8 @@ class FFTLocalizer:
             dict with keys:
                 'rotation': float (degrees)
                 'peak_value': float (correlation peak)
+                'ppr': float (peak-to-peak ratio)
+                'variance_theta': float (radians^2)
                 'success': bool
         """
         # Note: Min range masking removed (redundant - caller applies it in estimate_transform)
@@ -472,20 +547,40 @@ class FFTLocalizer:
         # Compute phase correlation
         pcm = self.compute_phase_correlation(img1_masked, img2_masked)
 
-        # Detect peak
-        row_offset, col_offset, peak_value = self.detect_peak(pcm)
+        # Detect peak (with PPR)
+        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm)
 
         # Convert column offset to rotation angle
         # Phase correlation: col_offset > 0 means CW rotation (positive angle)
         # Reference: krit_fft line 873
         rotation_deg = col_offset * np.rad2deg(self.oculus.angular_resolution)
 
+        # Compute rotation variance
+        peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
+        _, var_col = self.compute_peak_variance(
+            pcm,
+            peak_loc,
+            np.rad2deg(self.oculus.angular_resolution)
+        )
+        # Convert from degrees^2 to radians^2
+        var_theta = np.deg2rad(np.sqrt(var_col)) ** 2
+
         if self.verbose:
-            print(f"Rotation: {rotation_deg:.2f}° (peak={peak_value:.4f})")
+            # Detailed debug output for rotation estimation
+            print(f"[Rotation Debug]")
+            print(f"  PCM shape: {pcm.shape}")
+            print(f"  Peak loc: row={peak_loc[0]}, col={peak_loc[1]}")
+            print(f"  Peak value: {peak_value:.4f}")
+            print(f"  col_offset: {col_offset:.2f} pixels")
+            print(f"  angular_resolution: {np.rad2deg(self.oculus.angular_resolution):.4f}°/pixel")
+            print(f"  PPR: {ppr:.2f}")
+            print(f"  rotation_deg: {rotation_deg:.2f}°")
 
         return {
             'rotation': rotation_deg,
             'peak_value': peak_value,
+            'ppr': ppr,
+            'variance_theta': var_theta,
             'success': True
         }
 
@@ -507,6 +602,9 @@ class FFTLocalizer:
             dict with keys:
                 'translation': [tx, ty] (meters, NED frame)
                 'peak_value': float (correlation peak)
+                'ppr': float (peak-to-peak ratio)
+                'variance_x': float (meters^2)
+                'variance_y': float (meters^2)
                 'success': bool
         """
         # Apply erosion mask
@@ -551,23 +649,36 @@ class FFTLocalizer:
         # Compute phase correlation
         pcm = self.compute_phase_correlation(img1_padded, img2_rotated)
 
-        # Detect peak
-        row_offset, col_offset, peak_value = self.detect_peak(pcm)
+        # Detect peak (with PPR)
+        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm)
+
+        # Compute translation variance
+        peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
+        var_row, var_col = self.compute_peak_variance(
+            pcm,
+            peak_loc,
+            self.cart_range_resolution
+        )
 
         # Convert to meters (NED coordinate frame)
         # Phase correlation: row_offset > 0 = image2 shifts down = object farther = robot backward
         # Stonefish polar: Row 0 = far (top), Row N-1 = near (bottom)
         # Therefore: tx = -row_offset (negative sign needed)
         # CRITICAL: Use cart_range_resolution (same as polar_to_cartesian), NOT oculus.range_resolution
+        # NOTE: Tilt correction already applied in polar_to_cartesian projection
+        # Cartesian image already in horizontal plane, no additional tilt correction needed
         tx = -row_offset * self.cart_range_resolution  # Forward (meters)
         ty = col_offset * self.cart_range_resolution   # Left (meters)
 
         if self.verbose:
-            print(f"Translation: ({tx:.2f}, {ty:.2f}) m (peak={peak_value:.4f})")
+            print(f"Translation: ({tx:.2f}, {ty:.2f}) m (peak={peak_value:.4f}, ppr={ppr:.2f})")
 
         return {
             'translation': [tx, ty],
             'peak_value': peak_value,
+            'ppr': ppr,
+            'variance_x': var_row,
+            'variance_y': var_col,
             'success': True
         }
 
@@ -587,6 +698,9 @@ class FFTLocalizer:
             dict with keys:
                 'rotation': float (degrees)
                 'translation': [tx, ty] (meters, NED frame)
+                'covariance': np.ndarray (3×3, diagonal: [var_x, var_y, var_theta])
+                'ppr_rot': float (rotation peak-to-peak ratio)
+                'ppr_trans': float (translation peak-to-peak ratio)
                 'success': bool
                 'rot_peak': float (rotation correlation peak)
                 'trans_peak': float (translation correlation peak)
@@ -597,6 +711,7 @@ class FFTLocalizer:
             return {
                 'rotation': 0.0,
                 'translation': [0.0, 0.0],
+                'covariance': np.eye(3),
                 'success': False
             }
 
@@ -618,14 +733,25 @@ class FFTLocalizer:
         translation = trans_result['translation']
         trans_peak = trans_result['peak_value']
 
+        # Step 4: Build covariance matrix (3×3 diagonal)
+        covariance = np.diag([
+            trans_result['variance_x'],      # var(x) in meters^2
+            trans_result['variance_y'],      # var(y) in meters^2
+            rot_result['variance_theta']     # var(theta) in radians^2
+        ])
+
         if self.verbose:
             print(f"\nFFT Registration complete:")
-            print(f"  Rotation: {rotation:.2f}°")
-            print(f"  Translation: ({translation[0]:.2f}, {translation[1]:.2f}) m")
+            print(f"  Rotation: {rotation:.2f}° (PPR: {rot_result['ppr']:.2f})")
+            print(f"  Translation: ({translation[0]:.2f}, {translation[1]:.2f}) m (PPR: {trans_result['ppr']:.2f})")
+            print(f"  Covariance diag: [{trans_result['variance_x']:.4f}, {trans_result['variance_y']:.4f}, {rot_result['variance_theta']:.6f}]")
 
         return {
             'rotation': rotation,
             'translation': translation,
+            'covariance': covariance,
+            'ppr_rot': rot_result['ppr'],
+            'ppr_trans': trans_result['ppr'],
             'success': True,
             'rot_peak': rot_peak,
             'trans_peak': trans_peak

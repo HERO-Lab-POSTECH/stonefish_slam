@@ -10,7 +10,7 @@ slam_node:
   ros__parameters:
     # ==================== Module Enable Flags ====================
     enable_2d_mapping: false
-    enable_3d_mapping: true
+    enable_3d_mapping: false
 
     # Localization modules
     ssm.enable: false   # Sequential Scan Matching (for localization)
@@ -20,3 +20,9 @@ slam_node:
     fft_localization:
       enable: true    # Enable FFT-based rotation/translation estimation
       range_min: 0.5   # Minimum reliable range (meters)
+      # Validation parameters (compare FFT with odometry)
+      validate_with_odom: true   # Enable DR vs FFT comparison
+      max_position_error: 2.0    # Max allowed position difference (meters)
+      max_rotation_error: 0.35   # Max allowed rotation difference (radians, ~20°)
+      min_ppr: 1.05              # Minimum Peak-to-Peak Ratio threshold (1.0 = no check)
+      reject_on_failure: false   # If true, reject FFT result when validation fails
