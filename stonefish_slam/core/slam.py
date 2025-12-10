@@ -1310,8 +1310,9 @@ class SLAMNode(Node):
         ret2 = ICPResult(ret, self.localization.ssm_params.cov_samples > 0)
 
         # Compute transform (FFT or ICP)
-        if self.fft_enable and hasattr(keyframe, 'fft_success') and keyframe.fft_success:
-            # Use FFT transform instead of ICP
+        use_fft = self.fft_enable and hasattr(keyframe, 'fft_success') and keyframe.fft_success
+        if use_fft:
+            # Use FFT transform (already validated in SLAM_callback)
             ret2.estimated_transform = keyframe.fft_transform
             ret2.status.description = "FFT"
         else:
@@ -1344,26 +1345,27 @@ class SLAMNode(Node):
                         ret2.estimated_transform = odom
                         ret2.status.description = ""
 
-        # Verify transform is reasonable
-        if ret2.status:
-            delta = ret2.initial_transform.between(ret2.estimated_transform)
-            delta_translation = np.linalg.norm(delta.translation())
-            delta_rotation = abs(delta.theta())
-            if (
-                delta_translation > self.localization.ssm_params.max_translation
-                or delta_rotation > self.localization.ssm_params.max_rotation
-            ):
-                ret2.status = STATUS.LARGE_TRANSFORMATION
-                ret2.status.description = f"trans {delta_translation:.2f} rot {delta_rotation:.2f}"
+            # ICP-specific validation (skip for FFT - already validated)
+            # Verify transform is reasonable
+            if ret2.status:
+                delta = ret2.initial_transform.between(ret2.estimated_transform)
+                delta_translation = np.linalg.norm(delta.translation())
+                delta_rotation = abs(delta.theta())
+                if (
+                    delta_translation > self.localization.ssm_params.max_translation
+                    or delta_rotation > self.localization.ssm_params.max_rotation
+                ):
+                    ret2.status = STATUS.LARGE_TRANSFORMATION
+                    ret2.status.description = f"trans {delta_translation:.2f} rot {delta_rotation:.2f}"
 
-        # Check overlap
-        if ret2.status:
-            overlap = self.localization.get_overlap(
-                ret2.source_points, ret2.target_points, ret2.estimated_transform
-            )
-            if overlap < self.localization.ssm_params.min_points:
-                ret2.status = STATUS.NOT_ENOUGH_OVERLAP
-            ret2.status.description = f"overlap {overlap}"
+            # Check overlap
+            if ret2.status:
+                overlap = self.localization.get_overlap(
+                    ret2.source_points, ret2.target_points, ret2.estimated_transform
+                )
+                if overlap < self.localization.ssm_params.min_points:
+                    ret2.status = STATUS.NOT_ENOUGH_OVERLAP
+                    ret2.status.description = f"overlap {overlap}"
 
         # Add to graph if successful
         if ret2.status:
