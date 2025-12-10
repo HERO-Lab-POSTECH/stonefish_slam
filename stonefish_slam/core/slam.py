@@ -602,7 +602,7 @@ class SLAMNode(Node):
             dr_transform: Dead reckoning transform (gtsam.Pose2)
 
         Returns:
-            (is_valid, message)
+            (is_valid, validation_info dict)
         """
         # FFT transform
         fft_tx = fft_result['translation'][0]
@@ -621,23 +621,22 @@ class SLAMNode(Node):
         rot_error = abs(fft_theta - dr_theta)
         rot_error = min(rot_error, 2*np.pi - rot_error)
 
-        # PPR check
-        ppr_rot = fft_result.get('ppr_rot', float('inf'))
-        ppr_trans = fft_result.get('ppr_trans', float('inf'))
-        min_ppr = min(ppr_rot, ppr_trans)
+        # Validation info
+        info = {
+            'fft': (fft_tx, fft_ty, np.degrees(fft_theta)),
+            'dr': (dr_tx, dr_ty, np.degrees(dr_theta)),
+            'pos_err': pos_error,
+            'rot_err': np.degrees(rot_error),
+            'reasons': []
+        }
 
-        # Validation
-        reasons = []
+        # Validation checks
         if pos_error > self.fft_max_pos_error:
-            reasons.append(f"pos_err={pos_error:.2f}m > {self.fft_max_pos_error}m")
+            info['reasons'].append('pos')
         if rot_error > self.fft_max_rot_error:
-            reasons.append(f"rot_err={np.degrees(rot_error):.1f}° > {np.degrees(self.fft_max_rot_error):.1f}°")
-        if min_ppr < self.fft_min_ppr:
-            reasons.append(f"PPR={min_ppr:.2f} < {self.fft_min_ppr}")
+            info['reasons'].append('rot')
 
-        if reasons:
-            return False, "; ".join(reasons)
-        return True, "OK"
+        return len(info['reasons']) == 0, info
 
     def SLAM_callback_integrated(self, sonar_msg: Image, odom_msg: Odometry) -> None:
         """Integrated SLAM callback with internal feature extraction.
@@ -723,25 +722,18 @@ class SLAMNode(Node):
                     if fft_result['success']:
                         # Validate with odometry if enabled
                         fft_valid = True
-                        validation_msg = ""
+                        val_info = None
 
                         if self.fft_validate and self.fg.keyframes:
                             # Get DR transform between keyframes
                             dr_transform = self.fg.current_keyframe.dr_pose.between(frame.dr_pose)
-                            fft_valid, validation_msg = self.validate_fft_with_odom(fft_result, dr_transform)
-
-                            if not fft_valid:
-                                self.get_logger().warn(
-                                    f"FFT validation failed: {validation_msg}",
-                                    throttle_duration_sec=1.0
-                                )
+                            fft_valid, val_info = self.validate_fft_with_odom(fft_result, dr_transform)
 
                         if fft_valid:
                             # FFT valid - use FFT result
                             self.get_logger().info(
-                                f"FFT: rot={fft_result['rotation']:.2f}°, "
-                                f"trans=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m, "
-                                f"PPR=({fft_result.get('ppr_rot', 0):.1f}, {fft_result.get('ppr_trans', 0):.1f})",
+                                f"FFT OK: trans=({fft_result['translation'][0]:.2f}, {fft_result['translation'][1]:.2f})m, "
+                                f"rot={fft_result['rotation']:.2f}°",
                                 throttle_duration_sec=1.0
                             )
                             frame.fft_transform = n2g(
@@ -755,10 +747,14 @@ class SLAMNode(Node):
                             frame.fft_is_dr_fallback = False
                         else:
                             # FFT invalid - fallback to DR (odometry)
+                            # Single log with all relevant info
+                            fft = val_info['fft']
+                            dr = val_info['dr']
                             self.get_logger().warn(
-                                f"FFT validation failed ({validation_msg}), using DR: "
-                                f"trans=({dr_transform.x():.2f}, {dr_transform.y():.2f})m, "
-                                f"rot={np.degrees(dr_transform.theta()):.2f}°",
+                                f"FFT rejected ({'|'.join(val_info['reasons'])}): "
+                                f"FFT=({fft[0]:.2f},{fft[1]:.2f})m/{fft[2]:.1f}° vs "
+                                f"DR=({dr[0]:.2f},{dr[1]:.2f})m/{dr[2]:.1f}° "
+                                f"[Δpos={val_info['pos_err']:.2f}m, Δrot={val_info['rot_err']:.1f}°] → using DR",
                                 throttle_duration_sec=1.0
                             )
                             frame.fft_transform = dr_transform
