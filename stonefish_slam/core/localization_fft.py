@@ -373,7 +373,7 @@ class FFTLocalizer:
                     pcm: np.ndarray,
                     subpixel: bool = True,
                     cross_power_spectrum: Optional[np.ndarray] = None,
-                    use_dft_refinement: Optional[bool] = None) -> Tuple[float, float, float, float]:
+                    use_dft_refinement: Optional[bool] = None) -> Tuple[float, float, float]:
         """
         Detect peak in Phase Correlation Matrix.
 
@@ -384,26 +384,14 @@ class FFTLocalizer:
             use_dft_refinement: Enable DFT subpixel refinement (default: self.dft_refinement_enable)
 
         Returns:
-            (row_offset, col_offset, peak_value, ppr)
+            (row_offset, col_offset, peak_value)
         """
-        # Find maximum (1st peak)
+        # Find maximum peak
         peak_value = np.max(pcm)
         peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
 
-        # Detect 2nd peak for PPR calculation
-        pcm_masked = pcm.copy()
-        r, c = peak_loc
-        h, w = pcm.shape
-        # Mask 5x5 region around 1st peak
-        r_min, r_max = max(0, r-2), min(h, r+3)
-        c_min, c_max = max(0, c-2), min(w, c+3)
-        pcm_masked[r_min:r_max, c_min:c_max] = 0
-        second_peak = np.max(pcm_masked)
-
-        # Calculate PPR (Peak-to-Peak Ratio)
-        ppr = peak_value / (second_peak + 1e-10)
-
         # Convert to offset from center
+        h, w = pcm.shape
         row_offset = peak_loc[0] - h // 2
         col_offset = peak_loc[1] - w // 2
 
@@ -449,7 +437,7 @@ class FFTLocalizer:
                 if self.verbose:
                     print(f"DFT refinement failed, using parabolic result: {e}")
 
-        return row_offset, col_offset, peak_value, ppr
+        return row_offset, col_offset, peak_value
 
     def _upsampled_dft(self,
                        cross_power_spectrum: np.ndarray,
@@ -698,7 +686,6 @@ class FFTLocalizer:
             dict with keys:
                 'rotation': float (degrees)
                 'peak_value': float (correlation peak)
-                'ppr': float (peak-to-peak ratio)
                 'variance_theta': float (radians^2)
                 'success': bool
         """
@@ -719,7 +706,7 @@ class FFTLocalizer:
 
         # Phase correlation with DFT refinement
         pcm, cross_power = self.compute_phase_correlation(img1_masked, img2_masked, return_cross_power=True)
-        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm, cross_power_spectrum=cross_power)
+        row_offset, col_offset, peak_value = self.detect_peak(pcm, cross_power_spectrum=cross_power)
 
         # Convert column offset to rotation angle
         # Phase correlation: col_offset > 0 means CW rotation (positive angle)
@@ -744,13 +731,11 @@ class FFTLocalizer:
             print(f"  Peak value: {peak_value:.4f}")
             print(f"  col_offset: {col_offset:.2f} pixels")
             print(f"  angular_resolution: {np.rad2deg(self.oculus.angular_resolution):.4f}°/pixel")
-            print(f"  PPR: {ppr:.2f}")
             print(f"  rotation_deg: {rotation_deg:.2f}°")
 
         return {
             'rotation': rotation_deg,
             'peak_value': peak_value,
-            'ppr': ppr,
             'variance_theta': var_theta,
             'success': True
         }
@@ -773,7 +758,6 @@ class FFTLocalizer:
             dict with keys:
                 'translation': [tx, ty] (meters, NED frame)
                 'peak_value': float (correlation peak)
-                'ppr': float (peak-to-peak ratio)
                 'variance_x': float (meters^2)
                 'variance_y': float (meters^2)
                 'success': bool
@@ -825,7 +809,7 @@ class FFTLocalizer:
             return_cross_power=True,
             apply_periodic_decomp=False
         )
-        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm, cross_power_spectrum=cross_power)
+        row_offset, col_offset, peak_value = self.detect_peak(pcm, cross_power_spectrum=cross_power)
 
         # Compute translation variance
         peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
@@ -846,12 +830,11 @@ class FFTLocalizer:
         ty = col_offset * self.cart_range_resolution   # Left (meters)
 
         if self.verbose:
-            print(f"Translation: ({tx:.2f}, {ty:.2f}) m (peak={peak_value:.4f}, ppr={ppr:.2f})")
+            print(f"Translation: ({tx:.2f}, {ty:.2f}) m (peak={peak_value:.4f})")
 
         return {
             'translation': [tx, ty],
             'peak_value': peak_value,
-            'ppr': ppr,
             'variance_x': var_row,
             'variance_y': var_col,
             'success': True
@@ -874,8 +857,6 @@ class FFTLocalizer:
                 'rotation': float (degrees)
                 'translation': [tx, ty] (meters, NED frame)
                 'covariance': np.ndarray (3×3, diagonal: [var_x, var_y, var_theta])
-                'ppr_rot': float (rotation peak-to-peak ratio)
-                'ppr_trans': float (translation peak-to-peak ratio)
                 'success': bool
                 'rot_peak': float (rotation correlation peak)
                 'trans_peak': float (translation correlation peak)
@@ -917,16 +898,14 @@ class FFTLocalizer:
 
         if self.verbose:
             print(f"\nFFT Registration complete:")
-            print(f"  Rotation: {rotation:.2f}° (PPR: {rot_result['ppr']:.2f})")
-            print(f"  Translation: ({translation[0]:.2f}, {translation[1]:.2f}) m (PPR: {trans_result['ppr']:.2f})")
+            print(f"  Rotation: {rotation:.2f}° (peak: {rot_peak:.4f})")
+            print(f"  Translation: ({translation[0]:.2f}, {translation[1]:.2f}) m (peak: {trans_peak:.4f})")
             print(f"  Covariance diag: [{trans_result['variance_x']:.4f}, {trans_result['variance_y']:.4f}, {rot_result['variance_theta']:.6f}]")
 
         return {
             'rotation': rotation,
             'translation': translation,
             'covariance': covariance,
-            'ppr_rot': rot_result['ppr'],
-            'ppr_trans': trans_result['ppr'],
             'success': True,
             'rot_peak': rot_peak,
             'trans_peak': trans_peak
