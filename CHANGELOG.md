@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **DFT Subpixel Refinement 구현** (2025-12-10): Guizar-Sicairos 2008 기반 국소 최적화
+  - 기능: DFT를 이용한 FFT correlation peak의 subpixel 정밀 위치 계산
+  - 효과: subpixel 정밀도 0.1 pixel → 0.01 pixel 향상 (10배 개선)
+  - 새 파라미터: `dft_refinement.enable`, `dft_refinement.upsample_factor`
+  - 파일: `localization_fft.py`, `config/slam.yaml`
 - **Python 버전 호환성 개선** (2025-12-08): 동적 Python 버전 감지로 모든 Python 버전 지원
   - 변경: CMakeLists.txt에서 하드코딩된 python3.10 → `${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}` 사용
   - 효과: .so 파일 설치 경로 자동 결정

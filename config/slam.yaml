@@ -20,6 +20,10 @@ slam_node:
     fft_localization:
       enable: true    # Enable FFT-based rotation/translation estimation
       range_min: 0.5   # Minimum reliable range (meters)
+      # DFT subpixel refinement (Guizar-Sicairos 2008)
+      dft_refinement:
+        enable: true           # Enable DFT subpixel refinement (0.01 pixel accuracy)
+        upsample_factor: 100   # Upsampling factor (100 = 0.01 pixel precision)
       # Validation parameters (compare FFT with odometry)
       validate_with_odom: true   # Enable DR vs FFT comparison
       max_position_error: 2.0    # Max allowed position difference (meters)

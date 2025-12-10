@@ -35,6 +35,8 @@ class FFTLocalizer:
                  trans_gaussian_sigma: float = 4.0,
                  trans_gaussian_truncate: float = 4.0,
                  max_expected_rotation: float = 30.0,
+                 dft_upsample_factor: int = 100,
+                 dft_refinement_enable: bool = True,
                  verbose: bool = False):
         """
         Initialize FFT Localizer.
@@ -49,6 +51,8 @@ class FFTLocalizer:
             trans_gaussian_sigma: Gaussian sigma for translation mask smoothing
             trans_gaussian_truncate: Gaussian truncate factor for translation mask
             max_expected_rotation: Maximum expected rotation in degrees (for padding)
+            dft_upsample_factor: Upsampling factor for DFT subpixel refinement (default: 100)
+            dft_refinement_enable: Enable DFT subpixel refinement (default: True)
             verbose: Enable debug output
         """
         self.oculus = oculus
@@ -67,6 +71,10 @@ class FFTLocalizer:
 
         # Maximum expected rotation for padding calculation
         self.max_expected_rotation = max_expected_rotation
+
+        # DFT subpixel refinement parameters
+        self.dft_upsample_factor = dft_upsample_factor
+        self.dft_refinement_enable = dft_refinement_enable
 
         # Cache for polar_to_cartesian conversion (performance optimization)
         self.p2c_cache = None
@@ -272,16 +280,18 @@ class FFTLocalizer:
 
     def compute_phase_correlation(self,
                                   img1: np.ndarray,
-                                  img2: np.ndarray) -> np.ndarray:
+                                  img2: np.ndarray,
+                                  return_cross_power: bool = False):
         """
         Compute phase correlation between two images.
 
         Args:
             img1: First image
             img2: Second image
+            return_cross_power: If True, return (pcm, cross_power_spectrum) tuple
 
         Returns:
-            Phase Correlation Matrix (PCM)
+            Phase Correlation Matrix (PCM), or (PCM, cross_power_spectrum) if return_cross_power=True
         """
         # Compute 2D FFT
         F1 = np.fft.fft2(img1)
@@ -303,17 +313,24 @@ class FFTLocalizer:
         pcm = np.fft.ifftshift(pcm)
         pcm = np.abs(pcm)
 
+        if return_cross_power:
+            # Return cross_power_spectrum BEFORE ifftshift (needed for DFT refinement)
+            return pcm, cross_power_spectrum
         return pcm
 
     def detect_peak(self,
                     pcm: np.ndarray,
-                    subpixel: bool = True) -> Tuple[float, float, float, float]:
+                    subpixel: bool = True,
+                    cross_power_spectrum: Optional[np.ndarray] = None,
+                    use_dft_refinement: Optional[bool] = None) -> Tuple[float, float, float, float]:
         """
         Detect peak in Phase Correlation Matrix.
 
         Args:
             pcm: Phase Correlation Matrix
             subpixel: Enable subpixel accuracy using parabolic fitting
+            cross_power_spectrum: Normalized cross-power spectrum for DFT refinement (optional)
+            use_dft_refinement: Enable DFT subpixel refinement (default: self.dft_refinement_enable)
 
         Returns:
             (row_offset, col_offset, peak_value, ppr)
@@ -364,9 +381,114 @@ class FFTLocalizer:
 
             except Exception as e:
                 if self.verbose:
-                    print(f"Subpixel refinement failed: {e}")
+                    print(f"Parabolic refinement failed: {e}")
+
+        # DFT subpixel refinement (after parabolic fitting)
+        if use_dft_refinement is None:
+            use_dft_refinement = self.dft_refinement_enable
+
+        if use_dft_refinement and cross_power_spectrum is not None and peak_value > 0:
+            try:
+                row_offset, col_offset = self._dft_subpixel_refinement(
+                    cross_power_spectrum,
+                    row_offset,
+                    col_offset
+                )
+            except Exception as e:
+                if self.verbose:
+                    print(f"DFT refinement failed, using parabolic result: {e}")
 
         return row_offset, col_offset, peak_value, ppr
+
+    def _upsampled_dft(self,
+                       cross_power_spectrum: np.ndarray,
+                       upsample_factor: int,
+                       row_offset: float,
+                       col_offset: float) -> np.ndarray:
+        """
+        Upsampled DFT by matrix multiplication (Guizar-Sicaros et al. 2008).
+
+        Computes upsampled DFT in a small region around the specified offset.
+        This is much faster than upsampling the entire cross-power spectrum.
+
+        Args:
+            cross_power_spectrum: Normalized cross-power spectrum (fftshifted)
+            upsample_factor: Upsampling factor (e.g., 100)
+            row_offset: Row offset from center (pixels)
+            col_offset: Column offset from center (pixels)
+
+        Returns:
+            Upsampled region (1.5 × 1.5 pixels at upsampled resolution)
+        """
+        h, w = cross_power_spectrum.shape
+
+        # Define upsampled region size (1.5 pixels at original resolution)
+        region_size = int(np.ceil(1.5 * upsample_factor))
+
+        # Calculate DFT sample positions
+        # Center the upsampled region around the specified offset
+        row_center = h // 2 + row_offset
+        col_center = w // 2 + col_offset
+
+        # Generate sample coordinates
+        row_samples = np.arange(region_size) - region_size // 2
+        col_samples = np.arange(region_size) - region_size // 2
+
+        row_freq = row_samples / (upsample_factor * h)
+        col_freq = col_samples / (upsample_factor * w)
+
+        # Create frequency grids centered at the offset
+        row_kernel = np.exp(-1j * 2 * np.pi * np.outer(row_freq, np.arange(h) - h // 2))
+        col_kernel = np.exp(-1j * 2 * np.pi * np.outer(col_freq, np.arange(w) - w // 2))
+
+        # Matrix multiply DFT
+        upsampled_region = row_kernel @ cross_power_spectrum @ col_kernel.T
+
+        return upsampled_region
+
+    def _dft_subpixel_refinement(self,
+                                 cross_power_spectrum: np.ndarray,
+                                 row_offset_init: float,
+                                 col_offset_init: float) -> Tuple[float, float]:
+        """
+        Refine subpixel offset using upsampled DFT (Guizar-Sicaros et al. 2008).
+
+        Args:
+            cross_power_spectrum: Normalized cross-power spectrum (fftshifted)
+            row_offset_init: Initial row offset from parabolic fitting (pixels)
+            col_offset_init: Initial column offset from parabolic fitting (pixels)
+
+        Returns:
+            (refined_row_offset, refined_col_offset) in pixels
+        """
+        # Compute upsampled DFT around initial offset
+        upsampled_region = self._upsampled_dft(
+            cross_power_spectrum,
+            self.dft_upsample_factor,
+            row_offset_init,
+            col_offset_init
+        )
+
+        # Find peak in upsampled region
+        upsampled_abs = np.abs(upsampled_region)
+        peak_idx = np.unravel_index(np.argmax(upsampled_abs), upsampled_abs.shape)
+
+        region_size = upsampled_region.shape[0]
+        region_center = region_size // 2
+
+        # Compute offset from region center (in upsampled pixels)
+        row_shift_upsampled = peak_idx[0] - region_center
+        col_shift_upsampled = peak_idx[1] - region_center
+
+        # Convert to original pixel units
+        row_offset_refined = row_offset_init + row_shift_upsampled / self.dft_upsample_factor
+        col_offset_refined = col_offset_init + col_shift_upsampled / self.dft_upsample_factor
+
+        if self.verbose:
+            print(f"  DFT refinement: ({row_offset_init:.2f}, {col_offset_init:.2f}) "
+                  f"→ ({row_offset_refined:.4f}, {col_offset_refined:.4f})")
+
+        return row_offset_refined, col_offset_refined
 
     def compute_peak_variance(self,
                               pcm: np.ndarray,
@@ -545,10 +667,10 @@ class FFTLocalizer:
         )
 
         # Compute phase correlation
-        pcm = self.compute_phase_correlation(img1_masked, img2_masked)
+        pcm, cross_power = self.compute_phase_correlation(img1_masked, img2_masked, return_cross_power=True)
 
-        # Detect peak (with PPR)
-        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm)
+        # Detect peak (with PPR and DFT refinement)
+        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm, cross_power_spectrum=cross_power)
 
         # Convert column offset to rotation angle
         # Phase correlation: col_offset > 0 means CW rotation (positive angle)
@@ -647,10 +769,10 @@ class FFTLocalizer:
                 print(f"Applied rotation compensation: {-rotation:.2f}°")
 
         # Compute phase correlation
-        pcm = self.compute_phase_correlation(img1_padded, img2_rotated)
+        pcm, cross_power = self.compute_phase_correlation(img1_padded, img2_rotated, return_cross_power=True)
 
-        # Detect peak (with PPR)
-        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm)
+        # Detect peak (with PPR and DFT refinement)
+        row_offset, col_offset, peak_value, ppr = self.detect_peak(pcm, cross_power_spectrum=cross_power)
 
         # Compute translation variance
         peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
