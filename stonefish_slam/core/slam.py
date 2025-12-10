@@ -743,31 +743,28 @@ class SLAMNode(Node):
                             frame.fft_success = True
                             frame.fft_is_dr_fallback = False
 
-                            # Log FFT with DR comparison
+                            # Log: USE FFT | FFT(...) DR(...) | Δ(...)
                             if val_info:
                                 fft = val_info['fft']
                                 dr = val_info['dr']
                                 self.get_logger().info(
-                                    f"FFT ({fft[0]:.2f},{fft[1]:.2f},{fft[2]:.1f}°) "
-                                    f"DR({dr[0]:.2f},{dr[1]:.2f},{dr[2]:.1f}°) "
+                                    f"USE FFT | FFT({fft[0]:.2f},{fft[1]:.2f},{fft[2]:.1f}°) "
+                                    f"DR({dr[0]:.2f},{dr[1]:.2f},{dr[2]:.1f}°) | "
                                     f"Δ({val_info['pos_err']:.2f}m,{val_info['rot_err_deg']:.1f}°)"
                                 )
                         else:
-                            # FFT invalid - fallback to DR (odometry)
-                            # Build rejection reason string
+                            # Log: USE DR | FFT(...) DR(...) | reason
+                            fft = val_info['fft']
+                            dr = val_info['dr']
                             reasons = []
                             if 'pos' in val_info['reasons']:
                                 reasons.append(f"pos {val_info['pos_err']:.2f}>{val_info['pos_threshold']:.2f}m")
                             if 'rot' in val_info['reasons']:
                                 reasons.append(f"rot {val_info['rot_err_deg']:.1f}>{val_info['rot_threshold_deg']:.1f}°")
-                            reason_str = ', '.join(reasons)
-
-                            fft = val_info['fft']
-                            dr = val_info['dr']
                             self.get_logger().warn(
-                                f"FFT→DR [{reason_str}] "
-                                f"FFT({fft[0]:.2f},{fft[1]:.2f},{fft[2]:.1f}°) "
-                                f"DR({dr[0]:.2f},{dr[1]:.2f},{dr[2]:.1f}°)",
+                                f"USE DR  | FFT({fft[0]:.2f},{fft[1]:.2f},{fft[2]:.1f}°) "
+                                f"DR({dr[0]:.2f},{dr[1]:.2f},{dr[2]:.1f}°) | "
+                                f"{', '.join(reasons)}",
                                 throttle_duration_sec=1.0
                             )
                             frame.fft_transform = dr_transform
