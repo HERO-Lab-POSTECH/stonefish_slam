@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Combined Mapping Standalone Launch** (2025-12-11): 3D/2D 매핑 동시 실행 지원
+  - 파일: `launch/mapping_combined_standalone.launch.py`
+  - 기능: GroupAction + PushRosNamespace로 3D 매핑과 2D 매핑을 독립적 네임스페이스에서 동시 실행
+  - 효과: 단일 실행으로 3D/2D 통합 매핑 가능
 - **FFT Localization - Periodic Decomposition** (2025-12-10): Moisan 2011 기반 spectral leakage 제거
   - 기능: `_periodic_decomposition()` 메서드로 Moisan periodic-plus-smooth decomposition 구현
   - 효과: Border effect 제거로 FFT 수행 전 spectral leakage 감소

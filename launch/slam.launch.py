@@ -128,7 +128,7 @@ def generate_launch_description():
 
     enable_3d_mapping_arg = DeclareLaunchArgument(
         'enable_3d_mapping',
-        default_value='false',
+        default_value='true',
         description='Enable 3D mapping'
     )
 

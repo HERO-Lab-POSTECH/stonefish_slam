@@ -263,9 +263,8 @@ class FFTLocalizer:
             horizontal_range_resolution = range_resolution * np.cos(self.oculus.tilt_angle_rad)
 
             # Cache for translation estimation (horizontal plane)
-            # NOTE: Use slant range_resolution for translation calculation
-            # The Cartesian remap preserves polar row indexing, so pixel movement
-            # corresponds to slant range, not horizontal range
+            # NOTE: Use slant range_resolution for true XY projection
+            # Cartesian image represents horizontal plane coordinates
             self.cart_range_resolution = range_resolution
 
             # Apply tilt correction: project slant range to horizontal range
@@ -277,9 +276,9 @@ class FFTLocalizer:
             horizontal_fov_deg = np.rad2deg(self.oculus.horizontal_fov)
             max_lateral = horizontal_range_max * np.sin(np.radians(horizontal_fov_deg / 2.0))
 
-            # Cartesian image dimensions (same resolution as horizontal range)
-            cart_width = int(np.ceil(2 * max_lateral / horizontal_range_resolution))
-            cart_height = rows
+            # Cartesian image dimensions (use slant range resolution for true projection)
+            cart_width = int(np.ceil(2 * max_lateral / range_resolution))
+            cart_height = int(np.ceil(horizontal_range_max / range_resolution))
 
             # Create bearing angle array for each column
             # col=0 → -FOV/2 (left), col=num_beams-1 → +FOV/2 (right)
@@ -306,9 +305,9 @@ class FFTLocalizer:
             # IMPORTANT: Stonefish FLS row convention is OPPOSITE of Oculus
             # Stonefish: row=0 (top) is FAR range, row=max (bottom) is NEAR range
             # Cartesian: YY=0 (top) should be FAR, YY=max (bottom) should be NEAR
-            # These are PROJECTED coordinates on horizontal plane
-            x_proj = horizontal_range_max - horizontal_range_resolution * YY
-            y_proj = horizontal_range_resolution * (-cart_width / 2.0 + XX + 0.5)
+            # These are PROJECTED coordinates on horizontal plane (use slant range resolution)
+            x_proj = horizontal_range_max - range_resolution * YY
+            y_proj = range_resolution * (-cart_width / 2.0 + XX + 0.5)
 
             # Compute horizontal range and bearing from projected coordinates
             horizontal_range = np.sqrt(np.square(x_proj) + np.square(y_proj))
@@ -341,6 +340,10 @@ class FFTLocalizer:
 
             if self.verbose:
                 print(f"Transformation maps built: {cart_height}x{cart_width} cartesian image")
+                print(f"  range_max: {self.oculus.range_max}m, horizontal_range_max: {horizontal_range_max:.2f}m")
+                print(f"  range_resolution: {range_resolution:.6f} m/pixel")
+                print(f"  cart_range_resolution: {self.cart_range_resolution:.6f} m/pixel")
+                print(f"  cart_height: {cart_height} (was {rows}), cart_width: {cart_width}")
 
         # Use cached maps for fast remapping
         cartesian_image = cv2.remap(
@@ -957,6 +960,13 @@ class FFTLocalizer:
         tx = -row_offset * self.cart_range_resolution  # Forward (meters)
         ty = col_offset * self.cart_range_resolution   # Left (meters)
 
+        if self.verbose:
+            print(f"[Translation Debug]")
+            print(f"  row_offset: {row_offset:.4f}, col_offset: {col_offset:.4f}")
+            print(f"  cart_range_resolution: {self.cart_range_resolution:.6f} m/pixel")
+            print(f"  tx = -{row_offset:.4f} * {self.cart_range_resolution:.6f} = {tx:.4f} m")
+            print(f"  ty = {col_offset:.4f} * {self.cart_range_resolution:.6f} = {ty:.4f} m")
+
         return {
             'translation': [tx, ty],
             'peak_value': peak_value,
@@ -967,7 +977,8 @@ class FFTLocalizer:
 
     def estimate_transform(self,
                            polar_img1: np.ndarray,
-                           polar_img2: np.ndarray) -> Dict[str, Any]:
+                           polar_img2: np.ndarray,
+                           rotation_override: Optional[float] = None) -> Dict[str, Any]:
         """
         Estimate full transformation (rotation + translation) between two polar sonar images.
 
@@ -976,6 +987,7 @@ class FFTLocalizer:
         Args:
             polar_img1: First polar image (range × angle)
             polar_img2: Second polar image (range × angle)
+            rotation_override: Optional rotation to use instead of FFT estimation (degrees)
 
         Returns:
             dict with keys:
@@ -1000,9 +1012,14 @@ class FFTLocalizer:
         img1_masked = self.apply_range_min_mask(polar_img1)
         img2_masked = self.apply_range_min_mask(polar_img2)
 
-        # Step 1: Estimate rotation in polar domain
+        # Step 1: Estimate rotation in polar domain (or use override)
         rot_result = self.estimate_rotation(img1_masked, img2_masked)
-        rotation = rot_result['rotation']
+        if rotation_override is not None:
+            rotation = rotation_override
+            if self.verbose:
+                print(f"[FFT] Using rotation override: {rotation:.2f}° (FFT estimate: {rot_result['rotation']:.2f}°)")
+        else:
+            rotation = rot_result['rotation']
         rot_peak = rot_result['peak_value']
 
         # Step 2: Convert to Cartesian
@@ -1029,6 +1046,8 @@ class FFTLocalizer:
 
         return {
             'rotation': rotation,
+            'rotation_fft': rot_result['rotation'],
+            'rotation_override_used': rotation_override is not None,
             'translation': translation,
             'covariance': covariance,
             'success': True,
