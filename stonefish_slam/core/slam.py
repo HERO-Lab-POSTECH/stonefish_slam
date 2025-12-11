@@ -12,6 +12,7 @@ from message_filters import Subscriber, ApproximateTimeSynchronizer
 from sensor_msgs.msg import PointCloud2, Image
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from octomap_msgs.msg import Octomap
 from typing import Tuple
 
 # stonefish_slam imports
@@ -198,6 +199,7 @@ class SLAMNode(Node):
         self.declare_parameter('fft_localization.max_rotation_error', 0.35)  # radians (~20 deg)
         self.declare_parameter('fft_localization.min_ppr', 1.5)  # minimum PPR threshold
         self.declare_parameter('fft_localization.reject_on_failure', False)
+        self.declare_parameter('fft_localization.use_dr_rotation', False)
 
         # Initialize SLAM modules (composition instead of inheritance)
         self.fg = FactorGraph()
@@ -462,6 +464,7 @@ class SLAMNode(Node):
                 self.fft_max_rot_error = self.get_parameter('fft_localization.max_rotation_error').value
                 self.fft_min_ppr = self.get_parameter('fft_localization.min_ppr').value
                 self.fft_reject_on_failure = self.get_parameter('fft_localization.reject_on_failure').value
+                self.fft_use_dr_rotation = self.get_parameter('fft_localization.use_dr_rotation').value
 
                 # Previous polar sonar image storage
                 self.prev_polar_sonar = None
@@ -558,11 +561,11 @@ class SLAMNode(Node):
         # 3D map publisher
         if self.enable_3d_mapping:
             self.map_3d_pub = self.create_publisher(
-                PointCloud2,
-                SLAM_NS + 'mapping/map_3d_pointcloud',
+                Octomap,
+                SLAM_NS + 'mapping/map_3d_octomap',
                 qos_profile=qos_pointcloud_pub_profile
             )
-            self.get_logger().info(f"Publishing 3D map to: {SLAM_NS}mapping/map_3d_pointcloud (QoS: RELIABLE)")
+            self.get_logger().info(f"Publishing 3D map to: {SLAM_NS}mapping/map_3d_octomap (QoS: RELIABLE)")
 
         # tf broadcaster to show pose
         self.tf = TransformBroadcaster(self)
@@ -731,9 +734,15 @@ class SLAMNode(Node):
                     polar_prev = self.prev_polar_sonar.copy()
                     polar_curr = polar_sonar.copy()
 
-                    # Use FFT rotation estimation (not DR)
+                    # DR 회전 추출 (use_dr_rotation 설정 시)
+                    rotation_override = None
+                    if self.fft_use_dr_rotation and self.fg.keyframes:
+                        dr_transform = self.fg.current_keyframe.dr_pose.between(frame.dr_pose)
+                        rotation_override = np.degrees(dr_transform.theta())
+
                     fft_result = self.fft_localizer.estimate_transform(
-                        polar_prev, polar_curr
+                        polar_prev, polar_curr,
+                        rotation_override=rotation_override
                     )
 
                     if fft_result['success']:
@@ -758,12 +767,13 @@ class SLAMNode(Node):
                             frame.fft_success = True
                             frame.fft_is_dr_fallback = False
 
-                            # Log: USE FFT | FFT(...) DR(...) | Δ(...)
+                            # Log: USE FFT [DR_ROT] | FFT(...) DR(...) | Δ(...)
                             if val_info:
+                                mode_str = "[DR_ROT]" if fft_result.get('rotation_override_used', False) else "[FFT_ROT]"
                                 fft = val_info['fft']
                                 dr = val_info['dr']
                                 self.get_logger().info(
-                                    f"USE FFT | FFT({fft[0]:.2f},{fft[1]:.2f},{fft[2]:.1f}°) "
+                                    f"USE FFT {mode_str} | FFT({fft[0]:.2f},{fft[1]:.2f},{fft[2]:.1f}°) "
                                     f"DR({dr[0]:.2f},{dr[1]:.2f},{dr[2]:.1f}°) | "
                                     f"Δ({val_info['pos_err']:.2f}m,{val_info['rot_err_deg']:.1f}°)"
                                 )
@@ -859,15 +869,15 @@ class SLAMNode(Node):
                                     all_slam_keyframes=self.fg.keyframes
                                 )
 
-                                pc_msg = self.mapper_3d.get_pointcloud2_msg(
+                                octomap_msg = self.mapper_3d.get_octomap_msg(
                                     frame_id='world_ned',
                                     stamp=self.get_clock().now().to_msg()
                                 )
 
-                                if pc_msg.width > 0:
-                                    self.map_3d_pub.publish(pc_msg)
+                                if len(octomap_msg.data) > 0:
+                                    self.map_3d_pub.publish(octomap_msg)
                                     self.get_logger().info(
-                                        f"Published 3D point cloud: {pc_msg.width} points"
+                                        f"Published 3D octomap: {len(octomap_msg.data)} bytes"
                                     )
                             except Exception as e:
                                 import traceback
@@ -1108,22 +1118,22 @@ class SLAMNode(Node):
                                     all_slam_keyframes=self.fg.keyframes
                                 )
 
-                                # Get and publish PointCloud2
-                                pc_msg = self.mapper_3d.get_pointcloud2_msg(
+                                # Get and publish Octomap
+                                octomap_msg = self.mapper_3d.get_octomap_msg(
                                     frame_id='world_ned',
                                     stamp=self.get_clock().now().to_msg()
                                 )
 
-                                if pc_msg.width > 0:  # Only publish if not empty
-                                    self.map_3d_pub.publish(pc_msg)
+                                if len(octomap_msg.data) > 0:  # Only publish if not empty
+                                    self.map_3d_pub.publish(octomap_msg)
                                     self.get_logger().info(
-                                        f"Published 3D point cloud: {pc_msg.width} points, "
+                                        f"Published 3D octomap: {len(octomap_msg.data)} bytes, "
                                         f"frame {self.mapper_3d.frame_count}"
                                     )
                                 else:
-                                    # Debug: Why is point cloud empty?
+                                    # Debug: Why is octomap empty?
                                     self.get_logger().warn(
-                                        f"3D point cloud is empty after {self.mapper_3d.frame_count} frames, "
+                                        f"3D octomap is empty after {self.mapper_3d.frame_count} frames, "
                                         f"{self.mapper_3d.get_voxel_count()} total voxels"
                                     )
                             except Exception as e:
