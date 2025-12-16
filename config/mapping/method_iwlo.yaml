@@ -6,9 +6,9 @@ slam_node:
     mapping_3d:
       # Base log-odds parameters (overrides mapping.yaml)
       log_odds_occupied: 2.0      # Base occupied increment
-      log_odds_free: -3.0         # Base free decrement
-      log_odds_max: 15.0          # Log-odds saturation upper bound
-      log_odds_min: -10.0         # Log-odds saturation lower bound
+      log_odds_free: -6.0         # Base free decrement
+      log_odds_max: 10.0          # Log-odds saturation upper bound
+      log_odds_min: -20.0         # Log-odds saturation lower bound
 
       # Intensity weighting parameters
       intensity_threshold: 35     # Minimum intensity for observation
