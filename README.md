@@ -34,13 +34,10 @@ source install/setup.bash
 # Terminal 1: Run simulator
 ros2 launch stonefish_ros2 bluerov2.launch.py
 
-# Terminal 2: Run controller
-ros2 launch stonefish_control controller.launch.py controller_type:=position
-
-# Terminal 3: Run path following (robot needs to move for SLAM)
+# Terminal 2: Run path following (includes hybrid controller)
 ros2 launch stonefish_trajectory_manager path_following.launch.py
 
-# Terminal 4: Run SLAM
+# Terminal 3: Run SLAM
 ros2 launch stonefish_slam slam.launch.py vehicle_name:=bluerov2
 ```
 
