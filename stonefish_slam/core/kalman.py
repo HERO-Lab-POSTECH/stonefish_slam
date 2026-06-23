@@ -13,7 +13,12 @@ from tf_transformations import euler_from_quaternion
 
 # import stonefish_slam
 from stonefish_slam.utils.conversions import *
-from stonefish_slam.core.kalman_filter import kalman_predict, kalman_correct
+from stonefish_slam.core.kalman_filter import (
+    kalman_predict,
+    kalman_correct,
+    pressure_to_depth,
+    dvl_velocity_rejected,
+)
 
 
 class KalmanNode(Node):
@@ -142,7 +147,7 @@ class KalmanNode(Node):
         dvl_measurement = np.array([[dvl_msg.velocity.x], [dvl_msg.velocity.y], [dvl_msg.velocity.z]])
 
         # We do not do a kalman correction if the speed is high.
-        if np.any(np.abs(dvl_measurement) > self.dvl_max_velocity):
+        if dvl_velocity_rejected(dvl_msg.velocity.x, dvl_msg.velocity.y, dvl_msg.velocity.z, self.dvl_max_velocity):
             return
         else:
             self.state_vector, self.cov_matrix = kalman_correct(self.state_vector, self.cov_matrix, dvl_measurement, self.H_dvl, self.R_dvl)
@@ -194,8 +199,7 @@ class KalmanNode(Node):
         Args:
             pressure_msg (FluidPressure): pressure
         """
-        curr_depth = -((pressure_msg.fluid_pressure / 101.325) - 1) * 10
-        curr_depth -= self.offset_z
+        curr_depth = pressure_to_depth(pressure_msg.fluid_pressure, self.offset_z)
 
         depth = np.array([[curr_depth], [0], [0]])  # We need the shape(3,1) for the correction
         self.state_vector, self.cov_matrix = kalman_correct(self.state_vector, self.cov_matrix, depth, self.H_depth, self.R_depth)

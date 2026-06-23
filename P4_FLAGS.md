@@ -1,5 +1,19 @@
 # P4 Investigation Flags
 
+## 압력→깊이 변환 Pa/kPa 1000배 단위 버그 (P3.2에서 확정) ★HIGH
+
+- **파일**: `stonefish_slam/core/kalman_filter.py::pressure_to_depth` (원래 `core/kalman.py` pressure_callback). `core/dead_reckoning.py:173-174`에도 동일 식 주석 존재.
+- **발견일**: 2026-06-23 (P3.2 콜백 추출의 자료조사+의존성추적에서 확정)
+- **증상**: `curr_depth = -((fluid_pressure / 101.325) - 1) * 10`. ROS `sensor_msgs/FluidPressure.fluid_pressure`는 **Pa** 단위인데, `101.325`는 1 atm을 **kPa**로 표현한 값 → **1000배 단위 불일치**.
+- **증거체인(추측 아님, 실측)**:
+  1. ROS 스펙: FluidPressure.fluid_pressure = "Absolute pressure reading in Pascals". 출처: [docs.ros2.org FluidPressure](https://docs.ros2.org/latest/api/sensor_msgs/msg/FluidPressure.html).
+  2. sim publisher가 변환 없이 raw Pa publish: `stonefish_ros2/src/stonefish_ros2/ROS2Interface.cpp:185` `msg.fluid_pressure = s.getValue(0)`.
+  3. 환경 압력이 Pa: `stonefish_description/data/worlds/common/environment.scn:15` `pressure="101300.0"`.
+  4. **검산**: 표면(101300 Pa) → 코드 depth `-9990 m`. 해수 10m(≈201818 Pa) → `-19910 m`. 물리적 불가능.
+- **부차 이슈**: `* 10`(m/atm)도 해수 정확값 10.08(rho=1025) 대신 10 → ~0.8% 스케일 오차. `offset_z=2.5`(kalman.py TODO)가 이 오류를 부분 은폐한 것으로 보임.
+- **정답식(P4 수정용)**: `depth = (P_abs − 101325) / (rho·g)`, 해수 rho=1025·g=9.80665 → `depth = -(fluid_pressure − 101325.0)/(1025·9.80665) − offset_z`(Z-up 부호). 출처: 해양물리(talleylab.ucsd.edu, WHOI), [표준중력 wiki].
+- **현재 처리**: P3.2는 동작 보존 추출이라 **식 무변경**(`pressure_to_depth`가 버그를 그대로 보존, docstring에 경고). `test_kalman.py`가 현재 동작을 특성화 → **P4 수정 시 회귀 안전망**. 수정하면 특성화 테스트 기대값을 정답으로 교체.
+
 ## ICP 수렴 실패 — test_icp_recovers_known_translation
 
 - **파일**: `stonefish_slam/test/test_pcl.py::test_icp_recovers_known_translation`

@@ -59,3 +59,54 @@ def kalman_correct(
     corrected_x = predicted_x + K @ (z - H @ predicted_x)
     corrected_P = predicted_P - K @ H @ predicted_P
     return corrected_x, corrected_P
+
+
+def pressure_to_depth(fluid_pressure: float, offset_z: float) -> float:
+    """Convert an absolute fluid pressure reading to a Z-up depth coordinate.
+
+    .. warning::
+        This reproduces the EXISTING formula verbatim and is **physically
+        incorrect**: ROS ``sensor_msgs/FluidPressure.fluid_pressure`` is in
+        Pascals, but the divisor ``101.325`` is 1 atm expressed in *kilo*pascals
+        — a 1000x unit mismatch. The Stonefish publisher emits raw Pascals
+        (``ROS2Interface.cpp``; ``environment.scn`` sets 101300 Pa), so at the
+        surface this returns ~-9990 m rather than ~0. The ``* 10`` factor also
+        approximates seawater's 10.08 m/atm as 10. Kept as-is to preserve
+        behavior during extraction; the fix is tracked in P4_FLAGS.md.
+
+    Args:
+        fluid_pressure (float): pressure reading from the FluidPressure message.
+        offset_z (float): additive datum offset subtracted after conversion.
+
+    Returns:
+        float: the (Z-up, negative-down) depth value the node feeds into the
+        Kalman correction.
+    """
+    curr_depth = -((fluid_pressure / 101.325) - 1) * 10
+    curr_depth -= offset_z
+    return curr_depth
+
+
+def dvl_velocity_rejected(
+    velocity_x: float,
+    velocity_y: float,
+    velocity_z: float,
+    max_velocity: float,
+) -> bool:
+    """Decide whether a DVL velocity measurement should be rejected.
+
+    Mirrors the early-return gate in the original ``dvl_callback``: a
+    measurement is rejected when any component's magnitude exceeds
+    ``max_velocity`` (strict ``>``), so a value equal to the limit is accepted.
+
+    Args:
+        velocity_x (float): DVL velocity x component.
+        velocity_y (float): DVL velocity y component.
+        velocity_z (float): DVL velocity z component.
+        max_velocity (float): rejection threshold.
+
+    Returns:
+        bool: ``True`` if the measurement should be discarded, else ``False``.
+    """
+    measurement = np.array([[velocity_x], [velocity_y], [velocity_z]])
+    return bool(np.any(np.abs(measurement) > max_velocity))
