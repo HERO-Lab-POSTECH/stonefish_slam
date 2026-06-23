@@ -36,6 +36,15 @@
 - **근거 표준**: 노드명 고유성은 RMW 강제 사항. [rmw validate_node_name.c](https://github.com/ros2/rmw/blob/master/rmw/src/validate_node_name.c).
 - **수정안**: standalone 노드를 각자 고유 이름(`mapping_2d_node`·`mapping_3d_node`)으로 초기화. 동작 변경(노드명 토픽 네임스페이스에 영향 가능)이라 P4에서 처리.
 
+## kalman 공분산 업데이트 — Joseph form 수치 안정성 (P3.1 자료조사에서 식별)
+
+- **파일**: `stonefish_slam/core/kalman_filter.py::kalman_correct`
+- **발견일**: 2026-06-23 (P3.1 kalman 추출의 자료조사 단계)
+- **증상**: 공분산 보정에 단순형 `P = (I − KH)P⁻`(코드: `P − K@H@P`)를 쓴다. 이는 **최적 칼만 게인에서만** 정확하며, 부동소수점 누적으로 P의 대칭성·양정치성이 시간에 따라 깨질 수 있다(특히 장시간 필터링).
+- **표준 근거**: 수치 안정형은 Joseph form `P = (I−KH)P⁻(I−KH)ᵀ + KRKᵀ` — 두 항이 각각 양반정치라 반올림으로도 indefinite가 되지 않는다. 출처: [kalman-filter.com/joseph-form](https://kalman-filter.com/joseph-form/), Welch & Bishop TR 95-041.
+- **현재 처리**: P3.1은 **동작 보존**이 원칙이라 단순형 그대로 추출(식 무변경). 기록만.
+- **수정안**: P4 수치 고도화에서 Joseph form 전환 검토. 전환 시 기존 테스트(최적 게인 가정)는 동등하게 통과해야 하고, 장시간 시퀀스에서 P 대칭성 유지를 추가 검증.
+
 ## wildcard import — PEP 8 위반 (P3.0 컨벤션 조사에서 발견)
 
 - **파일**: 여러 모듈 — `utils/conversions.py:20`(`from .topics import *`), `utils/sonar.py:6`, `core/types.py:10-12`(conversions·visualization·io), `core/kalman.py:15`, `core/feature_extraction.py:7-9`, `core/cfar.py:5` 등.

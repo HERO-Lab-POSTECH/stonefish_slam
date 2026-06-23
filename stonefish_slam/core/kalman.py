@@ -13,6 +13,7 @@ from tf_transformations import euler_from_quaternion
 
 # import stonefish_slam
 from stonefish_slam.utils.conversions import *
+from stonefish_slam.core.kalman_filter import kalman_predict, kalman_correct
 
 
 class KalmanNode(Node):
@@ -130,47 +131,6 @@ class KalmanNode(Node):
         # log at the roslevel that we are done with init
         self.get_logger().info("Kalman Node is initialized")
 
-    def kalman_predict(self, previous_x: np.array, previous_P: np.array, A: np.array):
-        """Propagate the state and the error covariance ahead.
-
-        Args:
-            previous_x (np.array): value of the previous state vector
-            previous_P (np.array): value of the previous covariance matrix
-            A (np.array): State Transition Matrix
-
-        Returns:
-            predicted_x (np.array): predicted estimation
-            predicted_P (np.array): predicted covariance matrix
-        """
-
-        A = np.array(A)
-        predicted_x = A @ previous_x
-        predicted_P = A @ previous_P @ A.T + self.Q
-
-        return predicted_x, predicted_P
-
-    def kalman_correct(self, predicted_x: np.array, predicted_P: np.array, z: np.array, H: np.array, R: np.array):
-        """Measurement Update.
-
-        Args:
-            predicted_x (np.array): predicted state vector with kalman_predict()
-            predicted_P (np.array): predicted covariance matrix with kalman_predict()
-            z (np.array): Output Vector (measurement)
-            H (np.array): Observation Matrix (H_dvl, H_imu, H_gyro, H_depth)
-            R (np.array): Measurement Uncertainty (R_dvl, R_imu, R_gyro, R_depth)
-
-        Returns:
-            corrected_x (np.array): corrected estimation
-            corrected_P (np.array): corrected covariance matrix
-
-        """
-
-        K = predicted_P @ H.T @ np.linalg.inv(H @ predicted_P @ H.T + R)
-        corrected_x = predicted_x + K @ (z - H @ predicted_x)
-        corrected_P = predicted_P - K @ H @ predicted_P
-
-        return corrected_x, corrected_P
-
     def dvl_callback(self, dvl_msg: DVL) -> None:
         """Handle the Kalman Filter using the DVL only.
 
@@ -185,7 +145,7 @@ class KalmanNode(Node):
         if np.any(np.abs(dvl_measurement) > self.dvl_max_velocity):
             return
         else:
-            self.state_vector, self.cov_matrix = self.kalman_correct(self.state_vector, self.cov_matrix, dvl_measurement, self.H_dvl, self.R_dvl)
+            self.state_vector, self.cov_matrix = kalman_correct(self.state_vector, self.cov_matrix, dvl_measurement, self.H_dvl, self.R_dvl)
 
     def imu_callback(self, imu_msg: Imu) -> None:
         """Handle the Kalman Filter using the VN100 only. Publish the state vector.
@@ -194,7 +154,7 @@ class KalmanNode(Node):
             imu_msg (Imu): the message from VN100
         """
         # Kalman prediction
-        predicted_x, predicted_P = self.kalman_predict(self.state_vector, self.cov_matrix, self.A_imu)
+        predicted_x, predicted_P = kalman_predict(self.state_vector, self.cov_matrix, self.A_imu, self.Q)
 
         # measurement_z preparation
         # parse the IMU measurnment
@@ -209,7 +169,7 @@ class KalmanNode(Node):
         euler_angle[2] -= self.imu_yaw0
 
         # Kalman correction
-        self.state_vector, self.cov_matrix = self.kalman_correct(predicted_x, predicted_P, euler_angle, self.H_imu, self.R_imu)
+        self.state_vector, self.cov_matrix = kalman_correct(predicted_x, predicted_P, euler_angle, self.H_imu, self.R_imu)
 
         # Use filtered velocity to update our x and y estimates
         trans_x = self.state_vector[6][0] * self.dt_imu  # x update
@@ -238,7 +198,7 @@ class KalmanNode(Node):
         curr_depth -= self.offset_z
 
         depth = np.array([[curr_depth], [0], [0]])  # We need the shape(3,1) for the correction
-        self.state_vector, self.cov_matrix = self.kalman_correct(self.state_vector, self.cov_matrix, depth, self.H_depth, self.R_depth)
+        self.state_vector, self.cov_matrix = kalman_correct(self.state_vector, self.cov_matrix, depth, self.H_depth, self.R_depth)
 
     def send_odometry(self, t):
         """Publish the pose.
