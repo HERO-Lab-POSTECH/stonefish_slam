@@ -1,4 +1,5 @@
 # python imports
+import os
 import numpy as np
 import struct
 import rclpy
@@ -14,6 +15,7 @@ from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from octomap_msgs.msg import Octomap
 from typing import Tuple
+from ament_index_python.packages import get_package_share_directory
 
 # stonefish_slam imports
 from stonefish_slam.utils.io import *
@@ -144,7 +146,9 @@ class SLAMNode(Node):
         self.declare_parameter('ssm.max_translation', 3.0)
         self.declare_parameter('ssm.max_rotation', 0.5236)
         self.declare_parameter('ssm.target_frames', 3)
-        self.declare_parameter('icp_config', '/workspace/colcon_ws/src/stonefish_slam/config/icp.yaml')
+        default_icp_config = os.path.join(
+            get_package_share_directory('stonefish_slam'), 'config', 'icp.yaml')
+        self.declare_parameter('icp_config', default_icp_config)
 
         # Factor graph parameters (factor_graph.yaml)
         self.declare_parameter('nssm.enable', False)
