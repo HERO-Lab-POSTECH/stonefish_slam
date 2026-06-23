@@ -27,3 +27,19 @@
 
 - **파일**: `stonefish_slam`의 kalman 모듈
 - **사유**: kalman.py가 module-top에서 `rclpy`+`gtsam`을 import해 importlib 파일 직접 로드 시점에 import 자체가 크래시함(P2 테스트 전략으로 격리 불가). spec 1차 후보였으나 의도적으로 P2 제외 → 지연 import 또는 메서드 추출(P3 모듈화) 후 테스트 가능.
+
+## 노드명 3중 충돌 — standalone mapping 노드 (P3.0 컨벤션 조사에서 발견)
+
+- **파일**: `stonefish_slam/nodes/mapping_2d_standalone_node.py:29`, `stonefish_slam/nodes/mapping_3d_standalone_node.py:30`
+- **발견일**: 2026-06-23 (P3.0 명명·구조 외부 표준 대조 중)
+- **증상**: 두 standalone 노드가 모두 `super().__init__('slam_node')`로 초기화되며, `core/slam.py:94`(`Node.__init__(self, 'slam_node')`)도 `'slam_node'`다. 셋 중 둘 이상이 한 ROS 그래프에 동시에 뜨면 ROS2 고유 노드명 요구(RMW)를 위반해 노드 등록 충돌·진단 혼선이 발생한다.
+- **근거 표준**: 노드명 고유성은 RMW 강제 사항. [rmw validate_node_name.c](https://github.com/ros2/rmw/blob/master/rmw/src/validate_node_name.c).
+- **수정안**: standalone 노드를 각자 고유 이름(`mapping_2d_node`·`mapping_3d_node`)으로 초기화. 동작 변경(노드명 토픽 네임스페이스에 영향 가능)이라 P4에서 처리.
+
+## wildcard import — PEP 8 위반 (P3.0 컨벤션 조사에서 발견)
+
+- **파일**: 여러 모듈 — `utils/conversions.py:20`(`from .topics import *`), `utils/sonar.py:6`, `core/types.py:10-12`(conversions·visualization·io), `core/kalman.py:15`, `core/feature_extraction.py:7-9`, `core/cfar.py:5` 등.
+- **발견일**: 2026-06-23 (P3.0 명명·구조 외부 표준 대조 중)
+- **증상**: `from <module> import *` 사용. PEP 8은 "Wildcard imports should be avoided", Google Style은 모듈 단위 import만 허용해 둘 다 위반. 네임스페이스에 어떤 이름이 들어오는지 불투명해 정적 분석·가독성을 해친다.
+- **현재 처리**: 코드 무수정(P3.0은 문서 작업). 기록만 — 새 코드는 wildcard 금지(CONVENTIONS.md §2.2).
+- **수정안**: 명시적 import로 전환. 레거시라 P4(또는 해당 모듈 리팩토링 시) 처리.
