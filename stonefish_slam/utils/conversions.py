@@ -8,7 +8,6 @@ from sensor_msgs.msg import Image, PointCloud2
 from sensor_msgs_py import point_cloud2 as pc2  # ROS2
 from geometry_msgs.msg import Pose
 from std_msgs.msg import Header
-# import ros_numpy  # TODO: Install ros_numpy for ROS2 if needed
 import struct
 from scipy.spatial.transform import Rotation as R
 
