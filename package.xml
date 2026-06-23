@@ -29,12 +29,21 @@
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>message_filters</exec_depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <exec_depend>tf_transformations</exec_depend>
+
+  <!-- Factor-graph backend: ROS-packaged GTSAM (apt: ros-${ROS_DISTRO}-gtsam) -->
+  <exec_depend>gtsam</exec_depend>
 
   <!-- Python dependencies -->
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-sklearn</exec_depend>
+  <exec_depend>python3-shapely</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
 
   <!-- Test dependencies -->
   <test_depend>ament_lint_auto</test_depend>
