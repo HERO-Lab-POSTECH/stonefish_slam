@@ -15,7 +15,7 @@ def _square():
                      [0.5, 0.5], [0.2, 0.8], [0.8, 0.2]], dtype=float)
 
 
-@pytest.mark.xfail(reason="ICP 수렴 tolerance 미달, P4 조사")
+@pytest.mark.xfail(reason="ICP 수렴 tolerance 미달, P4 조사", strict=True)
 def test_icp_recovers_known_translation(load_module):
     m = _pcl(load_module)
     src = _square()

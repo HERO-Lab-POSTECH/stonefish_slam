@@ -14,3 +14,16 @@
   - `outlier_ratio`(0.8) + `max_correspondence_distance`(3.0) 파라미터 튜닝
   - 소규모 점군(7점)에서의 ICP 수렴 특성 확인
   - atol 완화(0.15) 또는 ICP 파라미터 개선 중 방향 결정 필요
+
+## fusion.ema_fusion — observation_count 인자 미사용 (의도 검증 필요)
+
+- **파일**: `stonefish_slam/utils/fusion.py::ema_fusion`
+- **발견일**: 2026-06-23 (P2 최종 whole-branch 검토에서 식별)
+- **증상**: 시그니처·docstring은 `observation_count`로 첫 관측을 판정한다는 의도를 시사하나, 본문은 `observation_count`를 전혀 쓰지 않고 first-observation 판정을 `old_map <= threshold`로 한다. 테스트 `test_first_observation_uses_new_value`는 old[0]=0.0이 우연히 count[0]=0과 일치해 green이 됨.
+- **현재 처리**: 코드 무수정(P2 0변경 원칙). 기록만.
+- **조사 필요**: docstring 의도(count 기반 판정)와 실제 코드(threshold 기반)의 괴리가 버그인지 설계 변경 흔적인지 확인. 버그면 판정 로직 수정 또는 시그니처에서 미사용 인자 제거.
+
+## kalman_predict/correct — P2 제외 사유 (추적용 기록)
+
+- **파일**: `stonefish_slam`의 kalman 모듈
+- **사유**: kalman.py가 module-top에서 `rclpy`+`gtsam`을 import해 importlib 파일 직접 로드 시점에 import 자체가 크래시함(P2 테스트 전략으로 격리 불가). spec 1차 후보였으나 의도적으로 P2 제외 → 지연 import 또는 메서드 추출(P3 모듈화) 후 테스트 가능.
