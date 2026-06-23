@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
 import cv2
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import PointCloud2, Image
 import cv_bridge
 import time
 
@@ -12,8 +8,6 @@ from stonefish_slam.utils.io import *
 from stonefish_slam.utils.topics import *
 from stonefish_slam.utils.conversions import *
 from stonefish_slam.utils.visualization import apply_custom_colormap
-# from stonefish_slam import pcl  # TODO: Re-enable when pybind11 is fixed
-import matplotlib.pyplot as plt
 
 from stonefish_slam.core.cfar import CFAR
 
@@ -298,83 +292,3 @@ class FeatureExtraction:
         self.node.get_logger().debug(f"Extracted {len(points)} feature points")
 
         return points
-
-
-# Standalone Node wrapper (for backward compatibility if needed)
-class FeatureExtractionNode(Node):
-    """Standalone ROS2 node wrapper for FeatureExtraction module.
-
-    DEPRECATED: This wrapper is for backward compatibility only.
-    The recommended approach is to use FeatureExtraction as an internal module in SLAM node.
-    """
-
-    def __init__(self):
-        super().__init__('feature_extraction_node')
-        self.get_logger().warn("FeatureExtractionNode standalone mode is DEPRECATED. Use SLAM node integration instead.")
-
-        # Instantiate feature extraction module
-        self.feature_extractor = FeatureExtraction(self)
-
-        # QoS profile
-        qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10
-        )
-
-        # Sonar subscriber
-        self.sonar_sub = self.create_subscription(
-            Image,
-            f'/{self.feature_extractor.vehicle_name}/fls/image',
-            self.callback,
-            qos
-        )
-
-        # Feature publisher
-        self.feature_pub = self.create_publisher(
-            PointCloud2,
-            SONAR_FEATURE_TOPIC,
-            10
-        )
-
-        self.get_logger().info(f"Feature extraction node initialized (STANDALONE MODE)")
-
-    def callback(self, sonar_msg):
-        """ROS2 callback wrapper"""
-        # Extract features
-        points = self.feature_extractor.extract_features(sonar_msg)
-
-        # Publish as PointCloud2
-        if len(points) > 0:
-            # Add z=0 for 2D sonar in FRD frame: [x=forward, y=lateral, z=0]
-            points_3d = np.c_[points[:, 0], points[:, 1], np.zeros(len(points))]
-
-            # Convert to a pointcloud
-            feature_msg = n2r(points_3d, "PointCloudXYZ")
-            feature_msg.header.stamp = sonar_msg.header.stamp
-            feature_msg.header.frame_id = f"{self.feature_extractor.vehicle_name}/base_link_frd"
-            self.feature_pub.publish(feature_msg)
-        else:
-            # Publish empty cloud
-            empty_points = np.zeros((0, 3))
-            feature_msg = n2r(empty_points, "PointCloudXYZ")
-            feature_msg.header.stamp = sonar_msg.header.stamp
-            feature_msg.header.frame_id = f"{self.feature_extractor.vehicle_name}/base_link_frd"
-            self.feature_pub.publish(feature_msg)
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = FeatureExtractionNode()
-
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()
