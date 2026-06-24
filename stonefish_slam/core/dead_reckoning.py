@@ -4,11 +4,8 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import gtsam
 import numpy as np
-import os
-import sys
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
-import tf_transformations
 
 # ros2-python imports
 from nav_msgs.msg import Odometry, Path
@@ -21,8 +18,6 @@ import geometry_msgs.msg
 from stonefish_slam.utils.conversions import g2n, g2r, n2g, r2g
 from stonefish_slam.utils.visualization import ros_colorline_trajectory
 
-import math
-from std_msgs.msg import String, Float32
 
 class DeadReckoningNode(Node):
     '''A class to support dead reckoning using DVL and IMU readings
