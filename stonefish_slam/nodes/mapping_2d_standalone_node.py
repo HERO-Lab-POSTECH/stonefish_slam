@@ -14,9 +14,8 @@ import rclpy
 from rclpy.node import Node
 import message_filters
 from sensor_msgs.msg import Image
-from nav_msgs.msg import OccupancyGrid, Odometry
+from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
-import numpy as np
 import gtsam
 
 from stonefish_slam.core.mapping_2d import SonarMapping2D

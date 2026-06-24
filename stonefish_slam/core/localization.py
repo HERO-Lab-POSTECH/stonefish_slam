@@ -21,13 +21,12 @@ from stonefish_slam.core.types import (
     STATUS,
     Keyframe,
     InitializationResult,
-    ICPResult,
     SMParams,
 )
 from stonefish_slam.core.factor_graph import FactorGraph
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.sonar import OculusProperty
-from stonefish_slam.utils.conversions import g2n, n2g, pose322, X
+from stonefish_slam.utils.conversions import g2n, n2g
 from stonefish_slam.utils.io import CodeTimer
 
 

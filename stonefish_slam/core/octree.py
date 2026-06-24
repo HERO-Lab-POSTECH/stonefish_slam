@@ -5,7 +5,6 @@ Note: This is a legacy Python octree. The main system now uses
 C++ OctoMap backend (see cpp/octree_mapping.cpp).
 """
 import numpy as np
-from typing import Optional, Tuple, List, Dict
 
 
 class OctNode:

@@ -13,7 +13,6 @@ from sensor_msgs.msg import PointCloud2, Image
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from octomap_msgs.msg import Octomap
-from typing import Tuple
 from ament_index_python.packages import get_package_share_directory
 
 # stonefish_slam imports

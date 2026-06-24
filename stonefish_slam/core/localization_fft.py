@@ -9,7 +9,6 @@ Completely independent module - no ROS2 or ICP dependencies.
 """
 
 import numpy as np
-from scipy import ndimage
 from scipy.interpolate import interp1d
 from typing import Tuple, Dict, Any, Optional
 import warnings

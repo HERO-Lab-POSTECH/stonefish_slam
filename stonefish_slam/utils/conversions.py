@@ -1,15 +1,12 @@
-from ctypes import Union
 from typing import Any, TYPE_CHECKING
 import numpy as np
 import gtsam
 import cv2
 import cv_bridge
-from sensor_msgs.msg import Image, PointCloud2
 from sensor_msgs_py import point_cloud2 as pc2  # ROS2
 from geometry_msgs.msg import Pose
 from std_msgs.msg import Header
 import struct
-from scipy.spatial.transform import Rotation as R
 
 if TYPE_CHECKING:
     try:

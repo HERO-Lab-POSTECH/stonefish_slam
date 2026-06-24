@@ -444,7 +444,6 @@ class SonarMapping2D:
 
             # Debug log for keyframe processing
             if timestamp is not None:
-                from rclpy.time import Time
                 self.logger.debug(
                     f"Processing keyframe: pose=({pose.x():.2f}, {pose.y():.2f}), "
                     f"timestamp_type={type(timestamp).__name__}, "

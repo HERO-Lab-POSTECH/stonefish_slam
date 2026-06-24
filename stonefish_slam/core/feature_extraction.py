@@ -4,8 +4,6 @@ import cv2
 import cv_bridge
 import time
 
-from stonefish_slam.utils.visualization import apply_custom_colormap
-
 from stonefish_slam.core.cfar import CFAR
 
 

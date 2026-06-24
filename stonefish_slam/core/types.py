@@ -1,12 +1,9 @@
-from ctypes import Union
-from typing import Any
 from enum import Enum
 
 import gtsam
 import numpy as np
 from rclpy.time import Time
 
-from stonefish_slam.utils.sonar import OculusProperty
 from stonefish_slam.utils.conversions import g2n, n2g, pose322
 
 

@@ -15,12 +15,10 @@ References:
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-from collections import defaultdict
-import gtsam
 import time  # For performance profiling
 
 from stonefish_slam.utils.profiler import MappingProfiler
-from stonefish_slam.core.octree import HierarchicalOctree, OctNode
+from stonefish_slam.core.octree import HierarchicalOctree
 
 # C++ Ray Processor import (with fallback)
 try:
