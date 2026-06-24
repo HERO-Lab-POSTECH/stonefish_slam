@@ -106,6 +106,11 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 - 노드는 `rclpy.node.Node` 상속, `super().__init__('node_name')`.
 - 파라미터는 `declare_parameter()` → `get_parameter().value`로 init에서 읽음. QoS 프로파일(`ReliabilityPolicy`, `HistoryPolicy`) 사용, `TransformBroadcaster`로 TF 발행. 근거: `core/slam.py:88-99`(파라미터)·`core/slam.py:436-437`(QoS)·`core/dead_reckoning.py:140`(`TransformBroadcaster`).
 - launch에서 여러 YAML config를 로드하고 런타임 오버라이드를 param dict로 노드에 전달.
+- **mapping standalone 노드는 의도적으로 존재한다 — 메인 `slam_node`의 mapping 토글로 대체되지 않는다**(2026-06-24 전수 정독 확정). `nodes/mapping_2d_standalone_node.py`·`mapping_3d_standalone_node.py`는 `core/mapping_2d.py`·`mapping_3d.py`의 **같은 알고리즘 클래스**(`SonarMapping2D`/`SonarMapping3D`)를 쓰므로 알고리즘 중복은 없으나, **입력 경로가 근본적으로 다르다**:
+  - **메인 `slam_node`**: factor graph가 최적화한 키프레임으로 맵을 갱신한다 — `SonarMapping2D.update_global_map_from_slam(keyframes, tf2_buffer, ...)`(`core/slam.py:798`)·`SonarMapping3D.update_map_from_slam(new_keyframes, ...)`(`core/slam.py:820`). pose가 loop closure로 보정된다. `enable_2d_mapping`/`enable_3d_mapping`(`core/slam.py:137-138`)로 켜고 끄며, `launch/mapping.launch.py`는 이를 mapping-only 모드(SSM/NSSM off)로 띄우지만 **여전히 SLAM 콜백 파이프라인**(`slam_callback_integrated`)을 거친다.
+  - **standalone**: SLAM(factor graph·loop closure)을 통째로 우회하고 odometry 원본 pose로 소나 이미지를 직접 처리한다 — 3D는 `process_sonar_image(image, pose)`(`mapping_3d_standalone_node.py:212`), 2D는 `add_keyframe()`+`update_global_map()`(`mapping_2d_standalone_node.py:129,132`). 클래스의 **다른 메서드**를 호출한다. 3D standalone은 메인에 없는 소나 디버그 시각화(`generate_hit_map_visualization`, `:216-256`)도 발행한다.
+  - **용도**: SLAM 없이 odometry+소나만으로 mapping 알고리즘 품질을 빠르게 격리 검증·튜닝하는 **개발 하니스**(주석의 `# Test 2/3`·`# caused hang at frame #1300` 등이 그 흔적). CMakeLists.txt:86-95가 `install(PROGRAMS ...)`로 등록한 **live executable**(`ros2 run stonefish_slam mapping_{2d,3d}_standalone`)이지 dead 코드가 아니다. 노드명 `'slam_node'` 공유는 §2.0(:66) 참조 — 충돌 아님.
+  - 정리할 거리(P4 잔여): 2D standalone의 품질 결함(콜백 내 `from tf_transformations import ...` 지연 import `:122`, 매 프레임 `logger.info` `:110`, `OccupancyGrid conversion TODO` `:98`)은 동작보존 범위. standalone을 메인에 흡수하려면 메인 콜백에 직접-이미지 입력 분기를 추가해야 하므로 동작 변경(별도 설계 사이클).
 
 ### 2.7 config·상수·단위·좌표계
 - **YAML 기반 config**가 `config/`에 모듈별로(`sonar.yaml`, `slam.yaml`, `factor_graph.yaml`, `localization.yaml`, `mapping.yaml`, `feature.yaml`, `icp.yaml`). 계층 네임스페이스(`ros__parameters`, `sonar.*`, `ssm.*`).

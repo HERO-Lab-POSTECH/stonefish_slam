@@ -2,7 +2,7 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 import os
@@ -34,6 +34,12 @@ def generate_launch_description():
         description='Launch RViz for visualization'
     )
 
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='false',
+        description='Use simulation time'
+    )
+
     enable_2d_mapping_arg = DeclareLaunchArgument(
         'enable_2d_mapping',
         default_value='true',
@@ -62,6 +68,7 @@ def generate_launch_description():
             'enable_3d_mapping': LaunchConfiguration('enable_3d_mapping'),
             'vehicle_name': LaunchConfiguration('vehicle_name'),
             'rviz': LaunchConfiguration('rviz'),
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
         }.items()
     )
 
@@ -69,6 +76,7 @@ def generate_launch_description():
         # Arguments
         vehicle_name_arg,
         rviz_arg,
+        use_sim_time_arg,
         enable_2d_mapping_arg,
         enable_3d_mapping_arg,
 
