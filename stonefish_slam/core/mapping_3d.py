@@ -31,6 +31,69 @@ except ImportError as e:
     CPP_RAY_PROCESSOR_AVAILABLE = False
 
 
+def create_transform_matrix(position, tilt_rad):
+    """
+    Create 4x4 transform with tilt angle (pitch rotation)
+
+    Args:
+        position: [x, y, z] translation
+        tilt_rad: Tilt angle in radians (pitch rotation around Y axis)
+
+    Returns:
+        4x4 numpy array transform matrix
+    """
+    T = np.eye(4)
+    # Rotation: tilt downward (pitch rotation around Y axis)
+    # tilt_rad is negative for downward tilt in FRD frame
+    rot = R.from_euler('y', tilt_rad)  # Pitch around Y axis (tilt_rad already negative)
+    T[:3, :3] = rot.as_matrix()
+    T[:3, 3] = position
+    return T
+
+
+def pose_msg_to_transform(pose_msg):
+    """
+    Convert pose (dict or ROS message) to 4x4 transform matrix
+
+    Args:
+        pose_msg: Dict with 'position' and 'orientation', or geometry_msgs/Pose
+
+    Returns:
+        4x4 numpy array transform matrix
+    """
+    # Handle dict format (from our SLAM integration)
+    if isinstance(pose_msg, dict):
+        position = [
+            pose_msg['position']['x'],
+            pose_msg['position']['y'],
+            pose_msg['position']['z']
+        ]
+        quaternion = [
+            pose_msg['orientation']['x'],
+            pose_msg['orientation']['y'],
+            pose_msg['orientation']['z'],
+            pose_msg['orientation']['w']
+        ]
+    else:
+        # Handle ROS message format
+        if hasattr(pose_msg, 'pose'):
+            pose = pose_msg.pose
+        else:
+            pose = pose_msg
+
+        position = [pose.position.x, pose.position.y, pose.position.z]
+        quaternion = [pose.orientation.x, pose.orientation.y,
+                     pose.orientation.z, pose.orientation.w]
+
+    # Create transform using scipy
+    T = np.eye(4)
+    rot = R.from_quat(quaternion)  # scipy uses [x, y, z, w] format
+    T[:3, :3] = rot.as_matrix()
+    T[:3, 3] = position
+
+    return T
+
+
 class SonarMapping3D:
     """
     Convert sonar images to 3D point clouds with probabilistic mapping
@@ -65,7 +128,7 @@ class SonarMapping3D:
         self.sonar_tilt = -np.deg2rad(config['sonar_tilt_deg'])
 
         # Pre-compute sonar to base_link transform
-        self.T_sonar_to_base = self.create_transform_matrix(
+        self.T_sonar_to_base = create_transform_matrix(
             self.sonar_position,
             self.sonar_tilt
         )
@@ -357,67 +420,6 @@ class SonarMapping3D:
             return self.cpp_octree.get_num_nodes()
         else:
             return len(self.octree.voxels) if self.octree else 0
-
-    def create_transform_matrix(self, position, tilt_rad):
-        """
-        Create 4x4 transform with tilt angle (pitch rotation)
-
-        Args:
-            position: [x, y, z] translation
-            tilt_rad: Tilt angle in radians (pitch rotation around Y axis)
-
-        Returns:
-            4x4 numpy array transform matrix
-        """
-        T = np.eye(4)
-        # Rotation: tilt downward (pitch rotation around Y axis)
-        # tilt_rad is negative for downward tilt in FRD frame
-        rot = R.from_euler('y', tilt_rad)  # Pitch around Y axis (tilt_rad already negative)
-        T[:3, :3] = rot.as_matrix()
-        T[:3, 3] = position
-        return T
-
-    def pose_msg_to_transform(self, pose_msg):
-        """
-        Convert pose (dict or ROS message) to 4x4 transform matrix
-
-        Args:
-            pose_msg: Dict with 'position' and 'orientation', or geometry_msgs/Pose
-
-        Returns:
-            4x4 numpy array transform matrix
-        """
-        # Handle dict format (from our SLAM integration)
-        if isinstance(pose_msg, dict):
-            position = [
-                pose_msg['position']['x'],
-                pose_msg['position']['y'],
-                pose_msg['position']['z']
-            ]
-            quaternion = [
-                pose_msg['orientation']['x'],
-                pose_msg['orientation']['y'],
-                pose_msg['orientation']['z'],
-                pose_msg['orientation']['w']
-            ]
-        else:
-            # Handle ROS message format
-            if hasattr(pose_msg, 'pose'):
-                pose = pose_msg.pose
-            else:
-                pose = pose_msg
-
-            position = [pose.position.x, pose.position.y, pose.position.z]
-            quaternion = [pose.orientation.x, pose.orientation.y,
-                         pose.orientation.z, pose.orientation.w]
-
-        # Create transform using scipy
-        T = np.eye(4)
-        rot = R.from_quat(quaternion)  # scipy uses [x, y, z, w] format
-        T[:3, :3] = rot.as_matrix()
-        T[:3, 3] = position
-
-        return T
 
     def compute_range_weight(self, range_m, lambda_decay=None):
         """
@@ -966,7 +968,7 @@ class SonarMapping3D:
             self.range_resolution = (self.range_max - self.range_min) / range_bins
 
         # Get robot transform
-        T_base_to_world = self.pose_msg_to_transform(robot_pose)
+        T_base_to_world = pose_msg_to_transform(robot_pose)
         T_sonar_to_world = T_base_to_world @ self.T_sonar_to_base
 
         # Compute inverse transform for shadow validation (cache for efficiency)
