@@ -164,7 +164,24 @@ Visualization Manager:
           Max. Height Display: 10.5
           Max. Octree Depth: 16
           Min. Height Display: 6
-          Name: OccupancyGrid
+          Name: OccupancyGrid (integrated SLAM)
+          Topic:
+            Depth: 5
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /stonefish_slam/mapping/map_3d_octomap
+          Value: true
+          Voxel Alpha: 1
+          Voxel Coloring: Z-Axis
+          Voxel Rendering: Occupied Voxels
+        - Class: octomap_rviz_plugins/OccupancyGrid
+          Enabled: true
+          Max. Height Display: 10.5
+          Max. Octree Depth: 16
+          Min. Height Display: 6
+          Name: OccupancyGrid (standalone)
           Topic:
             Depth: 5
             Durability Policy: Volatile
