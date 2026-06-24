@@ -54,3 +54,14 @@ def test_adaptive_update_scales_down_on_free_voxel(load_module):
     # update_scale = (0.5 / 0.5) * 0.5 = 0.5, so applied = 1.5 * 0.5 = 0.75.
     t.update_voxel([1.0, 1.0, 1.0], 1.5, adaptive=True)
     assert np.isclose(t.query_voxel([1.0, 1.0, 1.0]), 0.75)
+
+
+def test_adaptive_update_honors_config_max_ratio(load_module):
+    # Coverage gap (P3): the prior test pins the class-default adaptive_max_ratio (0.5),
+    # but deployment injects 0.3 via config (config/mapping/method_log_odds.yaml:13,
+    # method_iwlo.yaml:25). Pin the config path: with adaptive_max_ratio = 0.3,
+    # update_scale = (0.5 / 0.5) * 0.3 = 0.3, so applied = 1.5 * 0.3 = 0.45.
+    t = _tree(load_module, "oct_adapt_cfg", resolution=0.1)
+    t.adaptive_max_ratio = 0.3
+    t.update_voxel([1.0, 1.0, 1.0], 1.5, adaptive=True)
+    assert np.isclose(t.query_voxel([1.0, 1.0, 1.0]), 0.45)
