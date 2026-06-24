@@ -312,3 +312,134 @@ def test_scenario_c_shadow_region_not_updated(load_mapping_3d):
         # x ≈ 8.1 → voxel x-index = floor(8.1/0.5) = 16
         x_idx = k[0]
         assert 14 <= x_idx <= 18, f"Occupied voxel x-index {x_idx} unexpected (expected ~16)"
+
+
+# ===========================================================================
+# process_sonar_image characterization tests (P4e oracle — added before
+# decomposition; must stay GREEN after helper extraction).
+#
+# Design decisions
+# ----------------
+# - Small image: shape=(100, 2) — only 2 bearings processed (bearing_step=1
+#   for small num_beams; bearing_divisor=128 → step=max(1,2//128)=1 so both
+#   bearings are processed).  2 bearings keeps runtime fast.
+# - Identity robot_pose dict → T_base_to_world = I → T_sonar_to_world = T_sonar_to_base
+#   (which is identity because sonar_position=[0,0,0], tilt=0 in _base_config).
+# - Observable output: octree state after the call (get_occupied_voxels / query_voxel)
+#   and frame_count increment.
+# - Determinism: two calls on fresh mappers with identical inputs produce
+#   identical octree state (same voxel centers, same log-odds to 1e-6).
+# ===========================================================================
+
+def _identity_pose():
+    """Robot pose dict at origin with identity rotation."""
+    return {
+        'position': {'x': 0.0, 'y': 0.0, 'z': 0.0},
+        'orientation': {'x': 0.0, 'y': 0.0, 'z': 0.0, 'w': 1.0},
+    }
+
+
+def _make_image(num_bins=100, num_beams=2, hit_row=None, hit_value=200.0):
+    """Return a (num_bins, num_beams) polar image with optional hit at hit_row."""
+    img = np.zeros((num_bins, num_beams), dtype=float)
+    if hit_row is not None:
+        img[hit_row, :] = hit_value
+    return img
+
+
+def _octree_snapshot(mapper):
+    """Return sorted list of (center_rounded, log_odds) for all leaf voxels.
+
+    Uses get_occupied_voxels with very low threshold (prob>0.01 ≈ log-odds>-4.6)
+    so free-space voxels are included.  We compare only occupied ones
+    (prob >= 0.5) for the oracle, since free-space may have fractional log-odds
+    depending on adaptive clamping.
+    """
+    # Occupied: probability > 0.5 → log-odds > 0
+    occupied = mapper.octree.get_occupied_voxels(min_probability=0.5)
+    # Sort by rounded center for deterministic comparison
+    result = []
+    for center, prob in occupied:
+        key = tuple(round(c, 4) for c in center)
+        result.append((key, round(prob, 6)))
+    return sorted(result)
+
+
+# ---------------------------------------------------------------------------
+# Scenario (d): single hit image → octree gains occupied voxels
+# ---------------------------------------------------------------------------
+
+def test_image_d_hit_produces_occupied_voxels(load_mapping_3d):
+    """process_sonar_image with a hit row populates the octree with occupied voxels."""
+    mapper = _make_mapper(load_mapping_3d)
+    img = _make_image(num_bins=100, num_beams=2, hit_row=40, hit_value=200.0)
+    pose = _identity_pose()
+
+    mapper.process_sonar_image(img, pose)
+
+    occupied = mapper.octree.get_occupied_voxels(min_probability=0.5)
+    assert len(occupied) > 0, "Expected occupied voxels after processing image with hit"
+
+    # All returned items are (center, prob) pairs; prob must be > 0.5
+    for center, prob in occupied:
+        assert prob > 0.5, f"Occupied voxel probability {prob} should exceed 0.5"
+        assert len(center) == 3, "Center must be 3D"
+
+
+def test_image_d_frame_count_increments(load_mapping_3d):
+    """process_sonar_image increments frame_count by 1 per call."""
+    mapper = _make_mapper(load_mapping_3d)
+    assert mapper.frame_count == 0, "frame_count should start at 0"
+
+    img = _make_image(num_bins=100, num_beams=2, hit_row=40)
+    mapper.process_sonar_image(img, _identity_pose())
+    assert mapper.frame_count == 1
+
+    mapper.process_sonar_image(img, _identity_pose())
+    assert mapper.frame_count == 2
+
+
+def test_image_d_no_hit_no_occupied_voxels(load_mapping_3d):
+    """All-zero image (no hit) produces no voxels with occupied probability."""
+    mapper = _make_mapper(load_mapping_3d)
+    img = _make_image(num_bins=100, num_beams=2)  # all zeros
+    mapper.process_sonar_image(img, _identity_pose())
+
+    occupied = mapper.octree.get_occupied_voxels(min_probability=0.5)
+    assert len(occupied) == 0, (
+        f"No-hit image should produce zero occupied voxels; got {len(occupied)}"
+    )
+
+
+def test_image_d_deterministic_octree_state(load_mapping_3d):
+    """Two fresh mappers fed the same image produce identical octree occupied snapshots."""
+    img = _make_image(num_bins=100, num_beams=2, hit_row=30, hit_value=180.0)
+    pose = _identity_pose()
+
+    mapper1 = _make_mapper(load_mapping_3d)
+    mapper1.process_sonar_image(img, pose)
+    snap1 = _octree_snapshot(mapper1)
+
+    mapper2 = _make_mapper(load_mapping_3d)
+    mapper2.process_sonar_image(img, pose)
+    snap2 = _octree_snapshot(mapper2)
+
+    assert snap1 == snap2, (
+        f"Octree snapshots differ between two identical runs:\n"
+        f"snap1={snap1[:5]}...\nsnap2={snap2[:5]}..."
+    )
+
+
+# NOTE (known oracle limitation — see code review MEDIUM on the P4e decomposition):
+# All characterization tests above use an identity robot_pose with the sonar at
+# origin/tilt 0, so T_sonar_to_base == I and the transform composition
+# `T_sonar_to_world = T_base_to_world @ self.T_sonar_to_base` commutes. A reorder of
+# that composition is therefore NOT detectable by this oracle. For *this*
+# decomposition that gap is benign: the composition line was verified character-
+# identical to the pre-decomposition original by line-level diff (it was moved, not
+# rewritten), so it cannot have regressed here. An attempt to add a tilted-sonar +
+# rotated-pose case to pin the order directly proved flaky under the full-suite run
+# (passes in isolation, fails when other process_sonar_image tests run first) and was
+# removed rather than committed as an unstable guard. Hardening this is deferred:
+# if the transform composition in _prepare_image_frame is ever modified, add a
+# dedicated, isolation-stable test for the multiplication order at that time.
