@@ -477,7 +477,7 @@ class SLAMNode(Node):
             20,
             self.feature_odom_sync_max_delay
         )
-        self.time_sync.registerCallback(self.SLAM_callback_integrated)
+        self.time_sync.registerCallback(self.slam_callback_integrated)
         self.get_logger().info("Using 2-way synchronizer (sonar + odom) with integrated feature extraction")
 
         self.get_logger().info(f"Created time synchronizer with max delay: {self.feature_odom_sync_max_delay}")
@@ -608,7 +608,7 @@ class SLAMNode(Node):
 
         return len(info['reasons']) == 0, info
 
-    def SLAM_callback_integrated(self, sonar_msg: Image, odom_msg: Odometry) -> None:
+    def slam_callback_integrated(self, sonar_msg: Image, odom_msg: Odometry) -> None:
         """Integrated SLAM callback with internal feature extraction.
 
         Replaces the old 3-way synchronization (feature + odom + sonar).
@@ -807,7 +807,7 @@ class SLAMNode(Node):
                             if map_image is not None and map_image.size > 0:
                                 image_msg = self.bridge.cv2_to_imgmsg(map_image, encoding="mono8")
                                 image_msg.header.stamp = self.get_clock().now().to_msg()
-                                image_msg.header.frame_id = "map"
+                                image_msg.header.frame_id = "world_ned"
                                 self.map_2d_pub.publish(image_msg)
                                 self.get_logger().info(
                                     f"Published 2D map: {map_image.shape[1]}x{map_image.shape[0]} pixels, "
@@ -888,9 +888,9 @@ class SLAMNode(Node):
         pose_msg = PoseWithCovarianceStamped()
         pose_msg.header.stamp = current_frame.time
         if self.rov_id == "":
-            pose_msg.header.frame_id = "map"
+            pose_msg.header.frame_id = "world_ned"
         else:
-            pose_msg.header.frame_id = self.rov_id + "_map"
+            pose_msg.header.frame_id = self.rov_id + "_world_ned"
         pose_msg.pose.pose = g2r(current_frame.pose3)
 
         cov = 1e-4 * np.identity(6, np.float32)
@@ -942,7 +942,7 @@ class SLAMNode(Node):
             link_msg = ros_constraints(links)
             link_msg.header.stamp = self.fg.current_keyframe.time
             if self.rov_id != "":
-                link_msg.header.frame_id = self.rov_id + "_map"
+                link_msg.header.frame_id = self.rov_id + "_world_ned"
             self.constraint_pub.publish(link_msg)
 
     def publish_trajectory(self) -> None:
@@ -956,9 +956,9 @@ class SLAMNode(Node):
         traj_msg = ros_colorline_trajectory(poses)
         traj_msg.header.stamp = self.fg.current_keyframe.time
         if self.rov_id == "":
-            traj_msg.header.frame_id = "map"
+            traj_msg.header.frame_id = "world_ned"
         else:
-            traj_msg.header.frame_id = self.rov_id + "_map"
+            traj_msg.header.frame_id = self.rov_id + "_world_ned"
         self.traj_pub.publish(traj_msg)
 
     def publish_point_cloud(self) -> None:
@@ -1008,9 +1008,9 @@ class SLAMNode(Node):
         cloud_msg = n2r(sampled_xyzi, "PointCloudXYZI")
         cloud_msg.header.stamp = self.fg.current_keyframe.time
         if self.rov_id == "":
-            cloud_msg.header.frame_id = "map"
+            cloud_msg.header.frame_id = "world_ned"
         else:
-            cloud_msg.header.frame_id = self.rov_id + "_map"
+            cloud_msg.header.frame_id = self.rov_id + "_world_ned"
         self.cloud_pub.publish(cloud_msg)
 
     def add_sequential_scan_matching(self, keyframe: Keyframe) -> None:
@@ -1033,7 +1033,7 @@ class SLAMNode(Node):
         # Compute transform (FFT or ICP)
         use_fft = self.fft_enable and hasattr(keyframe, 'fft_success') and keyframe.fft_success
         if use_fft:
-            # Use FFT transform (already validated in SLAM_callback_integrated)
+            # Use FFT transform (already validated in slam_callback_integrated)
             ret2.estimated_transform = keyframe.fft_transform
             ret2.status.description = "FFT"
         else:

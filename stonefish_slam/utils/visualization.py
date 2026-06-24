@@ -158,7 +158,7 @@ colors = {
 
 def ros_constraints(links):
     marker = Marker()
-    marker.header.frame_id = "map"
+    marker.header.frame_id = "world_ned"
     marker.type = Marker.LINE_LIST
     marker.ns = "constraints"
     marker.scale.x = 0.03  # Thinner lines (3cm instead of 20cm)
