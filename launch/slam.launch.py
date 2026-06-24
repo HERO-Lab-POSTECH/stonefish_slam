@@ -92,12 +92,22 @@ def launch_setup(context, *args, **kwargs):
         ]
     )
 
-    # RViz visualization (gated by the 'rviz' launch argument)
-    rviz_config = PathJoinSubstitution([
-        FindPackageShare('stonefish_slam'),
-        'rviz',
-        'stonefish_slam.rviz'
-    ])
+    # RViz visualization (gated by the 'rviz' launch argument).
+    # The shipped config is authored for vehicle_name='bluerov2'. For any other
+    # vehicle, rewrite the 'bluerov2' tokens (topic prefixes + TF frame ids) to
+    # the requested vehicle_name in a temp copy and load that — equivalent to
+    # nav2's ReplaceString, but with no extra dependency. At the default vehicle
+    # the original file is loaded untouched (so opening it directly still works).
+    rviz_config = os.path.join(pkg_share, 'rviz', 'stonefish_slam.rviz')
+    if vehicle_name and vehicle_name != 'bluerov2':
+        with open(rviz_config) as f:
+            rewritten = f.read().replace('bluerov2', vehicle_name)
+        tmp = tempfile.NamedTemporaryFile(
+            mode='w', prefix=f'stonefish_slam_{vehicle_name}_', suffix='.rviz',
+            delete=False)
+        tmp.write(rewritten)
+        tmp.close()
+        rviz_config = tmp.name
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',

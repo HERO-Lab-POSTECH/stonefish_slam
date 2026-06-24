@@ -887,10 +887,10 @@ class SLAMNode(Node):
         # define a pose with covariance message
         pose_msg = PoseWithCovarianceStamped()
         pose_msg.header.stamp = current_frame.time
-        if self.rov_id == "":
-            pose_msg.header.frame_id = "world_ned"
-        else:
-            pose_msg.header.frame_id = self.rov_id + "_world_ned"
+        # Stamp in the global frame so RViz (Fixed Frame world_ned) can render it.
+        # The former {rov_id}_world_ned frame had no TF link to world_ned and no
+        # consumer other than RViz, so visualization silently failed.
+        pose_msg.header.frame_id = "world_ned"
         pose_msg.pose.pose = g2r(current_frame.pose3)
 
         cov = 1e-4 * np.identity(6, np.float32)
@@ -941,8 +941,10 @@ class SLAMNode(Node):
             # conver this list to a series of multi-colored lines and publish
             link_msg = ros_constraints(links)
             link_msg.header.stamp = self.fg.current_keyframe.time
-            if self.rov_id != "":
-                link_msg.header.frame_id = self.rov_id + "_world_ned"
+            # Global frame for RViz (see publish pose note). Previously only set
+            # when rov_id != "" — left empty otherwise — so it never matched the
+            # world_ned Fixed Frame.
+            link_msg.header.frame_id = "world_ned"
             self.constraint_pub.publish(link_msg)
 
     def publish_trajectory(self) -> None:
@@ -955,10 +957,8 @@ class SLAMNode(Node):
         # convert to a ros color line
         traj_msg = ros_colorline_trajectory(poses)
         traj_msg.header.stamp = self.fg.current_keyframe.time
-        if self.rov_id == "":
-            traj_msg.header.frame_id = "world_ned"
-        else:
-            traj_msg.header.frame_id = self.rov_id + "_world_ned"
+        # Global frame for RViz (see publish pose note).
+        traj_msg.header.frame_id = "world_ned"
         self.traj_pub.publish(traj_msg)
 
     def publish_point_cloud(self) -> None:
@@ -1007,10 +1007,8 @@ class SLAMNode(Node):
         # convert the point cloud to a ros message and publish
         cloud_msg = n2r(sampled_xyzi, "PointCloudXYZI")
         cloud_msg.header.stamp = self.fg.current_keyframe.time
-        if self.rov_id == "":
-            cloud_msg.header.frame_id = "world_ned"
-        else:
-            cloud_msg.header.frame_id = self.rov_id + "_world_ned"
+        # Global frame for RViz (see publish pose note).
+        cloud_msg.header.frame_id = "world_ned"
         self.cloud_pub.publish(cloud_msg)
 
     def add_sequential_scan_matching(self, keyframe: Keyframe) -> None:
