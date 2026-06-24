@@ -188,7 +188,13 @@ class ICP:
         self.max_iterations = 40
         self.tolerance = 0.01
         self.max_correspondence_distance = 3.0
-        self.outlier_ratio = 0.8
+        # No fixed trim: max_correspondence_distance already rejects true
+        # outliers (match() drops anything beyond it). A fixed ratio below the
+        # actual overlap discards genuine inliers asymmetrically and biases the
+        # Kabsch centroid (TrICP requires trim fraction == true overlap;
+        # Chetverikov 2002). For full-overlap scans 0.8 dropped 20% of valid
+        # correspondences and converged to the wrong transform.
+        self.outlier_ratio = 1.0
 
     def loadFromYaml(self, config_file):
         """
@@ -263,7 +269,7 @@ class ICP:
             t = target_center - R @ source_center
 
             # Build transformation matrix
-            T_delta = np.eye(3, dtype=np.float32)
+            T_delta = np.eye(3, dtype=np.float64)
             T_delta[:2, :2] = R
             T_delta[:2, 2] = t
 

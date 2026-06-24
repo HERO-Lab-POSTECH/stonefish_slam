@@ -15,14 +15,30 @@ def _square():
                      [0.5, 0.5], [0.2, 0.8], [0.8, 0.2]], dtype=float)
 
 
-@pytest.mark.xfail(reason="ICP 수렴 tolerance 미달, P4 조사", strict=True)
 def test_icp_recovers_known_translation(load_module):
+    # P4 T-A5: was xfail (strict). Root cause of the miss was NOT float32 but
+    # the fixed outlier_ratio=0.8 trimming 20% of a perfect-overlap cloud
+    # (asymmetric drop biases the centroid) plus a convergence test on the
+    # pre-update residual. After the fix, perfect-overlap recovers the exact
+    # translation.
     m = _pcl(load_module)
     src = _square()
     shift = np.array([0.3, -0.2])
     status, T = m.ICP().compute(src, src + shift, np.eye(3))
     assert status == "success"
     np.testing.assert_allclose(T[:2, 2], shift, atol=0.05)
+
+
+def test_icp_perfect_overlap_recovers_exactly(load_module):
+    # Perfect-overlap (overlap ratio = 1.0): with correct trimming the
+    # translation must be recovered to near machine precision, not merely
+    # within 0.05. Pins that no inliers are spuriously discarded.
+    m = _pcl(load_module)
+    src = _square()
+    shift = np.array([0.3, -0.2])
+    status, T = m.ICP().compute(src, src + shift, np.eye(3))
+    assert status == "success"
+    np.testing.assert_allclose(T[:2, 2], shift, atol=1e-6)
 
 
 def test_icp_recovers_small_rotation(load_module):
