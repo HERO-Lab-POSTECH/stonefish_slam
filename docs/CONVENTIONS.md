@@ -58,8 +58,9 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 
 **좌표계 — REP 103/105 (★중요, sim과 다름)**
 - ROS 표준(REP 103)은 world에 **ENU**, body에 **FLU**를 1차로, NED는 `_ned` 접미사 secondary frame으로 허용한다. REP 105는 표준 프레임 `earth→map→odom→base_link`를 규정(`map`은 Z-up=ENU 정렬).
-- slam은 `odom`·`map`·`base_link`(표준 ROS ENU 관행)를 쓴다 — REP 105 부합. 단 `core/mapping_3d.py`·`mapping_3d_standalone_node.py`는 `frame_id='world_ned'`(센서 레거시)를 기본값으로 둔다. ⚠️ `core/slam.py:824`도 3D 매핑 경로(`mapper_3d.get_octomap_msg`)에서 `frame_id='world_ned'`로 octomap을 publish한다 — 즉 SLAMNode는 같은 노드 안에서 `"map"`(ENU, :808/889/957/1009 등)과 `'world_ned'`(NED, :824)를 **혼용**한다. 통일은 TF 변환을 수반하는 동작 변경이라 P4(아래 P4_FLAGS 참조).
-- ⚠️ **sim과의 좌표계 불일치**: sim은 전역에 `world_ned`(NED), slam은 `map`/`odom`(ENU)을 쓴다. 둘 다 각자 정당하나, **두 repo를 한 TF 트리로 통합할 때 NED↔ENU 변환이 필요**하다(통합 작업 시 반드시 다룰 것). 출처: [REP 103](https://github.com/ros-infrastructure/rep/blob/master/rep-0103.rst), [REP 105](https://github.com/ros-infrastructure/rep/blob/master/rep-0105.rst).
+- **전역 프레임 = `world_ned`(NED)로 통일**(P4d 결정, 2026-06-24). 근거: Stonefish 시뮬레이터가 전역 프레임을 NED로 발행하며(`core/slam.py:904` 주석 "Simulator provides world_ned → base_link_frd directly"), slam의 모든 출력 메시지가 그 NED 전역 위에서 동작하므로 전역 frame_id를 `world_ned`로 맞추는 것이 sim과 정합한다. 이전엔 SLAMNode가 같은 노드 안에서 `"map"`(2D·pose·traj·cloud)과 `'world_ned'`(3D octomap)를 **혼용**했으나, P4d에서 전역 frame_id 9곳(`core/slam.py` single/multi-ROV 8곳 + `utils/visualization.py:161`)을 `world_ned`/`{rov}_world_ned`로 통일했다. **이는 의도적 REP-103/105 비순응이다** — 수중 로봇 도메인 표준이 NED이고 sim이 NED를 강제하므로 `map`(ENU)을 전역에 쓰지 않기로 결정. TF는 모두 identity(회전 0)라 좌표 변환은 없고 frame_id **이름만** 정합한 것이다.
+- **로봇-로컬 TF 체인 `odom→base_link`는 REP-105 표준대로 유지**(`core/dead_reckoning.py:299/305/318/319`). 전역만 NED로 통일하고 dead_reckoning의 ENU TF 체인과 `child_frame_id`(`base_link`/`{rov}_base_link`, body 프레임)는 보존한다 — "전역만 통일" 결정의 경계.
+- ⚠️ **sim 통합 시**: sim도 전역 `world_ned`(NED)라 이제 전역 프레임은 양 repo가 일치한다. 단 dead_reckoning의 로컬 ENU TF 체인을 NED 전역 트리에 붙일 때는 여전히 NED↔ENU 변환 경계가 `launch`의 `world_ned→map` static TF(현재 identity)에 위치한다. 출처: [REP 103](https://github.com/ros-infrastructure/rep/blob/master/rep-0103.rst), [REP 105](https://github.com/ros-infrastructure/rep/blob/master/rep-0105.rst).
 
 **이 repo에서 발견된 명명 위반(P4_FLAGS 후보, 고칠 때까지 새 코드는 답습 금지)**
 - ⚠️ **CRITICAL — 노드명 3중 충돌**: `nodes/mapping_2d_standalone_node.py:28`와 `nodes/mapping_3d_standalone_node.py:30`이 둘 다 `super().__init__('slam_node')`로 초기화되며, `core/slam.py:41`(`Node.__init__(self, 'slam_node')`)도 `'slam_node'`다. 셋 중 둘 이상이 동시에 뜨면 ROS2 고유 노드명 요구를 위반한다. 표준 standalone 노드는 `mapping_2d_node`·`mapping_3d_node`처럼 고유 이름을 써야 한다.
@@ -109,7 +110,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 ### 2.7 config·상수·단위·좌표계
 - **YAML 기반 config**가 `config/`에 모듈별로(`sonar.yaml`, `slam.yaml`, `factor_graph.yaml`, `localization.yaml`, `mapping.yaml`, `feature.yaml`, `icp.yaml`). 계층 네임스페이스(`ros__parameters`, `sonar.*`, `ssm.*`).
 - 센서 상수는 클래스 속성(예: `OculusProperty.OCULUS_VERTICAL_APERTURE = {1: np.deg2rad(20), ...}` — `utils/sonar.py`)이나 YAML.
-- ⚠️ frame_id(`'map'`, `'odom'`, `'base_link'`)가 노드 코드에 **하드코딩**되어 있다(sim의 `world_ned` 중앙화와 대조). 새 코드는 가능하면 상수/파라미터로 중앙화하는 것을 권장하되, 기존 값과 일관성을 우선한다.
+- ⚠️ frame_id(전역 `'world_ned'`, 로컬 `'odom'`·`'base_link'`)가 노드 코드에 **하드코딩**되어 있다(sim의 `world_ned` 중앙화와 대조). 새 코드는 가능하면 상수/파라미터로 중앙화하는 것을 권장하되, 기존 값과 일관성을 우선한다. (전역 frame_id 통일 경위는 §2.0 좌표계 항목 참조.)
 
 ### 2.8 테스트 (P2에서 정립)
 - 테스트는 `stonefish_slam/test/`에 `test_*.py`, 함수는 `test_*`.
@@ -136,5 +137,5 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 ## 3. 적용 메모
 - 이 repo의 SSOT는 이 문서다. `CLAUDE.md`가 생기면 "작업 전 `docs/CONVENTIONS.md` 필독" 포인터 1줄을 둔다(CLAUDE.md만 자동 로드되므로).
 - 라이선스는 **GPL-3.0**(루트 `LICENSE` 기준). 메인테이너: Seungmin Kim <luckkim123@gmail.com>.
-- `P4_FLAGS.md`에 모인 수치/알고리즘 이슈는 P4에서 소화한다(노드명 'slam_node' 3중충돌, standalone 노드 구조 정리, god-method 분해, `polar_to_cartesian` 3중 정의 통합, 수치 4건: pressure→depth 1000배·ICP float32·fusion observation_count·Joseph form, rename군 STATUS/X()/SLAM_callback, PascalCase 파라미터, frame_id `world_ned` 통일, wildcard 런타임 sign-off, `__all__` 추가, `dead_reckoning.py:175` depth 복원 등). **P3는 동작 보존이 가능한 것만 처리했다** — 순수 이동·dead 제거·dedup·import 정리·메타데이터·문서·테스트 추가. 런타임 동작(수치 출력·토픽 그래프·노드명 네임스페이스)을 바꾸는 것은 전부 P4로 격리한다.
+- `P4_FLAGS.md`에 모인 수치/알고리즘 이슈는 P4에서 소화한다. **P4 진행(2026-06-24)**: kalman 제거(legacy-dead)·octree leaf·DDA corner·ICP outlier·dead_reckoning depth(NED)·robust Cauchy loop closure 연결·PCM 수치안정·`SLAM_callback_integrated`→snake_case·전역 frame_id `world_ned` 통일 — **완료**. 노드명 'slam_node' 공유는 측정 결과 **충돌 아님으로 반증**(combined launch가 PushRosNamespace로 분리, `P4_FLAGS.md` 참조). 잔여: god-method 분해(P4e), `polar_to_cartesian` 통합, PascalCase 파라미터, `__all__` 추가, free-region 반전(live-sim 필요). **P3는 동작 보존이 가능한 것만 처리했다** — 순수 이동·dead 제거·dedup·import 정리·메타데이터·문서·테스트 추가. 런타임 동작(수치 출력·토픽 그래프·노드명 네임스페이스)을 바꾸는 것은 전부 P4로 격리했다.
 - P3 안전망 도구: `test/static_import_gate.py`(AST 정적 게이트), `test/test_wildcard_gate.py`(wildcard 분류 동결), `test/test_octree.py`(numpy 실측 골든). §2.8 'P3 동작보존 안전망' 참조.

@@ -42,13 +42,17 @@
 - **파일**: `stonefish_slam`의 kalman 모듈
 - **사유**: kalman.py가 module-top에서 `rclpy`+`gtsam`을 import해 importlib 파일 직접 로드 시점에 import 자체가 크래시함(P2 테스트 전략으로 격리 불가). spec 1차 후보였으나 의도적으로 P2 제외 → 지연 import 또는 메서드 추출(P3 모듈화) 후 테스트 가능.
 
-## 노드명 3중 충돌 — standalone mapping 노드 (P3.0 컨벤션 조사에서 발견)
+## ✅ 노드명 'slam_node' 공유 — **P4d 측정 결과 런타임 충돌 아님**(2026-06-24)
 
-- **파일**: `stonefish_slam/nodes/mapping_2d_standalone_node.py:28`, `stonefish_slam/nodes/mapping_3d_standalone_node.py:30`
-- **발견일**: 2026-06-23 (P3.0 명명·구조 외부 표준 대조 중)
-- **증상**: 두 standalone 노드가 모두 `super().__init__('slam_node')`로 초기화되며, `core/slam.py:41`(`Node.__init__(self, 'slam_node')`)도 `'slam_node'`다. 셋 중 둘 이상이 한 ROS 그래프에 동시에 뜨면 ROS2 고유 노드명 요구(RMW)를 위반해 노드 등록 충돌·진단 혼선이 발생한다.
-- **근거 표준**: 노드명 고유성은 RMW 강제 사항. [rmw validate_node_name.c](https://github.com/ros2/rmw/blob/master/rmw/src/validate_node_name.c).
-- **수정안**: standalone 노드를 각자 고유 이름(`mapping_2d_node`·`mapping_3d_node`)으로 초기화. 동작 변경(노드명 토픽 네임스페이스에 영향 가능)이라 P4에서 처리.
+- **파일**: `stonefish_slam/nodes/mapping_2d_standalone_node.py:28`, `stonefish_slam/nodes/mapping_3d_standalone_node.py:30`, `core/slam.py:41` — 셋 다 노드명 `'slam_node'`.
+- **최초 가설(P3.0, 2026-06-23)**: "셋 중 둘 이상이 한 ROS 그래프에 동시에 뜨면 RMW 고유 노드명 요구 위반 → 충돌".
+- **P4d 측정으로 가설 반증(2026-06-24, 정적 grep + launch 전수 확인)**:
+  1. `slam.launch.py`는 standalone 노드를 include하지 않음 — `slam_node` 1개만 뜸.
+  2. `mapping_2d_standalone.launch.py`·`mapping_3d_standalone.launch.py`는 각자 별도 executable을 **단독** 실행 — 각 그래프에 `slam_node` 1개.
+  3. 유일하게 둘을 함께 띄우는 `mapping_combined_standalone.launch.py`는 **각각을 `PushRosNamespace('mapping_2d')`/`PushRosNamespace('mapping_3d')`로 분리** → 완전 노드 경로가 `/mapping_2d/slam_node`·`/mapping_3d/slam_node`로 **고유**. RMW 충돌 없음.
+  4. 이름 공유는 **의도적 설계**: standalone launch 주석 `# Must match yaml namespace (slam_node.ros__parameters)` — config YAML의 `slam_node.ros__parameters` 네임스페이스와 일치시켜 같은 mapping.yaml을 재사용하기 위함.
+- **결론**: 모든 실행 경로에서 노드명 충돌이 실재하지 않는다(combined 경로조차 네임스페이스로 분리). **버그 아님 → P4 수정 대상에서 제외.** 코드 명확성 차원에서 standalone에 고유 이름을 줄 수는 있으나, 그러면 config YAML 네임스페이스도 함께 바꿔야 하고 동작상 이득이 없어 **불변 유지**가 정당하다. (교훈: "동시에 뜨면 충돌"은 이론적으로 맞으나 그런 실행 경로가 없거나 네임스페이스로 분리됨을 확인하지 않은 단정이었다.)
+- **근거 표준**: 노드명 고유성은 `namespace + node_name` 전체 경로에 적용된다 — [rmw validate_node_name.c](https://github.com/ros2/rmw/blob/master/rmw/src/validate_node_name.c), [ROS2 Node naming](https://design.ros2.org/articles/topic_and_service_names.html).
 
 ## kalman 공분산 업데이트 — Joseph form 수치 안정성 (P3.1 자료조사에서 식별)
 
