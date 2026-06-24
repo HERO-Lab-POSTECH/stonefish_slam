@@ -2,8 +2,6 @@ import math
 import numpy as np
 from scipy.optimize import root
 
-from stonefish_slam.utils import *
-from stonefish_slam.utils.sonar import *
 from stonefish_slam.cpp import cfar
 
 class CFAR(object):

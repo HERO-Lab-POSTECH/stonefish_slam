@@ -8,8 +8,6 @@ from rclpy.time import Time
 
 from stonefish_slam.utils.sonar import OculusProperty
 from stonefish_slam.utils.conversions import *
-from stonefish_slam.utils.visualization import *
-from stonefish_slam.utils.io import *
 
 
 class STATUS(Enum):

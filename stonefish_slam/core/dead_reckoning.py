@@ -20,7 +20,6 @@ import geometry_msgs.msg
 # stonefish_slam imports
 from stonefish_slam.utils.conversions import *
 from stonefish_slam.utils.visualization import ros_colorline_trajectory
-from stonefish_slam.utils.topics import *
 
 import math
 from std_msgs.msg import String, Float32

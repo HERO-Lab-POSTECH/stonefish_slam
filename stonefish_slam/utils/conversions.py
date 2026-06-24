@@ -17,8 +17,6 @@ if TYPE_CHECKING:
     except ImportError:
         OculusPing = Any
 
-from .topics import *
-
 
 def X(x:int) -> gtsam.symbol:
     """convert an integer to a gtsam symbol
