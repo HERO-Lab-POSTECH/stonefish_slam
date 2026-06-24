@@ -741,7 +741,14 @@ class SonarMapping3D:
                 # Merge results into voxel_updates dict
                 for update in voxel_updates_list:
                     key = tuple(update.key)
-                    voxel_center = np.array(update.key, dtype=float) * self.voxel_resolution
+                    # update.key is a floor-quantized grid index (C++
+                    # dda_traversal.cpp:11-15 world_to_key uses std::floor), so
+                    # the cell CENTER is (key + 0.5) * resolution; key *
+                    # resolution returns the cell corner (half-voxel bias). The
+                    # Python fallback path feeds the true continuous pt_world to
+                    # shadow validation, so the corner here was inconsistent and
+                    # offset the shadow distance by half a voxel.
+                    voxel_center = (np.array(update.key, dtype=float) + 0.5) * self.voxel_resolution
 
                     # Shadow validation (same as Python fallback path)
                     if T_world_to_sonar is not None and first_hit_map is not None:
