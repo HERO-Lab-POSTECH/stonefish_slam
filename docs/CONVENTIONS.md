@@ -58,7 +58,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 
 **좌표계 — REP 103/105 (★중요, sim과 다름)**
 - ROS 표준(REP 103)은 world에 **ENU**, body에 **FLU**를 1차로, NED는 `_ned` 접미사 secondary frame으로 허용한다. REP 105는 표준 프레임 `earth→map→odom→base_link`를 규정(`map`은 Z-up=ENU 정렬).
-- slam은 `odom`·`map`·`base_link`(표준 ROS ENU 관행)를 쓴다 — REP 105 부합. 단 `core/mapping_3d.py`·`mapping_3d_standalone_node.py`는 `frame_id='world_ned'`(센서 레거시)를 기본값으로 둔다.
+- slam은 `odom`·`map`·`base_link`(표준 ROS ENU 관행)를 쓴다 — REP 105 부합. 단 `core/mapping_3d.py`·`mapping_3d_standalone_node.py`는 `frame_id='world_ned'`(센서 레거시)를 기본값으로 둔다. ⚠️ `core/slam.py:877`도 3D 매핑 경로(`mapper_3d.get_octomap_msg`)에서 `frame_id='world_ned'`로 octomap을 publish한다 — 즉 SLAMNode는 같은 노드 안에서 `'map'`(ENU, :861/942/1010/1062 등)과 `'world_ned'`(NED, :877)를 **혼용**한다. 통일은 TF 변환을 수반하는 동작 변경이라 P4(아래 P4_FLAGS 참조).
 - ⚠️ **sim과의 좌표계 불일치**: sim은 전역에 `world_ned`(NED), slam은 `map`/`odom`(ENU)을 쓴다. 둘 다 각자 정당하나, **두 repo를 한 TF 트리로 통합할 때 NED↔ENU 변환이 필요**하다(통합 작업 시 반드시 다룰 것). 출처: [REP 103](https://github.com/ros-infrastructure/rep/blob/master/rep-0103.rst), [REP 105](https://github.com/ros-infrastructure/rep/blob/master/rep-0105.rst).
 
 **이 repo에서 발견된 명명 위반(P4_FLAGS 후보, 고칠 때까지 새 코드는 답습 금지)**
@@ -74,7 +74,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
   - `utils/` — 헬퍼(`conversions.py`, `profiler.py`, `visualization.py`, `topics.py`).
   - `cpp/` — C++ 바인딩 wrapper + 순수파이썬 fallback.
   - `test/` — 테스트.
-- ⚠️ 의도된 예외: `SLAMNode` 클래스는 `core/slam.py`(알고리즘 계층)에 있고 `nodes/slam_node.py`는 얇은 진입점이다. ROS2 라이프사이클과 알고리즘을 분리하기 위함이며, 이 분리를 깨지 않는다.
+- ⚠️ 의도된 예외: `core/`의 ROS Node 진입 클래스(`SLAMNode`=`core/slam.py:88`, `KalmanNode`=`core/kalman.py:24`, `DeadReckoningNode`=`core/dead_reckoning.py:28`)는 알고리즘 계층인 `core/`에 두고, `nodes/*_node.py`(각 ~10줄)는 그 `main()`을 import하는 얇은 진입점이다. ROS2 라이프사이클과 알고리즘을 분리하기 위함이며, 세 노드 모두 동일 패턴이다 — 이 분리를 깨지 않는다.
 - launch는 `*.launch.py`, config는 `config/` 하위 계층, C++ 빌드는 루트 `CMakeLists.txt`.
 
 ### 2.2 import
@@ -86,7 +86,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 ### 2.3 명명
 - 변수·함수·파라미터: **snake_case**. 비공개는 `_`/`__` 접두.
 - 클래스: **PascalCase**(`Keyframe`, `FactorGraph`, `SLAMNode`, `OculusProperty`). 토픽 등 모듈 상수: **UPPER_SNAKE_CASE**(`IMU_TOPIC`, `SLAM_NS` — `utils/topics.py`).
-- ROS 파라미터는 **dot notation 계층**(`offset.x`, `ssm.enable`, `nssm.enable`). 근거: `core/kalman.py:39-65`.
+- ROS 파라미터는 **dot notation 계층**(`offset.x`, `ssm.enable`, `nssm.enable`). 근거: `core/kalman.py:66-68`(`declare_parameter('offset.x'/'offset.y'/'offset.z')`).
 - **단위는 변수명에 일관되게 넣지 않는다**(`_m`, `_rad`, `_deg` 접미 없음). 단위는 YAML·코드 주석으로 문서화. (이는 "권장"이지 절대 규칙은 아님 — repo 전반에 일관 적용되어 있지 않다.)
 
 ### 2.4 docstring·타입힌트
@@ -97,7 +97,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 - 미지원 변환 등은 명시적 `NotImplementedError`(서술적 메시지, `Raises:` docstring). 선택적 C++ import는 `try/except ImportError`. `main()` 루프는 `try/except KeyboardInterrupt`.
 - ⚠️ 일부 critical 구역(예: `core/mapping_2d.py`)에 catch-all `except Exception`이 있다. 이는 견고성을 위한 기존 패턴이나, **새 코드에서 catch-all은 최소화**하고 잡은 예외는 로깅한다.
 - **로깅 — 컨텍스트로 갈린다(의도된 분기)**:
-  - ROS2 노드 내부 → **`self.get_logger()`**(`.info()`/`.debug()`/`.warning()`). 근거: `core/kalman.py:131`.
+  - ROS2 노드 내부 → **`self.get_logger()`**(`.info()`/`.debug()`/`.warning()`). 근거: `core/kalman.py:137`(`self.get_logger().info(...)`; :130은 `TransformBroadcaster`).
   - 비-Node 코어 모듈 → **`logging.getLogger('<name>')`**(`core/mapping_2d.py:128` — `logging.getLogger('SonarMapping2D')`).
   - 타이밍/디버그 → `CodeTimer`가 `print('[DEBUG] ...')` 사용(`utils/io.py`). 새 코드의 일반 디버그는 `logger.debug()` 선호.
 
@@ -120,6 +120,12 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 - 테스트 추가 시 **live 코드 0줄 변경** 원칙(P2). 코드 변경이 필요한 테스트(kalman·guidance는 module-top import가 rclpy/gtsam을 끌어와 import 자체가 크래시)는 P3 추출 리팩토링 후 다룬다.
 - CI: `.github/workflows/ci.yml`(Python 3.10, transforms3d 미포함).
 
+**P3 동작보존 안전망 (rclpy/gtsam/cv2 부재 환경 대응)**
+- 이 환경엔 rclpy·gtsam·cv2가 없어(numpy/scipy만 있음) 대부분의 `core/` 모듈은 import-time에 크래시한다(`conversions.py:4 import gtsam`이 이를 import하는 모든 모듈로 전파). 따라서 "모듈 실제 로드" import-smoke가 불가능하고, P3 동작보존은 **검증 가능성에 따라 두 갈래**로 증명한다:
+  - **numpy-only 모듈(`core/octree.py`)** → `conftest.py`의 `load_module` fixture로 직접 path-load해 **수학적 골든 마스터**를 잠근다(예: `test_octree.py`의 adaptive 0.3 config 경로 = 0.45). 실측 verifiable.
+  - **rclpy/gtsam/cv2 오염 모듈(slam·kalman·dead_reckoning·mapping_3d·feature_extraction·localization_fft 등)** → path-load 불가 → **정적 AST 게이트**(`test/static_import_gate.py`)로만 검증한다: `py_compile` + repo-내부 import target-set diff(변환 전후 동결) + wildcard dead/live 분류(consumer 직접 바인딩을 차감해 wildcard로만 오는 의존 심볼 집계) + 모듈 top-level 부작용 0. `test_wildcard_gate.py`가 17곳 wildcard의 분류(10 dead / 7 live)와 live의 명시 심볼 집합을 골든 마스터로 동결한다.
+- ⚠️ **한계(정직하게)**: AST 게이트는 경로·타겟집합·심볼집합 불변을 *정적으로* 증명할 뿐, 런타임 심볼 binding(동명이클래스, `__init__` re-export 섀도잉, 메서드→함수 추출의 외부 동적 호출자)은 증명하지 못한다. `getattr`/문자열 디스패치는 별도 grep으로 확인한다. 런타임 검증(`colcon build` + `ros2 launch` 스모크)은 **P4 sign-off**로 미룬다.
+
 ### 2.9 C++ / pybind11 확장
 - `CMakeLists.txt`가 확장별로 별도 **pybind11 MODULE 타겟**을 정의(`cfar`, `dda_traversal`, `octree_mapping`, `ray_processor`, `pcl_module`). `.so` 네이밍은 `SET_TARGET_PROPERTIES`로 지정. 재사용 코어는 static lib로 빼서 다른 모듈이 링크(`octree_mapping_core`, `CMakeLists.txt:183` STATIC). 근거: `CMakeLists.txt`의 MODULE 타겟 — cfar(115)·dda_traversal(149)·octree_mapping(205)·ray_processor(250)·pcl_module(297).
 - 설치 경로: `local/lib/python3.X/dist-packages/stonefish_slam/`.
@@ -130,4 +136,5 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 ## 3. 적용 메모
 - 이 repo의 SSOT는 이 문서다. `CLAUDE.md`가 생기면 "작업 전 `docs/CONVENTIONS.md` 필독" 포인터 1줄을 둔다(CLAUDE.md만 자동 로드되므로).
 - 라이선스는 **GPL-3.0**(루트 `LICENSE` 기준). 메인테이너: Seungmin Kim <luckkim123@gmail.com>.
-- `P4_FLAGS.md`에 모인 수치/알고리즘 이슈는 P4에서 소화한다.
+- `P4_FLAGS.md`에 모인 수치/알고리즘 이슈는 P4에서 소화한다(노드명 'slam_node' 3중충돌, standalone 노드 구조 정리, god-method 분해, `polar_to_cartesian` 3중 정의 통합, 수치 4건: pressure→depth 1000배·ICP float32·fusion observation_count·Joseph form, rename군 STATUS/X()/SLAM_callback, PascalCase 파라미터, frame_id `world_ned` 통일, wildcard 런타임 sign-off, `__all__` 추가, `dead_reckoning.py:175` depth 복원 등). **P3는 동작 보존이 가능한 것만 처리했다** — 순수 이동·dead 제거·dedup·import 정리·메타데이터·문서·테스트 추가. 런타임 동작(수치 출력·토픽 그래프·노드명 네임스페이스)을 바꾸는 것은 전부 P4로 격리한다.
+- P3 안전망 도구: `test/static_import_gate.py`(AST 정적 게이트), `test/test_wildcard_gate.py`(wildcard 분류 동결), `test/test_octree.py`(numpy 실측 골든). §2.8 'P3 동작보존 안전망' 참조.
