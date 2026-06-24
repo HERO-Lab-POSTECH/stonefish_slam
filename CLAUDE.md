@@ -12,6 +12,6 @@ ROS2 Humble 수중 SLAM 패키지 — Python SLAM 코어(`core/`)와 pybind11 C+
 ## 핵심 사실
 - 라이선스 **GPL-3.0**, 메인테이너 Seungmin Kim <luckkim123@gmail.com>.
 - 빌드: `CMakeLists.txt`(ament_cmake + Python). C++ pybind11 확장 때문에 setup.py가 없다 — C++/Python 혼합 패키지의 정당한 형태(`docs/CONVENTIONS.md` §2.0).
-- 좌표계 **ENU**(`map`/`odom`/`base_link`, REP 105 부합). 단 3D 매핑 경로는 `world_ned`(NED) 레거시를 일부 혼용(`core/slam.py:877`·`mapping_3d.py` — 통일은 P4, `docs/CONVENTIONS.md` §2.0). ⚠️ sim은 전역 NED(`world_ned`)라 두 repo 통합 시 TF 변환 필요.
+- 좌표계 **ENU**(`map`/`odom`/`base_link`, REP 105 부합). 단 3D 매핑 경로는 `world_ned`(NED) 레거시를 일부 혼용(`core/slam.py:824`·`mapping_3d.py` — 통일은 P4, `docs/CONVENTIONS.md` §2.0). ⚠️ sim은 전역 NED(`world_ned`)라 두 repo 통합 시 TF 변환 필요.
 - 테스트: 루트 `conftest.py`의 `load_module` fixture로 모듈 직접 로드(import-time rclpy/gtsam 오염 회피), `pytest -v`. vendored pybind11은 discovery 배제. CI는 `.github/workflows/ci.yml`(Python 3.10).
 - 미해결 수치/명명 이슈는 [`P4_FLAGS.md`](P4_FLAGS.md)에 모인다(현재: ICP 수렴·노드명 3중 충돌·wildcard import 등) — 새 코드는 거기 적힌 안티패턴을 답습하지 않는다.

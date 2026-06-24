@@ -58,11 +58,11 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 
 **좌표계 — REP 103/105 (★중요, sim과 다름)**
 - ROS 표준(REP 103)은 world에 **ENU**, body에 **FLU**를 1차로, NED는 `_ned` 접미사 secondary frame으로 허용한다. REP 105는 표준 프레임 `earth→map→odom→base_link`를 규정(`map`은 Z-up=ENU 정렬).
-- slam은 `odom`·`map`·`base_link`(표준 ROS ENU 관행)를 쓴다 — REP 105 부합. 단 `core/mapping_3d.py`·`mapping_3d_standalone_node.py`는 `frame_id='world_ned'`(센서 레거시)를 기본값으로 둔다. ⚠️ `core/slam.py:877`도 3D 매핑 경로(`mapper_3d.get_octomap_msg`)에서 `frame_id='world_ned'`로 octomap을 publish한다 — 즉 SLAMNode는 같은 노드 안에서 `'map'`(ENU, :861/942/1010/1062 등)과 `'world_ned'`(NED, :877)를 **혼용**한다. 통일은 TF 변환을 수반하는 동작 변경이라 P4(아래 P4_FLAGS 참조).
+- slam은 `odom`·`map`·`base_link`(표준 ROS ENU 관행)를 쓴다 — REP 105 부합. 단 `core/mapping_3d.py`·`mapping_3d_standalone_node.py`는 `frame_id='world_ned'`(센서 레거시)를 기본값으로 둔다. ⚠️ `core/slam.py:824`도 3D 매핑 경로(`mapper_3d.get_octomap_msg`)에서 `frame_id='world_ned'`로 octomap을 publish한다 — 즉 SLAMNode는 같은 노드 안에서 `"map"`(ENU, :808/889/957/1009 등)과 `'world_ned'`(NED, :824)를 **혼용**한다. 통일은 TF 변환을 수반하는 동작 변경이라 P4(아래 P4_FLAGS 참조).
 - ⚠️ **sim과의 좌표계 불일치**: sim은 전역에 `world_ned`(NED), slam은 `map`/`odom`(ENU)을 쓴다. 둘 다 각자 정당하나, **두 repo를 한 TF 트리로 통합할 때 NED↔ENU 변환이 필요**하다(통합 작업 시 반드시 다룰 것). 출처: [REP 103](https://github.com/ros-infrastructure/rep/blob/master/rep-0103.rst), [REP 105](https://github.com/ros-infrastructure/rep/blob/master/rep-0105.rst).
 
 **이 repo에서 발견된 명명 위반(P4_FLAGS 후보, 고칠 때까지 새 코드는 답습 금지)**
-- ⚠️ **CRITICAL — 노드명 3중 충돌**: `nodes/mapping_2d_standalone_node.py:29`와 `nodes/mapping_3d_standalone_node.py:30`이 둘 다 `super().__init__('slam_node')`로 초기화되며, `core/slam.py:94`(`Node.__init__(self, 'slam_node')`)도 `'slam_node'`다. 셋 중 둘 이상이 동시에 뜨면 ROS2 고유 노드명 요구를 위반한다. 표준 standalone 노드는 `mapping_2d_node`·`mapping_3d_node`처럼 고유 이름을 써야 한다.
+- ⚠️ **CRITICAL — 노드명 3중 충돌**: `nodes/mapping_2d_standalone_node.py:28`와 `nodes/mapping_3d_standalone_node.py:30`이 둘 다 `super().__init__('slam_node')`로 초기화되며, `core/slam.py:41`(`Node.__init__(self, 'slam_node')`)도 `'slam_node'`다. 셋 중 둘 이상이 동시에 뜨면 ROS2 고유 노드명 요구를 위반한다. 표준 standalone 노드는 `mapping_2d_node`·`mapping_3d_node`처럼 고유 이름을 써야 한다.
 
 ---
 
@@ -74,7 +74,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
   - `utils/` — 헬퍼(`conversions.py`, `profiler.py`, `visualization.py`, `topics.py`).
   - `cpp/` — C++ 바인딩 wrapper + 순수파이썬 fallback.
   - `test/` — 테스트.
-- ⚠️ 의도된 예외: `core/`의 ROS Node 진입 클래스(`SLAMNode`=`core/slam.py:88`, `KalmanNode`=`core/kalman.py:24`, `DeadReckoningNode`=`core/dead_reckoning.py:28`)는 알고리즘 계층인 `core/`에 두고, `nodes/*_node.py`(각 ~10줄)는 그 `main()`을 import하는 얇은 진입점이다. ROS2 라이프사이클과 알고리즘을 분리하기 위함이며, 세 노드 모두 동일 패턴이다 — 이 분리를 깨지 않는다.
+- ⚠️ 의도된 예외: `core/`의 ROS Node 진입 클래스(`SLAMNode`=`core/slam.py:35`, `KalmanNode`=`core/kalman.py:24`, `DeadReckoningNode`=`core/dead_reckoning.py:22`)는 알고리즘 계층인 `core/`에 두고, `nodes/*_node.py`(각 ~10줄)는 그 `main()`을 import하는 얇은 진입점이다. ROS2 라이프사이클과 알고리즘을 분리하기 위함이며, 세 노드 모두 동일 패턴이다 — 이 분리를 깨지 않는다.
 - launch는 `*.launch.py`, config는 `config/` 하위 계층, C++ 빌드는 루트 `CMakeLists.txt`.
 
 ### 2.2 import

@@ -16,9 +16,10 @@ Sonar-based SLAM (Simultaneous Localization and Mapping) for underwater robots u
 ### Dependencies
 
 - stonefish_sim packages (stonefish_ros2, stonefish_msgs)
-- Python: numpy, scipy, opencv-python, transforms3d
+- Python: numpy, scipy, opencv-python, scikit-learn, shapely, matplotlib
+- ROS: tf_transformations
 - C++ build: pybind11, Eigen3, PCL, libpointmatcher
-- Optional: GTSAM (for factor graph optimization)
+- GTSAM (required — factor graph optimization; unguarded module-top import)
 
 ### Build
 
@@ -61,6 +62,7 @@ ros2 launch stonefish_slam localization.launch.py vehicle_name:=bluerov2
 | `dead_reckoning.launch.py` | Dead reckoning node |
 | `mapping_3d_standalone.launch.py` | Standalone 3D mapping |
 | `mapping_2d_standalone.launch.py` | Standalone 2D mapping |
+| `mapping_combined_standalone.launch.py` | Standalone 2D + 3D mapping |
 
 ### Launch Arguments
 
@@ -97,7 +99,8 @@ ros2 launch stonefish_slam slam.launch.py \
 | `/stonefish_slam/slam/traj` | sensor_msgs/PointCloud2 | Trajectory |
 | `/stonefish_slam/mapping/map_2d_image` | sensor_msgs/Image | 2D occupancy grid |
 | `/stonefish_slam/mapping/map_3d_octomap` | octomap_msgs/Octomap | 3D OctoMap |
-| `/stonefish_slam/feature_extraction/feature` | sensor_msgs/PointCloud2 | Extracted features |
+| `/stonefish_slam/slam/constraint` | visualization_msgs/Marker | Loop-closure constraints |
+| `/stonefish_slam/slam/cloud` | sensor_msgs/PointCloud2 | Aggregated point cloud |
 
 ## Configuration Files
 
@@ -111,13 +114,14 @@ Located in `config/`:
 | `localization.yaml` | SSM and keyframe settings |
 | `factor_graph.yaml` | NSSM loop closure parameters |
 | `icp.yaml` | ICP (libpointmatcher) configuration |
+| `dead_reckoning.yaml` | Dead-reckoning (DVL/IMU) settings |
 | `slam.yaml` | Global SLAM settings |
 
 ### Update Methods
 
-- **log_odds**: Standard log-odds update (config: `method_log_odds.yaml`)
-- **weighted_avg**: Weighted average update (config: `method_weighted_avg.yaml`)
-- **iwlo**: Inverse-Weighted Log-Odds (config: `method_iwlo.yaml`)
+- **log_odds**: Standard log-odds update (config: `config/mapping/method_log_odds.yaml`)
+- **weighted_avg**: Weighted average update (config: `config/mapping/method_weighted_avg.yaml`)
+- **iwlo**: Inverse-Weighted Log-Odds (config: `config/mapping/method_iwlo.yaml`)
 
 ## Nodes
 

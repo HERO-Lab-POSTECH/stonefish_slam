@@ -44,9 +44,9 @@
 
 ## 노드명 3중 충돌 — standalone mapping 노드 (P3.0 컨벤션 조사에서 발견)
 
-- **파일**: `stonefish_slam/nodes/mapping_2d_standalone_node.py:29`, `stonefish_slam/nodes/mapping_3d_standalone_node.py:30`
+- **파일**: `stonefish_slam/nodes/mapping_2d_standalone_node.py:28`, `stonefish_slam/nodes/mapping_3d_standalone_node.py:30`
 - **발견일**: 2026-06-23 (P3.0 명명·구조 외부 표준 대조 중)
-- **증상**: 두 standalone 노드가 모두 `super().__init__('slam_node')`로 초기화되며, `core/slam.py:94`(`Node.__init__(self, 'slam_node')`)도 `'slam_node'`다. 셋 중 둘 이상이 한 ROS 그래프에 동시에 뜨면 ROS2 고유 노드명 요구(RMW)를 위반해 노드 등록 충돌·진단 혼선이 발생한다.
+- **증상**: 두 standalone 노드가 모두 `super().__init__('slam_node')`로 초기화되며, `core/slam.py:41`(`Node.__init__(self, 'slam_node')`)도 `'slam_node'`다. 셋 중 둘 이상이 한 ROS 그래프에 동시에 뜨면 ROS2 고유 노드명 요구(RMW)를 위반해 노드 등록 충돌·진단 혼선이 발생한다.
 - **근거 표준**: 노드명 고유성은 RMW 강제 사항. [rmw validate_node_name.c](https://github.com/ros2/rmw/blob/master/rmw/src/validate_node_name.c).
 - **수정안**: standalone 노드를 각자 고유 이름(`mapping_2d_node`·`mapping_3d_node`)으로 초기화. 동작 변경(노드명 토픽 네임스페이스에 영향 가능)이라 P4에서 처리.
 
