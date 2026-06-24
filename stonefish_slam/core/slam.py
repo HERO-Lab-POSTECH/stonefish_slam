@@ -87,6 +87,7 @@ class SLAMNode(Node):
         self.declare_parameter('slam_prior_noise', [0.1, 0.1, 0.01])
         self.declare_parameter('slam_odom_noise', [0.2, 0.2, 0.02])
         self.declare_parameter('slam_icp_noise', [0.1, 0.1, 0.01])
+        self.declare_parameter('slam_loop_robust_c', 3.0)
         self.declare_parameter('point_downsample_resolution', 0.5)
         self.declare_parameter('ssm.enable', False)
         self.declare_parameter('ssm.min_points', 50)
@@ -558,6 +559,7 @@ class SLAMNode(Node):
 
         # Set noise models in factor graph
         self.fg.set_noise_models(prior_model, odom_model, icp_odom_model)
+        self.fg.robust_loop_c = self.get_parameter('slam_loop_robust_c').value
 
     def validate_fft_with_odom(self, fft_result: dict, dr_transform):
         """
