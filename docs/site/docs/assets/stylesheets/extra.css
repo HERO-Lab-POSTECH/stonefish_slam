@@ -1,0 +1,36 @@
+/* 한국어 가독성·표 스타일 보강 */
+
+:root {
+  --md-text-font: "Pretendard", "Noto Sans KR", -apple-system, system-ui, sans-serif;
+}
+
+/* 본문 줄간격을 한국어에 맞게 약간 넓힘 */
+.md-typeset {
+  line-height: 1.7;
+}
+
+/* 파라미터 표가 많으므로 표를 촘촘하고 읽기 쉽게 */
+.md-typeset table:not([class]) {
+  font-size: 0.78rem;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-default-fg-color--lightest);
+  font-weight: 600;
+}
+
+/* 코드 폰트 약간 작게 (긴 경로가 많음) */
+.md-typeset code,
+.md-typeset pre > code {
+  font-size: 0.80em;
+}
+
+/* 표 안의 인라인 코드(파라미터명·기본값)를 도드라지게 */
+.md-typeset table:not([class]) code {
+  white-space: nowrap;
+}
+
+/* admonition(경고/팁 박스) 제목을 굵게 */
+.md-typeset .admonition-title {
+  font-weight: 700;
+}

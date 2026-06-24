@@ -1,5 +1,7 @@
 # Stonefish SLAM
 
+📖 **Full documentation site (Korean): https://hero-lab-postech.github.io/stonefish_slam/**
+
 Sonar-based SLAM (Simultaneous Localization and Mapping) for underwater robots using the Stonefish simulator.
 
 ## Features
@@ -20,21 +22,79 @@ See `docs/CONVENTIONS.md` §2.0 for the rationale.
 
 ## Requirements
 
+This is a mixed C++/Python ROS 2 (Humble) package. It needs a C++ toolchain and native
+libraries (for the pybind11 extensions) **in addition to** the Python packages.
+
 ### Dependencies
 
-- stonefish_sim packages (stonefish_ros2, stonefish_msgs)
-- Python: numpy, scipy, opencv-python, scikit-learn, shapely, matplotlib
-- ROS: tf_transformations
-- C++ build: pybind11, Eigen3, PCL, libpointmatcher
-- GTSAM (required — factor graph optimization; unguarded module-top import)
+**ROS 2 packages** (from `package.xml`): `rclcpp`, `rclpy`, `std_msgs`, `sensor_msgs`,
+`geometry_msgs`, `nav_msgs`, `visualization_msgs`, `octomap_msgs`, `tf2_ros`,
+`tf2_geometry_msgs`, `cv_bridge`, `message_filters`, `sensor_msgs_py`, `tf_transformations`,
+and `stonefish_msgs` (provided by the stonefish_sim repo).
+
+**System / C++ build dependencies** (from `CMakeLists.txt`):
+
+| Dependency | Required? | Used by |
+|------------|-----------|---------|
+| `pybind11` | required | all 5 C++ extension modules |
+| Eigen3 (`libeigen3-dev`, `eigen3_cmake_module`) | required | all C++ extensions |
+| OctoMap (`octomap`) | required | `octree_mapping`, `ray_processor` |
+| GTSAM (`ros-humble-gtsam`) | required (C++ lib) | factor-graph backend — but **Python needs pip, see warning** |
+| OpenMP | optional | parallel ray processing (falls back to single-threaded) |
+| libpointmatcher | optional (`QUIET`) | C++ ICP (`pcl` module); Python fallback if absent |
+| PCL (`common`, `filters`) | optional (`QUIET`) | C++ ICP (`pcl` module); Python fallback if absent |
+
+**Python packages** (from `package.xml` / source imports): `numpy`, `scipy`,
+`opencv-python` (`cv2`), `pyyaml`, `scikit-learn` (`sklearn`), `shapely`, `matplotlib`,
+and `gtsam`.
+
+> ⚠️ **GTSAM Python bindings require pip — apt is not enough.**
+> `sudo apt install ros-humble-gtsam` installs **only the C++ library**, so `import gtsam`
+> from Python (`core/factor_graph.py`, `core/localization.py`, `core/types.py`, etc.) fails.
+> You **must** also run `pip install gtsam` to get the Python bindings. Without it the SLAM
+> node will not start.
+
+### Install
+
+Source ROS 2 Humble first, then install the system and Python dependencies.
+
+```bash
+# 0. Source ROS 2 Humble
+source /opt/ros/humble/setup.bash
+
+# 1. System / C++ build dependencies (apt)
+sudo apt install \
+    ros-humble-gtsam \
+    libpointmatcher-dev \
+    ros-humble-octomap \
+    pybind11-dev \
+    libeigen3-dev
+
+# 2. Python GTSAM bindings (REQUIRED — apt provides C++ only)
+pip install gtsam
+```
 
 ### Build
 
+Build the package with `--merge-install` (the existing install tree uses the merged layout),
+then source it.
+
 ```bash
-cd /workspace/colcon_ws
-colcon build --packages-select stonefish_slam
+colcon build --merge-install --packages-select stonefish_slam
 source install/setup.bash
 ```
+
+### Verify the C++ extensions (.so) built
+
+A successful build installs 5 pybind11 modules (`cfar`, `dda_traversal`, `octree_mapping`,
+`ray_processor`, `pcl`). Confirm the `.so` files are present (Python 3.10 path shown):
+
+```bash
+ls install/local/lib/python3.10/dist-packages/stonefish_slam/*.so
+```
+
+If a C++ extension is missing, the package logs a warning and runs the pure-Python fallback
+(the libpointmatcher ICP fallback is less precise — build the extensions for production accuracy).
 
 ## Quick Start
 

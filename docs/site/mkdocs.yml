@@ -1,0 +1,101 @@
+site_name: stonefish_slam 문서
+site_description: 수중 소나 SLAM (GTSAM factor graph·ICP·CFAR·OctoMap, ROS2 Humble) — 구조·사용법·파라미터·방법론
+site_author: HERO Lab POSTECH
+site_url: https://hero-lab-postech.github.io/stonefish_slam/
+docs_dir: docs
+use_directory_urls: true
+
+theme:
+  name: material
+  language: ko
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: 다크 모드로 전환
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: 라이트 모드로 전환
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tooltips
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - tables
+  - attr_list
+  - md_in_html
+  - footnotes
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+extra_javascript:
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+plugins:
+  - search:
+      lang:
+        - ko
+        - en
+
+nav:
+  - 홈: index.md
+  - 시작하기:
+      - 개요와 빠른 시작: getting-started/index.md
+      - 설치와 빌드: getting-started/installation.md
+      - SLAM 실행: getting-started/running.md
+  - 아키텍처:
+      - 시스템 구조: architecture/index.md
+      - 노드와 토픽: architecture/nodes-topics.md
+      - 좌표계와 TF: architecture/frames.md
+  - 방법론·알고리즘:
+      - SLAM 파이프라인: methodology/index.md
+      - 피처 추출(CFAR): methodology/feature-cfar.md
+      - 위치 추정(ICP·FFT): methodology/localization.md
+      - 팩터 그래프(GTSAM): methodology/factor-graph.md
+      - 매핑(2D·3D OctoMap): methodology/mapping.md
+  - 파라미터 레퍼런스:
+      - 개요와 사용법: parameters/index.md
+      - 소나·피처: parameters/sonar-feature.md
+      - 위치추정·팩터그래프: parameters/localization-graph.md
+      - 매핑(2D·3D): parameters/mapping.md
+  - 버전·상태: status.md

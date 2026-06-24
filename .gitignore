@@ -25,3 +25,6 @@ __pycache__/
 # OMC/OMP agent work artifacts
 .omc/
 .omp/
+
+# MkDocs build output
+docs/site/site/

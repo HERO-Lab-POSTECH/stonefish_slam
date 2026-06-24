@@ -1,0 +1,59 @@
+name: Deploy documentation site
+
+# stonefish_slam MkDocs (Material) 문서 사이트를 GitHub Pages에 배포한다.
+# docs/site/ 안의 소스가 바뀌면 GitHub 러너가 mkdocs build를 돌려 산출물을 Pages에 올린다.
+
+on:
+  push:
+    branches:
+      - docs-site
+      - main
+    paths:
+      - "docs/site/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 동시에 여러 배포가 겹치지 않도록 직렬화 (진행 중 실행은 취소하지 않고 큐잉)
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install MkDocs Material
+        run: pip install mkdocs-material
+
+      - name: Build site (strict)
+        working-directory: docs/site
+        run: mkdocs build --strict
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
