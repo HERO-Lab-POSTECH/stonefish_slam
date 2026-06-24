@@ -1,7 +1,6 @@
 # python imports
 import os
 import numpy as np
-import struct
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
@@ -30,59 +29,6 @@ from stonefish_slam.core.feature_extraction import FeatureExtraction
 from stonefish_slam.core.localization_fft import FFTLocalizer
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import *
-
-
-def pointcloud2_to_xyz_array(cloud_msg):
-    """
-    Convert PointCloud2 message to numpy array of XYZ points
-
-    Args:
-        cloud_msg: sensor_msgs.msg.PointCloud2
-
-    Returns:
-        numpy array of shape (N, 3) with xyz coordinates
-    """
-    # Get point step and create dtype
-    point_step = cloud_msg.point_step
-
-    # Parse fields to find x, y, z offsets
-    field_names = [field.name for field in cloud_msg.fields]
-
-    # Find offsets for x, y, z
-    x_offset = None
-    y_offset = None
-    z_offset = None
-
-    for field in cloud_msg.fields:
-        if field.name == 'x':
-            x_offset = field.offset
-        elif field.name == 'y':
-            y_offset = field.offset
-        elif field.name == 'z':
-            z_offset = field.offset
-
-    if x_offset is None or y_offset is None or z_offset is None:
-        raise ValueError("PointCloud2 must have x, y, z fields")
-
-    # Convert data to numpy array
-    num_points = cloud_msg.width * cloud_msg.height
-    points = []
-
-    for i in range(num_points):
-        offset = i * point_step
-
-        # Unpack x, y, z as floats
-        x = struct.unpack('f', cloud_msg.data[offset + x_offset:offset + x_offset + 4])[0]
-        y = struct.unpack('f', cloud_msg.data[offset + y_offset:offset + y_offset + 4])[0]
-        z = struct.unpack('f', cloud_msg.data[offset + z_offset:offset + z_offset + 4])[0]
-
-        points.append([x, y, z])
-
-    # Ensure we return a 2D array even when empty
-    if len(points) == 0:
-        return np.zeros((0, 3), dtype=np.float32)
-
-    return np.array(points, dtype=np.float32)
 
 
 class SLAMNode(Node):
