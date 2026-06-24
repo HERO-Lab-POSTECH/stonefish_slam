@@ -84,12 +84,6 @@ install(PROGRAMS
 )
 
 install(PROGRAMS
-  stonefish_slam/nodes/kalman_node.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME kalman_node
-)
-
-install(PROGRAMS
   stonefish_slam/nodes/mapping_3d_standalone_node.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME mapping_3d_standalone

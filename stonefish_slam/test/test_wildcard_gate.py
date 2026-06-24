@@ -31,7 +31,6 @@ from static_import_gate import module_to_file, module_exported_names  # noqa: E4
 # T4b가 만든 7개 명시 import: (consumer, source 점표기) → 명시해야 할 심볼 집합.
 # 골든 마스터(2026-06-24 게이트 산출, code-reviewer 함수별 전수 확인).
 _EXPLICIT_IMPORTS = {
-    ('stonefish_slam/core/kalman.py', 'stonefish_slam.utils.conversions'): {'g2r'},
     ('stonefish_slam/core/dead_reckoning.py', 'stonefish_slam.utils.conversions'):
         {'g2n', 'g2r', 'n2g', 'r2g'},
     ('stonefish_slam/core/types.py', 'stonefish_slam.utils.conversions'):
