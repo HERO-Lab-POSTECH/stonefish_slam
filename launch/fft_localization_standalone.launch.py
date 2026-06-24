@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""Launch file for independent 2D mapping standalone node."""
+"""Launch file for the opt-in standalone FFT localization node.
+
+FFT localization is internal to slam_node by default; this launch provides
+the optional standalone variant that only publishes raw consecutive-frame
+transforms (no odom validation, no DR fallback).
+
+Parameters are passed directly as a dict because the node name
+('fft_localization_node') does not match the config YAML namespace
+('slam_node'). The node's declare_parameter defaults already mirror
+config/slam.yaml (fft_localization.*) and config/sonar.yaml (sonar.*), so
+these values keep the launch self-documenting and parameterized by vehicle_name.
+"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
-from pathlib import Path
 
 
 def generate_launch_description():
-    pkg_share = Path(get_package_share_directory('stonefish_slam'))
-    config_dir = pkg_share / 'config'
-
     # Declare launch arguments
     vehicle_name_arg = DeclareLaunchArgument(
         'vehicle_name',
@@ -28,18 +34,14 @@ def generate_launch_description():
 
     vehicle_name = LaunchConfiguration('vehicle_name')
 
-    mapping_2d_node = Node(
+    fft_node = Node(
         package='stonefish_slam',
-        executable='mapping_2d_standalone',
-        name='slam_node',  # Must match yaml namespace (slam_node.ros__parameters)
+        executable='fft_localization_node',
+        name='fft_localization_node',
         parameters=[
-            str(config_dir / 'sonar.yaml'),    # Sonar parameters
-            str(config_dir / 'mapping.yaml'),  # Mapping parameters
-            str(config_dir / 'slam.yaml'),     # General SLAM params
             {
-                'frame_interval': 10,
-                'odom_topic': ['/', vehicle_name, '/odometry'],
                 'sonar_topic': ['/', vehicle_name, '/fls/image'],
+                'pose_topic': '/fft_localization/transform',
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
             }
         ],
@@ -49,5 +51,5 @@ def generate_launch_description():
     return LaunchDescription([
         vehicle_name_arg,
         use_sim_time_arg,
-        mapping_2d_node,
+        fft_node,
     ])

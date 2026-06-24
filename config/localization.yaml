@@ -13,6 +13,7 @@ slam_node:
     slam_prior_noise: [0.1, 0.1, 0.01]  # Initial pose uncertainty
     slam_odom_noise: [0.2, 0.2, 0.02]   # Dead reckoning uncertainty
     slam_icp_noise: [0.1, 0.1, 0.01]    # ICP measurement uncertainty
+    slam_loop_robust_c: 3.0              # Cauchy robust kernel c for loop closure (NSSM) factors only
 
     # ==================== Point Cloud Processing ====================
     # Point cloud downsampling for ICP/publishing

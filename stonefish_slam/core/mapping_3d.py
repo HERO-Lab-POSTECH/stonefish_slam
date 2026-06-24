@@ -661,20 +661,17 @@ class SonarMapping3D:
 
         return propagated_updates
 
-    def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators=None, T_world_to_sonar=None, first_hit_map=None):
-        """
-        Process a single sonar ray (bearing) and accumulate voxel updates
+    def _detect_hits(self, intensity_profile):
+        """Scan intensity_profile and return first-hit index and all high-intensity indices.
 
         Args:
-            bearing_angle: Horizontal angle in radians
-            intensity_profile: 1D array of intensities along range
-            T_sonar_to_world: 4x4 transform matrix from sonar to world
-            voxel_updates: Dictionary to accumulate updates per voxel
-            timing_accumulators: Optional dict with 'dda', 'merge', 'occupied' keys for profiling
-            T_world_to_sonar: Optional 4x4 inverse transform (for shadow validation)
-            first_hit_map: Optional np.ndarray (n_bearings,) for shadow validation
+            intensity_profile: 1D array of intensities along range (row 0 = far).
+
+        Returns:
+            first_hit_idx: Index of first above-threshold bin, or len(intensity_profile)
+                           if no hit (entire range treated as free space).
+            high_intensity_indices: List of all bin indices above intensity_threshold.
         """
-        # Find first hit and all high intensity regions after first hit
         first_hit_idx = -1
         high_intensity_indices = []
 
@@ -690,9 +687,26 @@ class SonarMapping3D:
             # No reflection within range_max → entire measured range is free space
             first_hit_idx = len(intensity_profile)  # Treat entire range as free
 
-        # Calculate vertical aperture parameters
-        half_aperture = self.vertical_fov / 2
+        return first_hit_idx, high_intensity_indices
 
+    def _update_free_space_voxels(self, bearing_angle, first_hit_idx, half_aperture,
+                                  T_sonar_to_world, T_world_to_sonar, first_hit_map,
+                                  voxel_updates, timing_accumulators):
+        """Update free-space voxels along the ray before the first hit.
+
+        Uses C++ DDA batch processing when available; falls back to Python traversal.
+        Accumulates negative log-odds updates into voxel_updates in-place.
+
+        Args:
+            bearing_angle: Horizontal angle in radians.
+            first_hit_idx: Index of first above-threshold bin (from _detect_hits).
+            half_aperture: Half of vertical_fov in radians.
+            T_sonar_to_world: 4x4 transform matrix from sonar to world.
+            T_world_to_sonar: Optional 4x4 inverse transform (for shadow validation).
+            first_hit_map: Optional np.ndarray (n_bearings,) for shadow validation.
+            voxel_updates: Dict to accumulate updates (modified in-place).
+            timing_accumulators: Optional dict with 'dda', 'merge' keys for profiling.
+        """
         # Update free space before first hit (with sparse sampling)
         # Use C++ DDA batch processing if available
         if self.use_dda and first_hit_idx > 0:
@@ -741,7 +755,14 @@ class SonarMapping3D:
                 # Merge results into voxel_updates dict
                 for update in voxel_updates_list:
                     key = tuple(update.key)
-                    voxel_center = np.array(update.key, dtype=float) * self.voxel_resolution
+                    # update.key is a floor-quantized grid index (C++
+                    # dda_traversal.cpp:11-15 world_to_key uses std::floor), so
+                    # the cell CENTER is (key + 0.5) * resolution; key *
+                    # resolution returns the cell corner (half-voxel bias). The
+                    # Python fallback path feeds the true continuous pt_world to
+                    # shadow validation, so the corner here was inconsistent and
+                    # offset the shadow distance by half a voxel.
+                    voxel_center = (np.array(update.key, dtype=float) + 0.5) * self.voxel_resolution
 
                     # Shadow validation (same as Python fallback path)
                     if T_world_to_sonar is not None and first_hit_map is not None:
@@ -838,6 +859,24 @@ class SonarMapping3D:
                     voxel_updates[voxel_key]['sum'] += log_odds_update  # Use weighted value
                     voxel_updates[voxel_key]['count'] += 1
 
+    def _update_occupied_voxels(self, bearing_angle, high_intensity_indices, intensity_profile,
+                                half_aperture, T_sonar_to_world, T_world_to_sonar, first_hit_map,
+                                voxel_updates, timing_accumulators):
+        """Update occupied voxels for all high-intensity bins (at and after first hit).
+
+        Accumulates positive log-odds updates into voxel_updates in-place.
+
+        Args:
+            bearing_angle: Horizontal angle in radians.
+            high_intensity_indices: List of bin indices above threshold (from _detect_hits).
+            intensity_profile: 1D array of intensities along range.
+            half_aperture: Half of vertical_fov in radians.
+            T_sonar_to_world: 4x4 transform matrix from sonar to world.
+            T_world_to_sonar: Optional 4x4 inverse transform (for shadow validation).
+            first_hit_map: Optional np.ndarray (n_bearings,) for shadow validation.
+            voxel_updates: Dict to accumulate updates (modified in-place).
+            timing_accumulators: Optional dict with 'occupied' key for profiling.
+        """
         # [E] Occupied voxel processing timing
         if timing_accumulators is not None:
             t_occupied = time.perf_counter()
@@ -929,22 +968,49 @@ class SonarMapping3D:
         if timing_accumulators is not None:
             timing_accumulators['occupied'] += (time.perf_counter() - t_occupied)
 
-    def process_sonar_image(self, polar_image, robot_pose):
+    def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators=None, T_world_to_sonar=None, first_hit_map=None):
         """
-        Process sonar image and update probabilistic map
+        Process a single sonar ray (bearing) and accumulate voxel updates
 
         Args:
-            polar_image: 2D numpy array (height x width) with intensity values
-            robot_pose: Robot pose (dict with 'position'/'orientation' or ROS Pose message)
+            bearing_angle: Horizontal angle in radians
+            intensity_profile: 1D array of intensities along range
+            T_sonar_to_world: 4x4 transform matrix from sonar to world
+            voxel_updates: Dictionary to accumulate updates per voxel
+            timing_accumulators: Optional dict with 'dda', 'merge', 'occupied' keys for profiling
+            T_world_to_sonar: Optional 4x4 inverse transform (for shadow validation)
+            first_hit_map: Optional np.ndarray (n_bearings,) for shadow validation
         """
-        # [A] Frame start timing
-        if self.profiling_enabled:
-            t_frame_start = time.perf_counter()
+        first_hit_idx, high_intensity_indices = self._detect_hits(intensity_profile)
 
-        # Start timing if profiling enabled (legacy)
-        if self.enable_profiling:
-            frame_start_time = time.time()
+        # Calculate vertical aperture parameters
+        half_aperture = self.vertical_fov / 2
 
+        self._update_free_space_voxels(
+            bearing_angle, first_hit_idx, half_aperture,
+            T_sonar_to_world, T_world_to_sonar, first_hit_map,
+            voxel_updates, timing_accumulators,
+        )
+
+        self._update_occupied_voxels(
+            bearing_angle, high_intensity_indices, intensity_profile,
+            half_aperture, T_sonar_to_world, T_world_to_sonar, first_hit_map,
+            voxel_updates, timing_accumulators,
+        )
+
+    def _prepare_image_frame(self, polar_image, robot_pose):
+        """[A] Coerce image, adapt dimensions, compute transforms and first-hit map.
+
+        Args:
+            polar_image: 2D array-like of intensity values (range_bins x bearing_bins).
+            robot_pose: Dict or ROS Pose message describing robot pose.
+
+        Returns:
+            Tuple (polar_image, range_bins, bearing_bins,
+                   T_sonar_to_world, T_world_to_sonar, first_hit_map)
+            where polar_image is guaranteed to be an np.ndarray and self.bearing_angles /
+            self.range_resolution may have been updated in-place to match image dimensions.
+        """
         # Ensure image is numpy array
         if not isinstance(polar_image, np.ndarray):
             polar_image = np.array(polar_image)
@@ -975,25 +1041,47 @@ class SonarMapping3D:
         # Compute first-hit map for shadow validation
         first_hit_map = self._compute_first_hit_map(polar_image)
 
-        # Initialize voxel update accumulator for this frame
-        # Dictionary to accumulate updates: key -> (sum_updates, count)
-        voxel_updates = {}  # Will store accumulated updates per voxel
-        all_voxel_updates = {}  # Combined updates (original + propagated)
+        return polar_image, range_bins, bearing_bins, T_sonar_to_world, T_world_to_sonar, first_hit_map
+
+    def _process_all_rays(self, polar_image, bearing_bins, T_sonar_to_world, T_world_to_sonar, first_hit_map):
+        """[B] Iterate over bearing subset and accumulate voxel updates.
+
+        Handles both the C++ fast path (direct octree update) and the Python
+        per-ray loop.  Returns a tuple (use_cpp_path, all_voxel_updates,
+        processed_bearings, timing_accumulators, t_ray_total) where:
+        - use_cpp_path: bool — True if C++ handled the frame.
+        - all_voxel_updates: dict of accumulated voxel update entries (Python path only;
+          empty dict on C++ path since octree is updated directly).
+        - processed_bearings: list of bearing indices that were processed.
+        - timing_accumulators: dict with 'dda'/'merge'/'occupied' elapsed totals.
+        - t_ray_total: wall-clock seconds for ray processing (only valid when
+          self.profiling_enabled; otherwise 0.0).
+
+        Args:
+            polar_image: (range_bins x bearing_bins) np.ndarray.
+            bearing_bins: int — number of bearing columns.
+            T_sonar_to_world: 4x4 transform matrix.
+            T_world_to_sonar: 4x4 inverse transform matrix.
+            first_hit_map: np.ndarray (n_bearings,) first-hit indices per bearing.
+        """
+        # Initialize voxel update accumulators
+        voxel_updates = {}      # per-bearing scratch space (cleared each iteration)
+        all_voxel_updates = {}  # combined updates (original + propagated)
 
         # Process subset of bearings for efficiency
         # Reduced divisor since propagation is disabled
         bearing_divisor = 128  # Reduced from 256 (50% fewer bearings processed)
         bearing_step = max(1, bearing_bins // bearing_divisor)
 
-        # Track processed bearings for propagation
+        # Track processed bearings for profiling
         processed_bearings = []
 
         # [B] Ray processing timing
+        timing_accumulators = {'dda': 0.0, 'merge': 0.0, 'occupied': 0.0}
+        t_ray_total = 0.0
+
         if self.profiling_enabled:
             t_ray_start = time.perf_counter()
-            timing_accumulators = {'dda': 0.0, 'merge': 0.0, 'occupied': 0.0}
-        else:
-            timing_accumulators = {'dda': 0.0, 'merge': 0.0, 'occupied': 0.0}  # Always initialize for profiling compatibility
 
         # C++ vs Python ray processing decision
         use_cpp_path = self.use_cpp_ray_processor and self.cpp_ray_processor is not None
@@ -1008,20 +1096,13 @@ class SonarMapping3D:
                 self.cpp_ray_processor.process_sonar_image(polar_image, T_sonar_to_world)
 
                 if self.profiling_enabled:
-                    t_cpp_total = time.perf_counter() - t_cpp_start
-                    # Store in ray_processing slot for compatibility
-                    t_ray_total = t_cpp_total
+                    t_ray_total = time.perf_counter() - t_cpp_start
 
                 # C++ updates octree directly, no Python merge needed
                 # Calculate processed rays from C++ bearing_step (not Python's bearing_step!)
                 cpp_step = self.cpp_bearing_step if hasattr(self, 'cpp_bearing_step') else 2
-                num_rays_processed = bearing_bins // cpp_step
                 for b_idx in range(0, bearing_bins, cpp_step):
                     processed_bearings.append(b_idx)
-
-                # Estimate voxel count (C++ doesn't report exact count yet)
-                # Typical: ~100-500 voxels per ray depending on scene
-                num_voxels_updated = num_rays_processed * 200  # Rough estimate
 
             except Exception as e:
                 print(f"[ERROR] C++ RayProcessor failed: {e}")
@@ -1103,28 +1184,75 @@ class SonarMapping3D:
             if self.profiling_enabled:
                 t_ray_total = time.perf_counter() - t_ray_start
 
-        # Apply averaged updates to all voxels (only if Python path was used)
+        return use_cpp_path, all_voxel_updates, processed_bearings, timing_accumulators, t_ray_total
+
+    def _apply_octree_updates(self, all_voxel_updates):
+        """[G] Flush accumulated voxel updates into the octree (Python path only).
+
+        Computes per-voxel average log-odds and calls octree.update_voxel with
+        adaptive protection enabled.
+
+        Args:
+            all_voxel_updates: dict mapping voxel_key → {'point', 'sum', 'count', 'intensity'}.
+
+        Returns:
+            Tuple (num_voxels_updated, t_octree_total) where t_octree_total is the
+            elapsed wall-clock seconds (only meaningful when self.profiling_enabled).
+        """
+        # [G] Octree updates timing
+        t_octree_total = 0.0
+        if self.profiling_enabled:
+            t_octree_start = time.perf_counter()
+
+        num_voxels_updated = 0
+
+        # Python update path (existing)
+        for voxel_key, update_info in all_voxel_updates.items():
+            # Calculate average update
+            avg_update = update_info['sum'] / update_info['count']
+
+            # Apply update (adaptive protection for both occupied AND free)
+            # CRITICAL FIX: Free space should also be protected from rapid changes
+            adaptive = True  # Always use adaptive protection
+            self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
+            num_voxels_updated += 1
+
+        if self.profiling_enabled:
+            t_octree_total = time.perf_counter() - t_octree_start
+
+        return num_voxels_updated, t_octree_total
+
+    def process_sonar_image(self, polar_image, robot_pose):
+        """
+        Process sonar image and update probabilistic map
+
+        Args:
+            polar_image: 2D numpy array (height x width) with intensity values
+            robot_pose: Robot pose (dict with 'position'/'orientation' or ROS Pose message)
+        """
+        # [A] Frame start timing
+        if self.profiling_enabled:
+            t_frame_start = time.perf_counter()
+
+        # Start timing if profiling enabled (legacy)
+        if self.enable_profiling:
+            frame_start_time = time.time()
+
+        # [A] Coerce image, adapt dimensions, compute transforms + first-hit map
+        polar_image, _range_bins, bearing_bins, T_sonar_to_world, T_world_to_sonar, first_hit_map = \
+            self._prepare_image_frame(polar_image, robot_pose)
+
+        # [B] Process all bearing rays → accumulated voxel updates
+        use_cpp_path, all_voxel_updates, processed_bearings, timing_accumulators, t_ray_total = \
+            self._process_all_rays(polar_image, bearing_bins, T_sonar_to_world, T_world_to_sonar, first_hit_map)
+
+        # [G] Flush accumulated updates into octree (Python path only)
         if not use_cpp_path:
-            # [G] Octree updates timing
-            if self.profiling_enabled:
-                t_octree_start = time.perf_counter()
-
-            num_voxels_updated = 0
-
-            # Python update path (existing)
-            for voxel_key, update_info in all_voxel_updates.items():
-                # Calculate average update
-                avg_update = update_info['sum'] / update_info['count']
-
-                # Apply update (adaptive protection for both occupied AND free)
-                # CRITICAL FIX: Free space should also be protected from rapid changes
-                adaptive = True  # Always use adaptive protection
-                self.octree.update_voxel(update_info['point'], avg_update, adaptive=adaptive)
-                num_voxels_updated += 1
-
-            if self.profiling_enabled:
-                t_octree_total = time.perf_counter() - t_octree_start
+            num_voxels_updated, t_octree_total = self._apply_octree_updates(all_voxel_updates)
         else:
+            # C++ path already updated octree directly; estimate voxel count
+            cpp_step = self.cpp_bearing_step if hasattr(self, 'cpp_bearing_step') else 2
+            num_voxels_updated = (bearing_bins // cpp_step) * 200  # Rough estimate
             # C++ path already updated octree, skip Python merge
             if self.profiling_enabled:
                 t_octree_total = 0.0  # No additional octree update needed

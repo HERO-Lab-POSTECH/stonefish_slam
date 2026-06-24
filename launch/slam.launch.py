@@ -2,11 +2,13 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, TextSubstitution, PythonExpression
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 import os
+import tempfile
 
 
 def launch_setup(context, *args, **kwargs):
@@ -31,6 +33,7 @@ def launch_setup(context, *args, **kwargs):
 
     # Get launch argument values
     vehicle_name = LaunchConfiguration('vehicle_name').perform(context)
+    use_sim_time = LaunchConfiguration('use_sim_time').perform(context)
     mode = LaunchConfiguration('mode').perform(context)
     enable_2d_mapping = LaunchConfiguration('enable_2d_mapping').perform(context)
     enable_3d_mapping = LaunchConfiguration('enable_3d_mapping').perform(context)
@@ -48,7 +51,8 @@ def launch_setup(context, *args, **kwargs):
         'enable_2d_mapping': enable_2d_mapping.lower() == 'true',
         'enable_3d_mapping': enable_3d_mapping.lower() == 'true',
         'update_method': update_method,
-        'vehicle_name': vehicle_name
+        'vehicle_name': vehicle_name,
+        'use_sim_time': use_sim_time.lower() == 'true'
     }
 
     # Only add ssm.enable/nssm.enable if explicitly set (override yaml)
@@ -88,7 +92,33 @@ def launch_setup(context, *args, **kwargs):
         ]
     )
 
-    return [slam_node, world_ned_to_map_tf]
+    # RViz visualization (gated by the 'rviz' launch argument).
+    # The shipped config is authored for vehicle_name='bluerov2'. For any other
+    # vehicle, rewrite the 'bluerov2' tokens (topic prefixes + TF frame ids) to
+    # the requested vehicle_name in a temp copy and load that — equivalent to
+    # nav2's ReplaceString, but with no extra dependency. At the default vehicle
+    # the original file is loaded untouched (so opening it directly still works).
+    rviz_config = os.path.join(pkg_share, 'rviz', 'stonefish_slam.rviz')
+    if vehicle_name and vehicle_name != 'bluerov2':
+        with open(rviz_config) as f:
+            rewritten = f.read().replace('bluerov2', vehicle_name)
+        tmp = tempfile.NamedTemporaryFile(
+            mode='w', prefix=f'stonefish_slam_{vehicle_name}_', suffix='.rviz',
+            delete=False)
+        tmp.write(rewritten)
+        tmp.close()
+        rviz_config = tmp.name
+    rviz_node = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        output='screen',
+        arguments=['-d', rviz_config],
+        parameters=[{'use_sim_time': use_sim_time.lower() == 'true'}],
+        condition=IfCondition(LaunchConfiguration('rviz'))
+    )
+
+    return [slam_node, world_ned_to_map_tf, rviz_node]
 
 
 def generate_launch_description():
@@ -112,6 +142,12 @@ def generate_launch_description():
         'vehicle_name',
         default_value='bluerov2',
         description='Vehicle name for topic namespacing'
+    )
+
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='false',
+        description='Use simulation time'
     )
 
     mode_arg = DeclareLaunchArgument(
@@ -154,6 +190,7 @@ def generate_launch_description():
         # Arguments
         rviz_arg,
         vehicle_name_arg,
+        use_sim_time_arg,
         mode_arg,
         enable_2d_mapping_arg,
         enable_3d_mapping_arg,

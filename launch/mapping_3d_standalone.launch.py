@@ -29,8 +29,21 @@ def generate_launch_description():
         description='3D mapping probability update method: log_odds, weighted_avg, iwlo'
     )
 
+    vehicle_name_arg = DeclareLaunchArgument(
+        'vehicle_name',
+        default_value='bluerov2',
+        description='Vehicle name for topic namespacing'
+    )
+
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='false',
+        description='Use simulation time'
+    )
+
     # Build method config path dynamically
     update_method = LaunchConfiguration('update_method')
+    vehicle_name = LaunchConfiguration('vehicle_name')
     method_config_path = PathJoinSubstitution([
         FindPackageShare('stonefish_slam'),
         'config', 'mapping',
@@ -39,6 +52,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         update_method_arg,
+        vehicle_name_arg,
+        use_sim_time_arg,
         Node(
             package='stonefish_slam',
             executable='mapping_3d_standalone',
@@ -53,9 +68,10 @@ def generate_launch_description():
                     # Standalone-specific settings only
                     'resolution': 0.2,
                     'frame_interval': 10,
-                    'odom_topic': '/bluerov2/odometry',
-                    'sonar_topic': '/bluerov2/fls/image',
+                    'odom_topic': ['/', vehicle_name, '/odometry'],
+                    'sonar_topic': ['/', vehicle_name, '/fls/image'],
                     'update_method': update_method,
+                    'use_sim_time': LaunchConfiguration('use_sim_time'),
                 }
             ],
             remappings=[

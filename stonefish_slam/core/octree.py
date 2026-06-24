@@ -169,8 +169,11 @@ class HierarchicalOctree:
             log_odds_update: Log-odds change
             depth: Current tree depth
         """
-        # Check if we've reached resolution or max depth
-        if depth >= self.max_depth or node.size <= self.resolution * 2:
+        # Check if we've reached resolution or max depth.
+        # Stop when the node has shrunk to the configured leaf size (resolution);
+        # the epsilon absorbs sub-ULP float drift. (`depth >= max_depth` remains
+        # an unconditional backstop against non-termination.)
+        if depth >= self.max_depth or node.size <= self.resolution + 1e-9:
             # Leaf node: update log-odds
             node.log_odds += log_odds_update
             node.log_odds = np.clip(node.log_odds, self.log_odds_min, self.log_odds_max)

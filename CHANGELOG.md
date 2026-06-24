@@ -2,7 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.4.0] - 2026-06-24
+
+**P4 알고리즘·수치 정확성 + 의도적 동작 변경.** P3까지의 동작 보존 철칙이 끝나는 단계 — 수치 버그 수정·표준 정합·ROS 그래프 정렬·god-method 분해를 위해 런타임/수치/frame_id를 의도적으로 바꿨다. 검증 기준이 "이전과 동일"에서 "의도대로 올바른가"로 전환됨. 9개 모듈 통째 정독 + 외부 표준 조사 + 적대 검증(0 refuted) + ralplan 합의를 거친 87개 진단에서 도출. 모든 변경은 executor 작업 + code-reviewer 독립 검증(전건 APPROVE, 0 blocker).
+
+### Removed
+- **`kalman_node` 일괄 제거** (P4a T-A1): legacy-dead 노드 — `kalman.py`가 부재 패키지 `uuv_sensor_ros_plugins_msgs`를 import해 실행 시 크래시, launch 참조 0, 출력 토픽(`kalman_odom`/`kalman_path`) 구독처 0, H 행렬이 0으로 하드코딩돼 필터 자체가 무기능. 4중 증거로 dead 확정. `core/kalman.py`·`core/kalman_filter.py`(전적으로 kalman.py 전용)·`nodes/kalman_node.py`·`test/test_kalman.py`·CMakeLists install 블록 제거. live한 `dead_reckoning`은 불변(`stonefish_msgs.DVL` 사용, 공유 코드 없음).
+
+### Fixed
+- **octree leaf size = 2×resolution 버그** (P4a T-A3, `octree.py`): `_update_recursive`가 `node.size <= resolution*2`에서 재귀를 멈춰 모든 leaf voxel이 `2*resolution` 큐브(의도 부피의 8배)였음. 생성자 계약·OctoMap 표준(Hornung 2013)·`world_to_key` 양자화와 모순. `<= resolution + 1e-9`로 수정(epsilon 가드).
+- **DDA free-space voxel corner bias** (P4a T-A4 part1, `mapping_3d.py`): `voxel_center = key * resolution`이 cell 모서리를 가리켜 shadow 검증에 half-voxel 편향. `key`는 floor 양자화 인덱스(C++ `dda_traversal.cpp` `world_to_key` 확인)이므로 cell 중심은 `(key + 0.5) * resolution`. Python fallback 경로와도 정합. (free 영역 반전 + first-hit 정의는 FLS 이미지 row 규약 + live-sim 검증 필요라 시뮬레이터 단계로 연기 — part2 #37.)
+- **Python ICP fallback wrong-transform** (P4a T-A5, `cpp/pcl.py`): perfect-overlap cloud에서 잘못된 transform으로 수렴. P4_FLAGS의 float32 가설은 실증 반박(float32/float64 바이트 동일). 실제 원인은 고정 `outlier_ratio=0.8`이 100% 겹침에서도 대응점 20%를 잘라 Kabsch centroid를 편향시킨 것(TrICP, Chetverikov 2002는 trim 비율 = 실제 overlap 요구). `0.8 → 1.0`으로 수정(`max_correspondence_distance=3.0`이 실제 outlier 거부). C++ 경로(libpointmatcher, 런타임 live)는 0.8이 옳아 불변. xfail 제거 + atol 1e-6 정밀 테스트 추가.
+- **dead_reckoning depth 하드코딩 0.0** (P4b T-B1/T-B2, `dead_reckoning.py` + 신규 `core/depth.py`): `curr_depth`가 항상 0이라 z 추정 불능. 주석 처리됐던 식은 1000배 단위 오류(절대 Pa를 kPa 상수로 나눔) + Z-up 부호 오류로 수면에서 -9990m 반환. 순수 함수 `pressure_to_depth()`를 `core/depth.py`로 추출 — `h = (P - 101325) / (1025 * 9.80665)`, NED z-down(수면→0, 10m→+10, P4_FLAGS의 Z-up 식과 부호 반대). `offset=2.5` fudge 제거. (SLAM은 현재 sim의 odometry를 직접 구독하므로 이 수정은 DR 노드 자체 출력만 바꾸고 맵은 DR 재배선 전까지 불변.)
+
+### Changed
+- **robust Cauchy loss를 loop closure에 연결 + PCM 수치 안정** (P4c T-C2/T-C3, `factor_graph.py`): `create_robust_full_noise_model`이 dead code(caller 0)였고 loop closure 팩터가 non-robust Gaussian을 써 outlier loop에 무방비였음. `add_loop_closure`(NSSM)에만 robust=True 연결, SSM·odometry는 non-robust 유지(표준 관행: odometry reliable, loop만 robust). Cauchy `c=1.0 → 3.0`(3σ에서 weight 0.5, 보수적; config `slam_loop_robust_c`로 조정). 근거: AEROS 2022, Mangelson et al. ICRA 2018, GTSAM robust noise model 문서. `verify_pcm`은 `np.linalg.inv(cov)` → `np.linalg.solve(cov, error)`(near-singular에서 더 안정, well-conditioned 동치). PCM 임계값 11.34 = chi2.ppf(0.99,3)는 표준 부합이라 무변경, 주석에 출처 명시. (궤적 개선 효과는 시뮬레이터 검증 필요 — 코드는 배선·스케일의 올바름까지만 증명.)
+- **전역 frame_id를 `world_ned`로 통일** (P4d T-D1, `slam.py` 8곳 + `visualization.py` 1곳): SLAM 출력 메시지가 전역 프레임에 `"map"`/`"{rov}_map"`(ENU 명명)을 쓰는데 3D 경로·시뮬레이터는 이미 `world_ned`(NED)를 씀. Stonefish가 전역을 NED로 발행하므로 single/multi-ROV 양 경로를 `world_ned`로 통일. REP-105 `odom→base_link` TF 체인과 child_frame_id body 프레임은 의도적 보존(결정: "전역 프레임만"). TF는 identity라 좌표 변환 없이 이름만 정합. 의도적 REP-103/105 비순응(근거 `docs/CONVENTIONS.md` §2.0).
+- **콜백 `SLAM_callback_integrated` → `slam_callback_integrated`** (P4d, `slam.py`): PEP 8 snake_case, 3곳(정의·등록·주석).
+- **C++ 확장 누락을 침묵하지 않고 경고** (P4a T-A5, `cpp/__init__.py`): `except ImportError: pass`가 모든 `.so` import 실패를 삼켜, 확장 없는 빌드가 pure-Python fallback(특히 덜 정밀한 `pcl.py` ICP)을 표시 없이 실행. 누락 모듈명과 degrade 내용을 명시하는 경고 1건을 emit. `.so` 존재 시 동작은 불변.
+
+### Refactored
+- **god-method 분해 — 동작 보존** (P4e T-E1/T-E2, `mapping_3d.py`): `process_sonar_ray`(274줄)를 29줄 조율자 + 3 헬퍼(`_detect_hits`·`_update_free_space_voxels`·`_update_occupied_voxels`)로, `process_sonar_image`(240줄)를 75줄 조율자 + 3 헬퍼(`_prepare_image_frame`·`_process_all_rays`·`_apply_octree_updates`)로 분해. public 시그니처 불변, 순수 코드 이동(code-reviewer가 라인 단위 문자 동등 확인). characterization 테스트를 분해 **전** 작성(oracle), mutation testing으로 비공허성 증명. 인프라: `conftest.py`에 `load_factor_graph`·`load_mapping_3d` fixture 추가(패키지 `__init__`의 cv_bridge import 체인 우회로 clean env 로드).
+
+### Verification
+- clean env(`env -i /usr/bin/python3 -m pytest -q`) 베이스라인 **37 passed, 0 xfail**(P4 시작 13+1xfail → 37 passed로 단조 증가).
+- 모든 동작 변경은 TDD(수치 버그는 RED→GREEN) 또는 characterization(refactor) + code-reviewer 독립 검증(전건 APPROVE, 0 blocker).
+- `package.xml` version 0.3.1 → 0.4.0(SemVer minor — 의도적 동작 변경).
+
+### Notes
+- **노드명 `slam_node` 충돌 가정 반증**(측정): 모든 launch 경로가 단일 `slam_node`를 실행하고, 둘을 함께 띄우는 유일한 경로(`mapping_combined_standalone`)는 `PushRosNamespace`로 분리(`/mapping_2d/slam_node` vs `/mapping_3d/slam_node`)해 전체 노드 경로가 고유. 이름 공유는 config YAML 네임스페이스 재사용 목적의 의도적 설계 — 버그 아님, P4 수정 범위에서 제외.
+- **토픽 rename 불필요**(측정): SLAM 발행 토픽을 sim이 구독하는 것 0개(완전 단방향). 양방향 계약은 sim→slam의 `/{vehicle}/odometry|fls/image|dvl|imu|pressure`뿐(vehicle_name 파라미터 동기화) — 불변.
+- **알려진 한계**: `process_sonar_image` characterization은 identity pose만 써 transform 합성 *순서*를 검증 못 함(분해는 라인 동등으로 이미 증명). 순서 고정 테스트가 전체 실행 시 flaky라(원인 미규명) 거짓 안전망 대신 docstring에 한계 명시 — 향후 합성 수정 시 isolation-stable 테스트 작성.
+- **연기**: T-A4 part2(free 영역 반전 + first-hit 정의)는 FLS 이미지 row 규약 확정 + live-sim 검증 필요라 시뮬레이터 단계로 이월(#37).
+
+## [0.3.1] - 2026-06-24
 
 ### Changed
 - **P3 기업표준 재구조화 — 동작 보존** (2026-06-24): 명명·구조 컨벤션 통일 + import 정리 + 모듈화. 런타임/수치/토픽그래프 변경 없음(pytest 16→20 passed + 1 xfailed, live 동작 불변).

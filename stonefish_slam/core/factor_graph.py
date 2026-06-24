@@ -46,6 +46,10 @@ class FactorGraph:
         self.pcm_queue_size = 5
         self.min_pcm = 3
 
+        # Robust cost parameter for loop closure (NSSM) factors only.
+        # Cauchy kernel: c=3.0 means "down-weight at ~3σ" (conservative).
+        self.robust_loop_c: float = 3.0
+
     @property
     def current_key(self) -> int:
         """Get the number of keyframes in the graph.
@@ -139,7 +143,8 @@ class FactorGraph:
         source_key: int,
         target_key: int,
         transform: gtsam.Pose2,
-        cov: np.ndarray = None
+        cov: np.ndarray = None,
+        robust: bool = False,
     ) -> None:
         """Add ICP-based constraint factor.
 
@@ -148,10 +153,15 @@ class FactorGraph:
             target_key: Target keyframe index
             transform: Relative transform from ICP
             cov: Covariance matrix (if None, uses default)
+            robust: If True, wrap noise model with Cauchy robust kernel.
+                    Should be True only for loop closure (NSSM) factors.
         """
         # Select noise model
         if cov is not None:
-            noise_model = self.create_full_noise_model(cov)
+            if robust:
+                noise_model = self.create_robust_full_noise_model(cov)
+            else:
+                noise_model = self.create_full_noise_model(cov)
         else:
             noise_model = self.icp_odom_model
 
@@ -224,7 +234,8 @@ class FactorGraph:
                     ret.source_key,
                     ret.target_key,
                     ret.estimated_transform,
-                    ret.cov
+                    ret.cov,
+                    robust=True,
                 )
 
                 # Log constraint in keyframe
@@ -259,11 +270,21 @@ class FactorGraph:
             pjk1 = ret_jk.estimated_transform
             pjk2 = pj.between(pi.compose(pil).compose(plk))
 
-            # Compute Mahalanobis distance
+            # Squared Mahalanobis distance via solve (numerically stabler than
+            # forming the explicit inverse; identical on well-conditioned cov).
             error = gtsam.Pose2.Logmap(pjk1.between(pjk2))
-            md = error.dot(np.linalg.inv(ret_jk.cov)).dot(error)
+            md = error.dot(np.linalg.solve(ret_jk.cov, error))
 
-            # chi2.ppf(0.99, 3) = 11.34
+            # PCM consistency gate. md is the SQUARED Mahalanobis distance, so it
+            # is compared against a chi2 quantile directly:
+            #   chi2.ppf(0.99, 3) = 11.34  (3 dof = Pose2 x,y,theta; 99% confidence)
+            # 0.99 is the community-standard operating point (Mangelson et al.,
+            # ICRA 2018; AEROS, Antonante et al. 2022 uses chi2_inv(0.99,3)=11.35).
+            # Known limitation (inherited from the canonical PCM implementation):
+            # only ret_jk.cov is used — the joint covariance of both measurements
+            # and the odometry path (plk) is omitted, making the gate marginally
+            # stricter than the nominal 0.99. Correcting this needs odometry-cov
+            # propagation (research-grade), deferred beyond P4.
             if md < 11.34:
                 G[a].append(b)
                 G[b].append(a)
@@ -397,9 +418,12 @@ class FactorGraph:
         """
         return gtsam.noiseModel.Gaussian.Covariance(cov)
 
-    @staticmethod
-    def create_robust_full_noise_model(cov: np.ndarray) -> gtsam.noiseModel.Robust:
+    def create_robust_full_noise_model(self, cov: np.ndarray) -> gtsam.noiseModel.Robust:
         """Create robust GTSAM noise model from covariance matrix.
+
+        Uses self.robust_loop_c as the Cauchy kernel parameter (default 3.0).
+        c controls at how many sigma the weight starts dropping:
+        Cauchy(c=3.0).weight(3.0) ≈ 0.5 (conservative down-weighting).
 
         Args:
             cov: Covariance matrix
@@ -408,5 +432,5 @@ class FactorGraph:
             GTSAM robust noise model with Cauchy kernel
         """
         model = gtsam.noiseModel.Gaussian.Covariance(cov)
-        robust = gtsam.noiseModel.mEstimator.Cauchy.Create(1.0)
+        robust = gtsam.noiseModel.mEstimator.Cauchy.Create(self.robust_loop_c)
         return gtsam.noiseModel.Robust.Create(robust, model)

@@ -15,6 +15,7 @@ from stonefish_msgs.msg import DVL
 import geometry_msgs.msg
 
 # stonefish_slam imports
+from stonefish_slam.core.depth import pressure_to_depth
 from stonefish_slam.utils.conversions import g2n, g2r, n2g, r2g
 from stonefish_slam.utils.visualization import ros_colorline_trajectory
 
@@ -45,9 +46,6 @@ class DeadReckoningNode(Node):
         self.keyframe_translation = None
         self.keyframe_rotation = None
         self.dvl_error_timer = 0.0
-
-        # TODO pressure to depth has error(need to be modify)
-        self.offset = 2.5
 
         # Latest pressure message
         self.latest_pressure_msg = None
@@ -164,9 +162,8 @@ class DeadReckoningNode(Node):
         if pressure_msg is None:
             return
 
-        # curr_depth = -((pressure_msg.fluid_pressure / 101.325) - 1) * 10
-        # curr_depth -= self.offset
-        curr_depth = 0.0
+        # Absolute pressure (Pa) -> depth (m), positive-down (NED).
+        curr_depth = pressure_to_depth(pressure_msg.fluid_pressure)
 
         # Calculate time difference
         dvl_time_sec = dvl_msg.header.stamp.sec + dvl_msg.header.stamp.nanosec / 1e9

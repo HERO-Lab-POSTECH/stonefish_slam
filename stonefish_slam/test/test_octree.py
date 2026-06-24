@@ -65,3 +65,39 @@ def test_adaptive_update_honors_config_max_ratio(load_module):
     t.adaptive_max_ratio = 0.3
     t.update_voxel([1.0, 1.0, 1.0], 1.5, adaptive=True)
     assert np.isclose(t.query_voxel([1.0, 1.0, 1.0]), 0.45)
+
+
+def _leaf_for(t, point):
+    """Descend from the root to the leaf node containing `point`.
+
+    Uses only public OctNode API (children / get_octant_index / is_leaf) so it
+    works under the numpy-only load_module fixture. Returns the OctNode whose
+    .size is the actual leaf voxel edge length.
+    """
+    p = np.array(point[:3], dtype=np.float64)
+    node = t.root
+    while not node.is_leaf():
+        node = node.children[node.get_octant_index(p)]
+    return node
+
+
+def test_leaf_size_equals_resolution(load_module):
+    # The constructor contract (octree.py:94 "resolution: ... leaf node size")
+    # and the OctoMap standard (Hornung 2013) require the leaf voxel edge to
+    # equal `resolution`. auto-size = 2**max_depth * resolution, halved each
+    # level, reaches exactly `resolution` at depth == max_depth. A leaf larger
+    # than `resolution` means recursion stopped one (or more) levels too early.
+    t = _tree(load_module, "oct_leaf", resolution=0.1, max_depth=9)
+    t.update_voxel([1.0, 1.0, 1.0], 1.5, adaptive=False)
+    leaf = _leaf_for(t, [1.0, 1.0, 1.0])
+    assert np.isclose(leaf.size, 0.1), f"leaf size {leaf.size} != resolution 0.1"
+
+
+def test_leaf_grid_matches_world_to_key_resolution(load_module):
+    # world_to_key quantizes by floor(coord / resolution) — cells of size
+    # `resolution`. The hierarchical leaf grid must agree with that cell size,
+    # else the two voxel grids in the same map disagree.
+    t = _tree(load_module, "oct_leaf_grid", resolution=0.2, max_depth=8)
+    t.update_voxel([2.0, 2.0, 2.0], 1.5, adaptive=False)
+    leaf = _leaf_for(t, [2.0, 2.0, 2.0])
+    assert np.isclose(leaf.size, 0.2), f"leaf size {leaf.size} != resolution 0.2"

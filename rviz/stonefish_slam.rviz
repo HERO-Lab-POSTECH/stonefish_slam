@@ -13,8 +13,6 @@ Panels:
     Splitter Ratio: 0.5
   - Class: rviz_common/Selection
     Name: Selection
-  - Class: rviz_common/Selection
-    Name: Selection
 Visualization Manager:
   Class: ""
   Displays:
