@@ -74,8 +74,14 @@ install(PROGRAMS
   RENAME dead_reckoning_node
 )
 
-# NOTE: feature_extraction_node is now INTERNAL to slam_node
-# Removed standalone entry point
+# NOTE: feature_extraction is INTERNAL to slam_node by default.
+# feature_extraction_node below is the OPT-IN standalone variant that only
+# publishes feature points (slam_node does not consume it).
+install(PROGRAMS
+  stonefish_slam/nodes/feature_extraction_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME feature_extraction_node
+)
 
 install(PROGRAMS
   stonefish_slam/nodes/slam_node.py
