@@ -661,20 +661,17 @@ class SonarMapping3D:
 
         return propagated_updates
 
-    def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators=None, T_world_to_sonar=None, first_hit_map=None):
-        """
-        Process a single sonar ray (bearing) and accumulate voxel updates
+    def _detect_hits(self, intensity_profile):
+        """Scan intensity_profile and return first-hit index and all high-intensity indices.
 
         Args:
-            bearing_angle: Horizontal angle in radians
-            intensity_profile: 1D array of intensities along range
-            T_sonar_to_world: 4x4 transform matrix from sonar to world
-            voxel_updates: Dictionary to accumulate updates per voxel
-            timing_accumulators: Optional dict with 'dda', 'merge', 'occupied' keys for profiling
-            T_world_to_sonar: Optional 4x4 inverse transform (for shadow validation)
-            first_hit_map: Optional np.ndarray (n_bearings,) for shadow validation
+            intensity_profile: 1D array of intensities along range (row 0 = far).
+
+        Returns:
+            first_hit_idx: Index of first above-threshold bin, or len(intensity_profile)
+                           if no hit (entire range treated as free space).
+            high_intensity_indices: List of all bin indices above intensity_threshold.
         """
-        # Find first hit and all high intensity regions after first hit
         first_hit_idx = -1
         high_intensity_indices = []
 
@@ -690,9 +687,26 @@ class SonarMapping3D:
             # No reflection within range_max → entire measured range is free space
             first_hit_idx = len(intensity_profile)  # Treat entire range as free
 
-        # Calculate vertical aperture parameters
-        half_aperture = self.vertical_fov / 2
+        return first_hit_idx, high_intensity_indices
 
+    def _update_free_space_voxels(self, bearing_angle, first_hit_idx, half_aperture,
+                                  T_sonar_to_world, T_world_to_sonar, first_hit_map,
+                                  voxel_updates, timing_accumulators):
+        """Update free-space voxels along the ray before the first hit.
+
+        Uses C++ DDA batch processing when available; falls back to Python traversal.
+        Accumulates negative log-odds updates into voxel_updates in-place.
+
+        Args:
+            bearing_angle: Horizontal angle in radians.
+            first_hit_idx: Index of first above-threshold bin (from _detect_hits).
+            half_aperture: Half of vertical_fov in radians.
+            T_sonar_to_world: 4x4 transform matrix from sonar to world.
+            T_world_to_sonar: Optional 4x4 inverse transform (for shadow validation).
+            first_hit_map: Optional np.ndarray (n_bearings,) for shadow validation.
+            voxel_updates: Dict to accumulate updates (modified in-place).
+            timing_accumulators: Optional dict with 'dda', 'merge' keys for profiling.
+        """
         # Update free space before first hit (with sparse sampling)
         # Use C++ DDA batch processing if available
         if self.use_dda and first_hit_idx > 0:
@@ -845,6 +859,24 @@ class SonarMapping3D:
                     voxel_updates[voxel_key]['sum'] += log_odds_update  # Use weighted value
                     voxel_updates[voxel_key]['count'] += 1
 
+    def _update_occupied_voxels(self, bearing_angle, high_intensity_indices, intensity_profile,
+                                half_aperture, T_sonar_to_world, T_world_to_sonar, first_hit_map,
+                                voxel_updates, timing_accumulators):
+        """Update occupied voxels for all high-intensity bins (at and after first hit).
+
+        Accumulates positive log-odds updates into voxel_updates in-place.
+
+        Args:
+            bearing_angle: Horizontal angle in radians.
+            high_intensity_indices: List of bin indices above threshold (from _detect_hits).
+            intensity_profile: 1D array of intensities along range.
+            half_aperture: Half of vertical_fov in radians.
+            T_sonar_to_world: 4x4 transform matrix from sonar to world.
+            T_world_to_sonar: Optional 4x4 inverse transform (for shadow validation).
+            first_hit_map: Optional np.ndarray (n_bearings,) for shadow validation.
+            voxel_updates: Dict to accumulate updates (modified in-place).
+            timing_accumulators: Optional dict with 'occupied' key for profiling.
+        """
         # [E] Occupied voxel processing timing
         if timing_accumulators is not None:
             t_occupied = time.perf_counter()
@@ -935,6 +967,36 @@ class SonarMapping3D:
 
         if timing_accumulators is not None:
             timing_accumulators['occupied'] += (time.perf_counter() - t_occupied)
+
+    def process_sonar_ray(self, bearing_angle, intensity_profile, T_sonar_to_world, voxel_updates, timing_accumulators=None, T_world_to_sonar=None, first_hit_map=None):
+        """
+        Process a single sonar ray (bearing) and accumulate voxel updates
+
+        Args:
+            bearing_angle: Horizontal angle in radians
+            intensity_profile: 1D array of intensities along range
+            T_sonar_to_world: 4x4 transform matrix from sonar to world
+            voxel_updates: Dictionary to accumulate updates per voxel
+            timing_accumulators: Optional dict with 'dda', 'merge', 'occupied' keys for profiling
+            T_world_to_sonar: Optional 4x4 inverse transform (for shadow validation)
+            first_hit_map: Optional np.ndarray (n_bearings,) for shadow validation
+        """
+        first_hit_idx, high_intensity_indices = self._detect_hits(intensity_profile)
+
+        # Calculate vertical aperture parameters
+        half_aperture = self.vertical_fov / 2
+
+        self._update_free_space_voxels(
+            bearing_angle, first_hit_idx, half_aperture,
+            T_sonar_to_world, T_world_to_sonar, first_hit_map,
+            voxel_updates, timing_accumulators,
+        )
+
+        self._update_occupied_voxels(
+            bearing_angle, high_intensity_indices, intensity_profile,
+            half_aperture, T_sonar_to_world, T_world_to_sonar, first_hit_map,
+            voxel_updates, timing_accumulators,
+        )
 
     def process_sonar_image(self, polar_image, robot_pose):
         """

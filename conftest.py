@@ -83,3 +83,45 @@ def load_factor_graph():
     for name in list(sys.modules):
         if name not in preexisting:
             sys.modules.pop(name, None)
+
+
+@pytest.fixture
+def load_mapping_3d():
+    """mapping_3d.py를 clean env(cv_bridge 부재)에서 로드.
+
+    mapping_3d.py 자체는 cv_bridge를 안 쓰지만(numpy·scipy·profiler·octree만),
+    `from stonefish_slam.utils.profiler import ...`가 패키지 `utils/__init__`을
+    실행시키고 그게 sonar→conversions→cv_bridge를 끌어와 import-time에 크래시한다.
+    그래서 패키지 __init__을 빈 네임스페이스로 우회하고, mapping_3d가 실제로 쓰는
+    형제(profiler·octree, 둘 다 순수)만 직접 로드하면 clean env에서도 도달한다.
+    C++ 확장(ray_processor:25)은 try/except 가드라 clean env에서 자연히 fallback.
+
+    [[stonefish-p4-test-load-constraint]] — load_factor_graph와 동일 패턴.
+    """
+    preexisting = set(sys.modules)
+
+    # 패키지 __init__ 우회 — 빈 네임스페이스 패키지로 등록(utils/__init__의 sonar→
+    # conversions→cv_bridge 체인 차단).
+    for pkg in ("stonefish_slam", "stonefish_slam.core", "stonefish_slam.utils"):
+        if pkg not in sys.modules:
+            m = types.ModuleType(pkg)
+            m.__path__ = [str(REPO_ROOT / pkg.replace(".", "/"))]
+            sys.modules[pkg] = m
+
+    def _load(relpath, name):
+        spec = importlib.util.spec_from_file_location(name, str(REPO_ROOT / relpath))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    # mapping_3d가 import-time에 from-import하는 형제(순수)를 정확한 이름으로 먼저.
+    _load("stonefish_slam/utils/profiler.py", "stonefish_slam.utils.profiler")
+    _load("stonefish_slam/core/octree.py", "stonefish_slam.core.octree")
+    m3d = _load("stonefish_slam/core/mapping_3d.py", "stonefish_slam.core.mapping_3d")
+
+    yield m3d
+
+    for name in list(sys.modules):
+        if name not in preexisting:
+            sys.modules.pop(name, None)
