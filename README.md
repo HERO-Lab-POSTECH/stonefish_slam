@@ -11,6 +11,13 @@ Sonar-based SLAM (Simultaneous Localization and Mapping) for underwater robots u
 - Loop closure with factor graph optimization (GTSAM)
 - Multiple update methods: log-odds, weighted average, IWLO
 
+## Coordinate Frames
+
+- **Global frame: `world_ned` (NED — North-East-Down).** The Stonefish simulator publishes its world frame as NED, so SLAM output messages (`pose`, `traj`, `cloud`, `constraint`, 2D/3D maps) all use `world_ned`. This is an intentional departure from REP-103/105 (which prescribe ENU) to stay consistent with the simulator.
+- **Local TF chain: `odom → base_link` (ENU, REP-105).** Dead reckoning keeps the standard REP-105 ENU body frames. The global↔local TF publishers are identity (no rotation), so only frame naming differs.
+
+See `docs/CONVENTIONS.md` §2.0 for the rationale.
+
 ## Requirements
 
 ### Dependencies
@@ -129,7 +136,6 @@ Located in `config/`:
 |------|-------------|
 | `slam_node` | Main SLAM node (feature extraction + localization + mapping) |
 | `dead_reckoning_node` | Dead reckoning from DVL/IMU |
-| `kalman_node` | Kalman filter state estimation |
 | `mapping_3d_standalone` | Standalone 3D mapping |
 | `mapping_2d_standalone` | Standalone 2D mapping |
 
@@ -141,6 +147,11 @@ High-performance modules:
 - `octree_mapping`: OctoMap-based 3D mapping (OpenMP)
 - `ray_processor`: Sonar ray processing
 - `pcl_module`: ICP with libpointmatcher
+
+If a C++ extension is missing (not built), the package logs a warning naming the
+absent module and what degrades, then runs the pure-Python fallback. The ICP
+fallback is less precise than the libpointmatcher C++ path — build the extensions
+for production accuracy.
 
 ## License
 
