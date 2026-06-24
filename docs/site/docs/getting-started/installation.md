@@ -4,6 +4,9 @@
 
 `stonefish_slam`은 버전 0.4.0, GPL-3.0 라이선스의 패키지이며, C++ pybind11 확장을 포함하므로 `setup.py` 없이 `ament_cmake`로 빌드된다. 따라서 Python 패키지뿐 아니라 C++ 툴체인과 네이티브 라이브러리가 함께 필요하다.
 
+!!! tip "두 가지 설치 경로 — 네이티브 또는 Docker"
+    설치는 두 방식 중 하나를 택한다. **호스트에 직접 설치**(아래 1~5단계)는 GTSAM·OctoMap·libpointmatcher 등 C++ 의존성과 pybind11 툴체인을 apt/pip으로 직접 맞추는 방식으로, 개발 머신에서 코드를 자주 고칠 때 적합하다. **Docker 이미지 빌드**([Docker로 설치](#docker))는 이 C++ 의존성과 `.so` 확장 빌드를 이미지 안에 모두 묶어 **배포·재현**에 적합하다 — `stonefish_slam`은 `stonefish_sim`과 **같은 이미지**에서 함께 빌드되므로, 시뮬레이터까지 한 번에 갖춰진다. 처음 배포하거나 다른 머신에서 그대로 돌리려면 Docker 경로를 권장한다.
+
 ## 사전 조건
 
 ROS 2 Humble 환경을 먼저 source 한다.
@@ -69,6 +72,37 @@ flowchart TD
     C --> D["colcon build --merge-install<br/>--packages-select stonefish_slam"]
     D --> E["source install/setup.bash"]
     E --> F[".so 빌드 확인"]
+```
+
+## Docker로 설치 {#docker}
+
+위의 apt + pip + colcon을 호스트에 직접 하는 대신, **Docker 이미지 하나로 ROS2·Stonefish 라이브러리·`stonefish_sim`·`stonefish_slam`을 모두 빌드**할 수 있다. SLAM의 까다로운 C++ 의존성(GTSAM·OctoMap·libpointmatcher·pybind11)과 5개 `.so` 확장 빌드가 이미지 안에서 끝나므로, 머신마다 의존성을 맞출 필요가 없어 **배포·재현에 적합**하다.
+
+!!! note "sim과 같은 이미지에서 함께 빌드된다"
+    환경 자산(Dockerfile·`docker-compose.yml`·`entrypoint.sh`·`stonefish.repos`·`.env.example`)은 **시뮬레이터 워크스페이스의 `.omp/env/`에 정본**으로 관리된다. `stonefish.repos`(vcstool)가 `stonefish`(C++ 코어)·`stonefish_sim`·`stonefish_slam` 세 repo를 한 이미지에 함께 가져와 빌드하므로, SLAM만 따로 빌드하는 Dockerfile은 없다. 시뮬레이터 워크스페이스의 `.omp/env/`에서 빌드하면 SLAM이 시뮬레이터와 같은 컨테이너에 포함된다. 빌드 절차(이미지 구조 `runtime`/`dev`, `xhost`·`.env`·`docker compose build`/`up`)의 상세는 **`stonefish_sim` 문서의 [Docker로 설치]**를 참조한다.
+
+### SLAM 의존성은 이미지에 포함된다
+
+`.omp/env/`의 Dockerfile은 SLAM 빌드에 필요한, `rosdep`가 자동으로 잡지 못하는 의존성을 명시 설치한다. 호스트 네이티브 설치에서 직접 깔아야 했던 항목들이 이미지 빌드 시점에 이미 들어가므로, 컨테이너 안에서는 추가 설치가 필요 없다.
+
+| 의존성 | 이미지에서의 처리 | 네이티브 설치 대비 |
+|--------|------------------|--------------------|
+| OctoMap | builder `liboctomap-dev` + runtime `liboctomap1.9 ros-humble-octomap-msgs` | `sudo apt install ros-humble-octomap` 불필요 |
+| pybind11 | builder `pybind11-dev` | `sudo apt install pybind11-dev` 불필요 |
+| PCL | runtime `ros-humble-pcl-conversions ros-humble-pcl-msgs` | `rosdep`가 `pcl` 키를 못 잡아 `--skip-keys`로 우회 |
+| 5개 `.so` 확장 | colcon overlay 빌드 시 함께 컴파일 | 컨테이너 안에 빌드 완료 상태 |
+
+!!! warning "GTSAM Python 바인딩은 이미지 정책에 따라 확인"
+    호스트 네이티브 설치에서는 `apt ros-humble-gtsam`(C++만) 외에 `pip install gtsam`(Python 바인딩)이 별도로 필요하다. 컨테이너 안에서 `import gtsam`이 실패하면(factor graph 노드가 동작하지 않음) 컨테이너 안에서 `pip install gtsam`을 추가한다. libpointmatcher는 `QUIET` 선택 의존성이라 이미지에 없으면 빌드는 통과하고 ICP가 순수 Python fallback으로 동작한다(아래 "선택 의존성과 Python fallback" 참조).
+
+### 컨테이너 안에서 실행
+
+이미지를 빌드·기동한 뒤(절차는 `stonefish_sim` 문서 참조) 컨테이너에 접속해 SLAM을 실행한다. 워크스페이스 루트는 `/workspace`이고 환경은 entrypoint가 이미 source한다.
+
+```bash
+docker exec -it stonefish_run bash
+# 컨테이너 안 — 시뮬레이터와 SLAM이 같은 환경에 있음
+ros2 launch stonefish_slam slam.launch.py
 ```
 
 ## 4. C++ `.so` 빌드 확인
