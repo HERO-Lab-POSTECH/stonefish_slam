@@ -17,9 +17,9 @@ from typing import Tuple
 from ament_index_python.packages import get_package_share_directory
 
 # stonefish_slam imports
-from stonefish_slam.utils.io import *
-from stonefish_slam.utils.conversions import *
-from stonefish_slam.utils.visualization import *
+from stonefish_slam.utils.io import CodeTimer
+from stonefish_slam.utils.conversions import X, g2n, g2r, n2g, n2r, r2g
+from stonefish_slam.utils.visualization import ros_colorline_trajectory, ros_constraints
 from stonefish_slam.core.factor_graph import FactorGraph
 from stonefish_slam.core.localization import Localization
 from stonefish_slam.core.types import Keyframe, STATUS, ICPResult
@@ -28,7 +28,9 @@ from stonefish_slam.core.mapping_3d import SonarMapping3D
 from stonefish_slam.core.feature_extraction import FeatureExtraction
 from stonefish_slam.core.localization_fft import FFTLocalizer
 from stonefish_slam.cpp import pcl
-from stonefish_slam.utils.topics import *
+from stonefish_slam.utils.topics import (
+    LOCALIZATION_ODOM_TOPIC, SLAM_CLOUD_TOPIC, SLAM_CONSTRAINT_TOPIC,
+    SLAM_NS, SLAM_ODOM_TOPIC, SLAM_POSE_TOPIC, SLAM_TRAJ_TOPIC)
 
 
 class SLAMNode(Node):

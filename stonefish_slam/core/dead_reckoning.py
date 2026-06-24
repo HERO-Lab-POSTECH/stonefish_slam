@@ -18,7 +18,7 @@ from stonefish_msgs.msg import DVL
 import geometry_msgs.msg
 
 # stonefish_slam imports
-from stonefish_slam.utils.conversions import *
+from stonefish_slam.utils.conversions import g2n, g2r, n2g, r2g
 from stonefish_slam.utils.visualization import ros_colorline_trajectory
 
 import math

@@ -12,7 +12,7 @@ from uuv_sensor_ros_plugins_msgs.msg import DVL
 from tf_transformations import euler_from_quaternion
 
 # import stonefish_slam
-from stonefish_slam.utils.conversions import *
+from stonefish_slam.utils.conversions import g2r
 from stonefish_slam.core.kalman_filter import (
     kalman_predict,
     kalman_correct,
