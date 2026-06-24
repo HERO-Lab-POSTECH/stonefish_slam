@@ -82,6 +82,15 @@
 - **현재 처리**: 보존(동작 보존). 코드 들여쓰기는 4-space로 통일됨.
 - **수정안**: P4에서 docstring 내부 탭→space 정규화 시 `__doc__` raw 값 변경을 명시 수용하고(`inspect.getdoc` dedent 결과는 불변임을 확인 후), 다른 모듈의 docstring 스타일과 함께 일괄 정리.
 
+## kalman.py — 미해결 외부 의존성 `uuv_sensor_ros_plugins_msgs` (P3 재감사에서 발견)
+
+- **파일**: `stonefish_slam/core/kalman.py:11`(`from uuv_sensor_ros_plugins_msgs.msg import DVL`, 무가드 모듈-top import).
+- **발견일**: 2026-06-24 (P3 재감사 build-packaging 차원, 적대 검증 통과).
+- **증상**: `kalman_node`(CMakeLists install PROGRAMS로 등록됨)를 실행하면 `kalman.py:11`이 import되는데, `uuv_sensor_ros_plugins_msgs` 패키지가 워크스페이스에도 시스템(`/opt/ros/*/share/`)에도 **존재하지 않는다**(실측 확인). try/except fallback도 없어 `ImportError`로 노드가 죽는다. 형제 노드 `dead_reckoning.py`는 동일 DVL 메시지를 sim repo에 실존하는 `stonefish_msgs`에서 가져오는데(이번 P3에서 package.xml에 선언 보강), `kalman.py`만 외부 UUV Simulator 패키지를 가리킨다.
+- **근거 표준**: [REP 149](https://www.ros.org/reps/rep-0149.html) — `find_package`/import하는 런타임 의존성은 package.xml에 선언되어 rosdep이 설치하도록 해야 한다.
+- **현재 처리**: 보류. 존재하지 않는 rosdep 키를 package.xml에 넣으면 빌드/rosdep이 깨질 수 있어 추가하지 **않았다**. `stonefish_msgs`(실존)만 이번 P3에서 선언 보강했다.
+- **수정안**: P4에서 둘 중 하나 — (a) `kalman.py`가 실제 사용되는 노드면 DVL 출처를 `stonefish_msgs`로 통일(`dead_reckoning.py`와 일치, 동작 변경)하거나, (b) UUV Simulator 외부 패키지 배포를 전제로 `uuv_sensor_ros_plugins_msgs`를 rosdep 키로 선언. `kalman.py`가 legacy dead 노드인지 먼저 확인 필요.
+
 ---
 
 ## P3 작업 요약 (2026-06-24, 동작 보존 — 참고)
