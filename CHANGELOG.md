@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **P3 기업표준 재구조화 — 동작 보존** (2026-06-24): 명명·구조 컨벤션 통일 + import 정리 + 모듈화. 런타임/수치/토픽그래프 변경 없음(pytest 16→20 passed + 1 xfailed, live 동작 불변).
+  - **import 정리**: wildcard import 17곳 제거 — 정적 게이트로 dead/live 분류 후 dead 10곳 삭제 + live 7곳 명시 import화. 우리 소스 `from X import *` 0개. (CONVENTIONS §2.2 절대 import 표준 준수)
+  - **dead code 제거**: `core/slam.py`의 미사용 `pointcloud2_to_xyz_array`(+orphan `import struct`) 삭제.
+  - **포맷 통일**: `core/dead_reckoning.py` 코드 들여쓰기 탭→4-space(PEP 8, AST 동등 보존).
+  - **모듈화**: `core/mapping_3d.py`의 무상태 변환 함수 `create_transform_matrix`·`pose_msg_to_transform`를 클래스 메서드에서 모듈 레벨 함수로 추출(실행 statement AST 동등).
+  - **메타데이터**: `package.xml` version 0.1.0→0.3.1(CHANGELOG 정렬). CONVENTIONS 줄번호 drift 정정·P3 안전망 절·P4 백로그 추가. P4_FLAGS wildcard 17곳 동기화 + 신규 후보(depth 무력화·docstring 탭) 기록.
+  - **안전망 추가**: `test/static_import_gate.py`(AST 정적 게이트), `test/test_wildcard_gate.py`(wildcard 분류 동결), `test/test_octree.py` adaptive 0.3 config 커버갭. rclpy/gtsam 부재 환경 대응(런타임 binding은 P4 sign-off).
+  - **P4 격리**: 노드명 'slam_node' 3중충돌·standalone 노드 구조·god-method 분해·수치버그(pressure 1000배·ICP float32·fusion·Joseph)·frame_id world_ned 통일 등은 동작 변경이라 P4(`P4_FLAGS.md`).
+
 ### Added
 - **Combined Mapping Standalone Launch** (2025-12-11): 3D/2D 매핑 동시 실행 지원
   - 파일: `launch/mapping_combined_standalone.launch.py`

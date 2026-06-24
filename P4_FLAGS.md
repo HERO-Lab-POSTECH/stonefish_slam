@@ -59,10 +59,38 @@
 - **현재 처리**: P3.1은 **동작 보존**이 원칙이라 단순형 그대로 추출(식 무변경). 기록만.
 - **수정안**: P4 수치 고도화에서 Joseph form 전환 검토. 전환 시 기존 테스트(최적 게인 가정)는 동등하게 통과해야 하고, 장시간 시퀀스에서 P 대칭성 유지를 추가 검증.
 
-## wildcard import — PEP 8 위반 (P3.0 컨벤션 조사에서 발견)
+## ✅ wildcard import — PEP 8 위반 → **P3에서 해소(2026-06-24)**
 
-- **파일**: 여러 모듈 — `utils/conversions.py:20`(`from .topics import *`), `utils/sonar.py:6`, `core/types.py:10-12`(conversions·visualization·io), `core/kalman.py:15`, `core/feature_extraction.py:7-9`, `core/cfar.py:5` 등.
-- **발견일**: 2026-06-23 (P3.0 명명·구조 외부 표준 대조 중)
-- **증상**: `from <module> import *` 사용. PEP 8은 "Wildcard imports should be avoided", Google Style은 모듈 단위 import만 허용해 둘 다 위반. 네임스페이스에 어떤 이름이 들어오는지 불투명해 정적 분석·가독성을 해친다.
-- **현재 처리**: 코드 무수정(P3.0은 문서 작업). 기록만 — 새 코드는 wildcard 금지(CONVENTIONS.md §2.2).
-- **수정안**: 명시적 import로 전환. 레거시라 P4(또는 해당 모듈 리팩토링 시) 처리.
+- **발견일**: 2026-06-23 (P3.0 명명·구조 외부 표준 대조 중). 정확히 **17곳**(P4_FLAGS 초기 목록은 6모듈만 열거했으나 slam.py 4곳·dead_reckoning.py 2곳·cfar.py 2번째 등 누락분 있었음).
+- **증상**: `from <module> import *` 사용. PEP 8은 "Wildcard imports should be avoided", Google Style은 모듈 단위 import만 허용해 둘 다 위반.
+- **해소(P3 T4a/T4b)**: 정적 게이트(`test/static_import_gate.py`)로 17곳을 dead/live 분류 — 각 consumer가 wildcard로만 오는 의존 심볼을 세고, consumer 직접 바인딩은 차감. **dead 10곳 삭제**(conversions:20·sonar:6·cfar:5/6·dead_reckoning:23·types:11/12·feature_extraction:7/8/9), **live 7곳 명시화**(kalman:15·dead_reckoning:21·types:10·slam의 io/conversions/visualization/topics). 우리 소스 wildcard **0개** 달성. `test_wildcard_gate.py`가 명시 ImportFrom을 파싱해 골든 심볼 집합과 비교(동결). code-reviewer 독립검토로 dead 삭제 런타임 안전성·live 심볼 완전성 확인.
+- **잔여 P4**: source 5모듈(conversions/topics/io/sonar/visualization)의 `__all__` 추가는 게이트 baseline 정합 위해 P4로 미룸(Open Q O7). C++ `.so` 상대 import(`__init__.py`)는 의도된 §2.2 예외라 불변(Open Q O8).
+
+## dead_reckoning.py:175 — curr_depth 깊이 무력화 (P3 재감사에서 발견)
+
+- **파일**: `stonefish_slam/core/dead_reckoning.py:175`(`curr_depth = 0.0`), :173-174(주석 처리된 압력→깊이식).
+- **발견일**: 2026-06-24 (P3 동작보존 위험 지도 분석 중).
+- **증상**: dead_reckoning 콜백이 압력→깊이 변환식을 주석 처리하고 `curr_depth = 0.0`을 하드코딩 → DR이 깊이를 항상 0으로 쓴다. 의도된 비활성화인지 미완성인지 불명. 주석 처리된 :173-174 식은 `kalman_filter.py:85`의 1000배 압력 버그(위 HIGH 플래그)와 동일식이라, 주석 부활 시 그 버그도 따라온다.
+- **현재 처리**: P3는 동작 보존이라 현 동작(=0)을 그대로 둠. 현재 출력이 이미 상수 0이라 P3에서 건드릴 것 없음.
+- **수정안**: P4에서 깊이를 실제 압력 변환으로 복원할지 결정(복원 시 pressure 1000배 버그를 정답식으로 동시 수정). pressure→depth 플래그와 함께 처리.
+
+## dead_reckoning.py docstring 내부 탭 (P3 T2 잔여)
+
+- **파일**: `stonefish_slam/core/dead_reckoning.py` — 4개 docstring(클래스 + 메서드 Args 블록)의 내부 들여쓰기가 여전히 탭.
+- **발견일**: 2026-06-24 (P3 T2 탭→4space 변환 중).
+- **증상**: T2에서 코드 들여쓰기 탭은 4-space로 변환했으나, docstring 내부 탭은 문자열 *데이터*(`__doc__` 값)라 변환하면 `__doc__`의 raw 값이 바뀐다(동작 변경). 따라서 코드 들여쓰기만 변환하고 docstring 내부 탭은 보존했다(`ast.dump` before==after 유지).
+- **현재 처리**: 보존(동작 보존). 코드 들여쓰기는 4-space로 통일됨.
+- **수정안**: P4에서 docstring 내부 탭→space 정규화 시 `__doc__` raw 값 변경을 명시 수용하고(`inspect.getdoc` dedent 결과는 불변임을 확인 후), 다른 모듈의 docstring 스타일과 함께 일괄 정리.
+
+---
+
+## P3 작업 요약 (2026-06-24, 동작 보존 — 참고)
+
+P3(기업표준 구조·명명 통일·재구조화·모듈화)에서 **동작 보존이 가능한 것만** 처리했다. 베이스라인 pytest 16 passed+1 xfailed → 20 passed+1 xfailed(신규 안전망 테스트 포함, live 동작 불변).
+- **PREREQ**: AST 정적 게이트(`test/static_import_gate.py`) + wildcard 분류 동결(`test_wildcard_gate.py`) + octree adaptive 0.3 config 커버갭(`test_octree.py`).
+- **T1**: CONVENTIONS 줄번호 drift 정정(§2.3·§2.5)·world_ned 혼용 기록(§2.0)·예외 3노드 일반화(§2.1)·P3 안전망 절(§2.8)·P4 백로그(§3).
+- **T2**: dead_reckoning.py 코드 들여쓰기 탭→4-space(ast.dump 동등·diff -w=0).
+- **T3**: slam.py dead `pointcloud2_to_xyz_array`(+orphan `import struct`) 삭제(사용자 승인).
+- **T4a/T4b**: wildcard 17곳 정리(dead 10 삭제 + live 7 명시화 → 0).
+- **T5**: octree 커버갭 + mapping_3d 무상태 메서드 2개(`create_transform_matrix`·`pose_msg_to_transform`)를 모듈 함수로 추출(실행 statement AST 동등·외부 호출자 0).
+- **P4 격리**: 노드명 3중충돌·standalone 구조·god-method 분해·수치버그(pressure/ICP/fusion/Joseph)·polar_to_cartesian 통합·rename군·PascalCase 파라미터·frame_id world_ned·`__all__` 추가·docstring 탭·depth 복원 — 전부 런타임/수치 변경이라 P4.
