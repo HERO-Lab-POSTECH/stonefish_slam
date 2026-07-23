@@ -149,8 +149,6 @@ class SLAMNode(Node):
         self.declare_parameter('fft_localization.validate_with_odom', True)
         self.declare_parameter('fft_localization.max_position_error', 2.0)  # meters
         self.declare_parameter('fft_localization.max_rotation_error', 0.35)  # radians (~20 deg)
-        self.declare_parameter('fft_localization.min_ppr', 1.5)  # minimum PPR threshold
-        self.declare_parameter('fft_localization.reject_on_failure', False)
         self.declare_parameter('fft_localization.use_dr_rotation', False)
 
         # Initialize SLAM modules (composition instead of inheritance)
@@ -414,8 +412,6 @@ class SLAMNode(Node):
                 self.fft_validate = self.get_parameter('fft_localization.validate_with_odom').value
                 self.fft_max_pos_error = self.get_parameter('fft_localization.max_position_error').value
                 self.fft_max_rot_error = self.get_parameter('fft_localization.max_rotation_error').value
-                self.fft_min_ppr = self.get_parameter('fft_localization.min_ppr').value
-                self.fft_reject_on_failure = self.get_parameter('fft_localization.reject_on_failure').value
                 self.fft_use_dr_rotation = self.get_parameter('fft_localization.use_dr_rotation').value
 
                 # Previous polar sonar image storage

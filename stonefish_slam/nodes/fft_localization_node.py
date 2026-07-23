@@ -45,18 +45,19 @@ class FFTLocalizationNode(Node):
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
         self.declare_parameter('pose_topic', '/fft_localization/transform')
 
-        # FFT localizer parameters. ⚠️ defaults are this node's own tuning and are NOT
-        # auto-loaded from config/slam.yaml (slam_node) — slam.yaml currently differs
-        # (verbose/erosion/sigma/truncate). Pass a params file to align if needed.
+        # FFT localizer parameters — defaults mirror config/slam.yaml
+        # (fft_localization.*) tuning as of 2026-07-23. ⚠️ the yaml is NOT auto-loaded
+        # here(노드명이 slam_node가 아님) — yaml을 재튜닝하면 여기도 갱신하거나
+        # params 파일을 직접 넘겨라.
         # Only the pure-estimation parameters are declared here; the SLAM validation
         # parameters (validate_with_odom, max_position_error, max_rotation_error,
-        # min_ppr, reject_on_failure, use_dr_rotation) are intentionally omitted
-        # because this node publishes raw transforms without odom validation.
+        # use_dr_rotation) are intentionally omitted because this node publishes
+        # raw transforms without odom validation.
         self.declare_parameter('fft_localization.range_min', 0.5)
-        self.declare_parameter('fft_localization.verbose', False)
-        self.declare_parameter('fft_localization.trans_erosion_iterations', 4)
-        self.declare_parameter('fft_localization.trans_gaussian_sigma', 4.0)
-        self.declare_parameter('fft_localization.trans_gaussian_truncate', 4.0)
+        self.declare_parameter('fft_localization.verbose', True)
+        self.declare_parameter('fft_localization.trans_erosion_iterations', 2)
+        self.declare_parameter('fft_localization.trans_gaussian_sigma', 2.0)
+        self.declare_parameter('fft_localization.trans_gaussian_truncate', 3.0)
 
         # Sonar parameters (defaults match config/sonar.yaml: sonar.*).
         self.declare_parameter('sonar.horizontal_fov', 130.0)

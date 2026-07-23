@@ -10,6 +10,16 @@ All notable changes to this project will be documented in this file.
 - 협업 규칙 `CONTRIBUTING.md` + PR 템플릿 (발효 2026-07-23)
 - README Testing 섹션 (pytest용 pybind11 `.so` 스테이징 절차)
 
+### Removed
+
+- `fft_localization.min_ppr`·`reject_on_failure` 파라미터 제거 — 선언·로드만 되고
+  검증 경로 어디서도 미적용이던 dead knobs (참조 전수 추적으로 확인, 동작 불변)
+
+### Changed
+
+- `fft_localization_node`(standalone) 기본값 4개(verbose/erosion/sigma/truncate)를
+  slam.yaml 튜닝값과 정렬 — slam_node FFT와 동일 조건으로 비교 가능
+
 ### Fixed
 
 - README 설치 blocker: `libpointmatcher-dev`(jammy에 없음) → `ros-humble-libpointmatcher`
