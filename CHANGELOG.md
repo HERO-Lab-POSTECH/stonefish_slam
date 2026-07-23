@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- 팀 개발 컨테이너 (`docker/` — stonefish_sim과 동일 이미지, 정본은 워크스페이스 `.omp/env/`)
+- 협업 규칙 `CONTRIBUTING.md` + PR 템플릿 (발효 2026-07-23)
+- README Testing 섹션 (pytest용 pybind11 `.so` 스테이징 절차)
+
+### Fixed
+
+- README 설치 blocker: `libpointmatcher-dev`(jammy에 없음) → `ros-humble-libpointmatcher`
+- README Quick Start: `path_following.launch.py` → 실존하는 `path.launch.py`
+- README 토픽 표: `/{vehicle}/dvl_sim` → 실제 발행 토픽 `/{vehicle}/dvl`
+- `fft_localization_node` 주석의 거짓 주장 정정 (기본값이 slam.yaml과 다름 — 동작 불변)
+
 ## [0.4.0] - 2026-06-24
 
 **P4 알고리즘·수치 정확성 + 의도적 동작 변경.** P3까지의 동작 보존 철칙이 끝나는 단계 — 수치 버그 수정·표준 정합·ROS 그래프 정렬·god-method 분해를 위해 런타임/수치/frame_id를 의도적으로 바꿨다. 검증 기준이 "이전과 동일"에서 "의도대로 올바른가"로 전환됨. 9개 모듈 통째 정독 + 외부 표준 조사 + 적대 검증(0 refuted) + ralplan 합의를 거친 87개 진단에서 도출. 모든 변경은 executor 작업 + code-reviewer 독립 검증(전건 APPROVE, 0 blocker).
