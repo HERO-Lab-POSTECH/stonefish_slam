@@ -109,7 +109,7 @@ ros2 launch stonefish_slam slam.launch.py rviz:=false
 | `mapping_2d_standalone.launch.py` | `mapping_2d_standalone` | `fls/image`, `odometry` | `/mapping/map_2d_image` |
 | `mapping_3d_standalone.launch.py` | `mapping_3d_standalone` | `fls/image`, `odometry` | `/mapping/map_3d_octomap` |
 | `mapping_combined_standalone.launch.py` | 2D + 3D (namespace 분리) | `fls/image`, `odometry` | 2D + 3D map |
-| `dead_reckoning.launch.py` | `dead_reckoning_node` | `/{v}/dvl`, `/{v}/imu`, `/{v}/pressure` | `/dead_reckoning/odom`, `/dead_reckoning/traj` |
+| `dead_reckoning.launch.py` | `dead_reckoning_node` | `/{v}/dvl`, `/{v}/imu`, `/{v}/pressure` | `/dead_reck/odom`, `/dead_reck/key_traj`, `/dead_reck/path` |
 
 ```bash
 # CFAR 피처 추출만 (소나 이미지 → 점군)
@@ -134,7 +134,7 @@ ros2 launch stonefish_slam dead_reckoning.launch.py
 `feature_extraction_node`와 `fft_localization_node`는 P4에서 신규 추가된 노드다(분석 사실 §1 패키지 트리). `nodes/` 하위의 진입점은 알고리즘 본체를 감싸는 얇은 wrapper다.
 
 !!! note "dead_reckoning의 좌표계"
-    `dead_reckoning_node`의 `/dead_reckoning/odom`은 `odom` 프레임 ENU 체계를 따른다(REP-105 로컬 TF 정책). 반면 통합 SLAM의 출력 토픽은 전부 `world_ned`로 통일되어 있다(분석 사실 §2 TF/좌표계 정책, P4d).
+    `dead_reckoning_node`의 `/dead_reck/odom`은 `odom` 프레임 ENU 체계를 따른다(REP-105 로컬 TF 정책). 반면 통합 SLAM의 출력 토픽은 전부 `world_ned`로 통일되어 있다(분석 사실 §2 TF/좌표계 정책, P4d).
 
 ## RViz
 
