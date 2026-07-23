@@ -6,7 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- 팀 개발 컨테이너 (`docker/` — stonefish_sim과 동일 이미지, 정본은 워크스페이스 `.omp/env/`)
+- README Docker 설치 안내 — 전용 배포 repo
+  [`stonefish_bringup`](https://github.com/HERO-Lab-POSTECH/stonefish_bringup) 참조
+  (sim과 동일 이미지에 slam 포함 — C++ 의존성·`.so` 확장까지 이미지 빌드에서 완결)
 - 협업 규칙 `CONTRIBUTING.md` + PR 템플릿 (발효 2026-07-23)
 - README Testing 섹션 (pytest용 pybind11 `.so` 스테이징 절차)
 

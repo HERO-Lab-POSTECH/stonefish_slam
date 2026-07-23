@@ -54,22 +54,25 @@ and `gtsam`.
 > You **must** also run `pip install gtsam` to get the Python bindings. Without it the SLAM
 > node will not start.
 
-### Docker (recommended, identical team environment)
+### Docker (recommended for deployment / reproduction)
 
-This repo ships the same team dev image as stonefish_sim (`docker/` — ROS 2
-Humble + Stonefish 1.3.0 + all sim/SLAM dependencies baked in; the workspace is
-bind-mounted). Expected layout: this repo cloned at `<ws>/src/stonefish_slam`.
+The team Docker environment lives in a dedicated repo:
+[**stonefish_bringup**](https://github.com/HERO-Lab-POSTECH/stonefish_bringup).
+`stonefish_slam` is built into the **same image** as the simulator (the
+multi-stage Dockerfile bakes Stonefish core + `stonefish_sim` + this repo via
+`stonefish.repos`), so all C++ dependencies (GTSAM, OctoMap, pybind11) and the
+5 `.so` extensions are compiled at image build time — no per-machine setup.
 
 ```bash
-cd <ws>/src/stonefish_slam/docker
-xhost +SI:localuser:$(id -un)          # allow X11 access (once per login)
-HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build
-docker compose exec stonefish-dev bash
+git clone https://github.com/HERO-Lab-POSTECH/stonefish_bringup.git
+cd stonefish_bringup
+docker compose build       # first build ~15-30 min
 ```
 
-Host prerequisites: NVIDIA driver + nvidia-container-toolkit (see
-stonefish_sim README "Installation" for details). Inside the container, continue
-with the Build section below (dependencies are already installed).
+Requirements (NVIDIA GPU + nvidia-container-toolkit, host X display `:0`) and
+the run commands are documented in the
+[stonefish_bringup README](https://github.com/HERO-Lab-POSTECH/stonefish_bringup#readme).
+For host development, continue with the Native install below.
 
 ### Native install
 
