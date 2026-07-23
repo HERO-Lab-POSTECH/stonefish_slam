@@ -54,7 +54,24 @@ and `gtsam`.
 > You **must** also run `pip install gtsam` to get the Python bindings. Without it the SLAM
 > node will not start.
 
-### Install
+### Docker (recommended, identical team environment)
+
+This repo ships the same team dev image as stonefish_sim (`docker/` — ROS 2
+Humble + Stonefish 1.3.0 + all sim/SLAM dependencies baked in; the workspace is
+bind-mounted). Expected layout: this repo cloned at `<ws>/src/stonefish_slam`.
+
+```bash
+cd <ws>/src/stonefish_slam/docker
+xhost +SI:localuser:$(id -un)          # allow X11 access (once per login)
+UID=$(id -u) GID=$(id -g) docker compose up -d --build
+docker compose exec stonefish-dev bash
+```
+
+Host prerequisites: NVIDIA driver + nvidia-container-toolkit (see
+stonefish_sim README "Installation" for details). Inside the container, continue
+with the Build section below (dependencies are already installed).
+
+### Native install
 
 Source ROS 2 Humble first, then install the system and Python dependencies.
 
@@ -65,7 +82,7 @@ source /opt/ros/humble/setup.bash
 # 1. System / C++ build dependencies (apt)
 sudo apt install \
     ros-humble-gtsam \
-    libpointmatcher-dev \
+    ros-humble-libpointmatcher \
     ros-humble-octomap \
     pybind11-dev \
     libeigen3-dev
@@ -103,7 +120,7 @@ If a C++ extension is missing, the package logs a warning and runs the pure-Pyth
 ros2 launch stonefish_ros2 bluerov2.launch.py
 
 # Terminal 2: Run path following (includes hybrid controller)
-ros2 launch stonefish_trajectory_manager path_following.launch.py
+ros2 launch stonefish_trajectory_manager path.launch.py
 
 # Terminal 3: Run SLAM
 ros2 launch stonefish_slam slam.launch.py vehicle_name:=bluerov2
@@ -154,7 +171,7 @@ ros2 launch stonefish_slam slam.launch.py \
 | `/{vehicle}/fls/image` | sensor_msgs/Image | Forward-Looking Sonar |
 | `/{vehicle}/odometry` | nav_msgs/Odometry | Ground truth (simulator) |
 | `/{vehicle}/imu` | sensor_msgs/Imu | IMU data |
-| `/{vehicle}/dvl_sim` | stonefish_msgs/DVL | DVL velocity |
+| `/{vehicle}/dvl` | stonefish_msgs/DVL | DVL velocity |
 | `/{vehicle}/pressure` | sensor_msgs/FluidPressure | Depth sensor |
 
 ### Publications
@@ -212,6 +229,23 @@ If a C++ extension is missing (not built), the package logs a warning naming the
 absent module and what degrades, then runs the pure-Python fallback. The ICP
 fallback is less precise than the libpointmatcher C++ path — build the extensions
 for production accuracy.
+
+## Testing
+
+```bash
+# stage the built pybind11 extensions into the source tree (once per build)
+cp <ws>/build/stonefish_slam/*.so stonefish_slam/
+python3 -m pytest        # from the repo root
+```
+
+Without the staged `.so` files, collection fails at
+`stonefish_slam.cpp` imports — this is expected, not a broken checkout.
+
+## Contributing
+
+Branch/commit/PR rules live in [CONTRIBUTING.md](CONTRIBUTING.md)
+(GitHub Flow · Conventional Commits · 1-reviewer PR gate). Run
+`python3 -m pytest` before opening a PR.
 
 ## License
 
