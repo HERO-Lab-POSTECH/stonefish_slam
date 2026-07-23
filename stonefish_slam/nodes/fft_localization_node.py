@@ -45,7 +45,9 @@ class FFTLocalizationNode(Node):
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
         self.declare_parameter('pose_topic', '/fft_localization/transform')
 
-        # FFT localizer parameters (defaults match config/slam.yaml: fft_localization.*).
+        # FFT localizer parameters. ⚠️ defaults are this node's own tuning and are NOT
+        # auto-loaded from config/slam.yaml (slam_node) — slam.yaml currently differs
+        # (verbose/erosion/sigma/truncate). Pass a params file to align if needed.
         # Only the pure-estimation parameters are declared here; the SLAM validation
         # parameters (validate_with_odom, max_position_error, max_rotation_error,
         # min_ppr, reject_on_failure, use_dr_rotation) are intentionally omitted
