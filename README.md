@@ -63,7 +63,7 @@ bind-mounted). Expected layout: this repo cloned at `<ws>/src/stonefish_slam`.
 ```bash
 cd <ws>/src/stonefish_slam/docker
 xhost +SI:localuser:$(id -un)          # allow X11 access (once per login)
-UID=$(id -u) GID=$(id -g) docker compose up -d --build
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build
 docker compose exec stonefish-dev bash
 ```
 
@@ -84,6 +84,7 @@ sudo apt install \
     ros-humble-gtsam \
     ros-humble-libpointmatcher \
     ros-humble-octomap \
+    ros-humble-tf-transformations \
     pybind11-dev \
     libeigen3-dev
 

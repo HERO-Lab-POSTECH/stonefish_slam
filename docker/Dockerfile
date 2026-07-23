@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-pcl-ros \
     ros-humble-image-transport \
     ros-humble-tf2-geometry-msgs \
+    ros-humble-tf-transformations \
     ros-humble-gtsam \
     ros-humble-libpointmatcher \
     ros-humble-octomap-msgs \
