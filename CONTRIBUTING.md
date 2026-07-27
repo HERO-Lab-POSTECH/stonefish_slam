@@ -78,7 +78,9 @@ stonefish_sim · stonefish_slam · stonefish(fork) 세 repo와 이 워크스페�
 
 ## 6. 테스트 · 품질 게이트
 
-- 각 repo에서 `python3 -m pytest` 가 로컬 게이트입니다 (sim 84·slam 37 기준, 2026-07-23).
+- 각 repo에서 `python3 -m pytest` 가 로컬 게이트입니다 — 전부 통과가 기준입니다.
+  테스트는 계속 추가되므로 여기에 고정 개수를 적지 않습니다(실제 수치는 PR의 테스트
+  증빙에 기록합니다).
 - **slam 사전 단계**: pybind11 확장을 소스 트리에 스테이징해야 수집이 됩니다.
 
   ```bash
