@@ -40,21 +40,6 @@ def pose322(pose:gtsam.Pose3) -> gtsam.Pose2:
     return gtsam.Pose2(pose.x(), pose.y(), pose.rotation().yaw())
 
 
-def pose223(pose:gtsam.Pose2) -> gtsam.Pose3:
-    """convert a gtsam.Pose2 to a gtsam.Pose3
-
-    Args:
-        pose (gtsam.Pose2): the input 2D pose
-
-    Returns:
-        gtsam.Pose3: the 3D pose with zeros for the unkown values
-    """
-
-    return gtsam.Pose3(
-        gtsam.Rot3.Yaw(pose.theta()), gtsam.Point3(pose.x(), pose.y(), 0)
-    )
-
-
 def n2g(numpy_arr:np.array, obj:str) -> any:
     """convert a numpy array to gtsam
 
