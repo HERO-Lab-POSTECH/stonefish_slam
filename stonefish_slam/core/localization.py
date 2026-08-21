@@ -51,6 +51,7 @@ class Localization:
 
         # Keyframe criteria
         self.keyframe_duration = None
+        self.keyframe_duration_max = None  # None = no forced-keyframe cadence
         self.keyframe_translation = None
         self.keyframe_rotation = None
 
@@ -124,6 +125,12 @@ class Localization:
         keyframe_duration_ns = self.keyframe_duration.nanoseconds
         if duration_ns < keyframe_duration_ns:
             return False
+
+        # Force keyframe when maximum duration exceeded (keeps cadence steady
+        # in slow segments where translation/rotation thresholds never trip)
+        if self.keyframe_duration_max is not None:
+            if duration_ns >= self.keyframe_duration_max.nanoseconds:
+                return True
 
         # Check translation and rotation
         dr_odom = self.fg.keyframes[-1].dr_pose.between(frame.dr_pose)

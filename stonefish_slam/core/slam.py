@@ -9,7 +9,7 @@ from tf2_ros import TransformBroadcaster, Buffer, TransformListener
 import cv_bridge
 from nav_msgs.msg import Odometry
 from message_filters import Subscriber, ApproximateTimeSynchronizer
-from sensor_msgs.msg import PointCloud2, Image
+from sensor_msgs.msg import PointCloud2, Image, CompressedImage
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from octomap_msgs.msg import Octomap
@@ -55,7 +55,12 @@ class SLAMNode(Node):
 
         # Sonar parameters (sonar.yaml)
         self.declare_parameter('vehicle_name', 'bluerov2')
-        # Note: sonar_image_topic is constructed from vehicle_name
+        # Note: sonar_image_topic is constructed from vehicle_name unless
+        # sonar_topic/odom_topic override it (real-bag replay: e.g.
+        # /vehicle_synced/image/fls2/image/compressed + /lig_nav).
+        self.declare_parameter('sonar_topic', '')       # '' = /{vehicle_name}/fls/image
+        self.declare_parameter('odom_topic', '')        # '' = /{vehicle_name}/odometry
+        self.declare_parameter('sonar_compressed', False)  # True: subscribe CompressedImage
         self.declare_parameter('sonar.horizontal_fov', 130.0)
         self.declare_parameter('sonar.vertical_fov', 20.0)
         self.declare_parameter('sonar.num_beams', 512)
@@ -82,6 +87,9 @@ class SLAMNode(Node):
 
         # Localization parameters (localization.yaml)
         self.declare_parameter('keyframe_duration', 1.0)
+        # 0.0 disables the forced-keyframe cadence; >0 forces a keyframe after
+        # this many seconds even without motion (steady cadence in slow segments)
+        self.declare_parameter('keyframe_duration_max', 0.0)
         self.declare_parameter('keyframe_translation', 3.0)
         self.declare_parameter('keyframe_rotation', 0.5236)
         self.declare_parameter('slam_prior_noise', [0.1, 0.1, 0.01])
@@ -106,6 +114,9 @@ class SLAMNode(Node):
         self.declare_parameter('nssm.max_rotation', 0.5236)
         self.declare_parameter('nssm.source_frames', 5)
         self.declare_parameter('nssm.cov_samples', 30)
+        # Try a loop closure only every N keyframes (1 = every keyframe).
+        # NSSM cost grows O(N) with graph size; >1 bounds it on long runs.
+        self.declare_parameter('nssm.try_interval', 1)
         self.declare_parameter('pcm_queue_size', 5)
         self.declare_parameter('min_pcm', 3)
 
@@ -145,6 +156,11 @@ class SLAMNode(Node):
         # SLAM integration parameters (slam.yaml)
         self.declare_parameter('enable_2d_mapping', False)
         self.declare_parameter('enable_3d_mapping', True)
+        # publish_point_cloud() rebuilds every keyframe's cloud per call
+        # (O(N*P)); on dense real-bag data this was measured blocking the
+        # callback thread ~30s at N=45 keyframes. Disable when the cloud
+        # topic is not consumed.
+        self.declare_parameter('publish_point_cloud', True)
 
         # FFT localization parameters
         self.declare_parameter('fft_localization.enable', False)
@@ -215,12 +231,17 @@ class SLAMNode(Node):
         # keyframe paramters, how often to add them (loaded from localization.yaml)
         keyframe_duration_sec = self.get_parameter('keyframe_duration').value
         keyframe_duration = Duration(seconds=keyframe_duration_sec)
+        keyframe_duration_max_sec = self.get_parameter('keyframe_duration_max').value
+        keyframe_duration_max = (
+            Duration(seconds=keyframe_duration_max_sec)
+            if keyframe_duration_max_sec > 0.0 else None)
         keyframe_translation = self.get_parameter('keyframe_translation').value
         keyframe_rotation = self.get_parameter('keyframe_rotation').value
 
         # Set keyframe criteria in localization module (skip if mapping-only mode)
         if self.localization is not None:
             self.localization.keyframe_duration = keyframe_duration
+            self.localization.keyframe_duration_max = keyframe_duration_max
             self.localization.keyframe_translation = keyframe_translation
             self.localization.keyframe_rotation = keyframe_rotation
 
@@ -299,6 +320,7 @@ class SLAMNode(Node):
             self.localization.nssm_params.source_frames = self.get_parameter('nssm.source_frames').value
             self.localization.nssm_params.cov_samples = self.get_parameter('nssm.cov_samples').value
             self.get_logger().info(f"NSSM: {self.localization.nssm_params.enable}")
+        self.nssm_try_interval = max(1, self.get_parameter('nssm.try_interval').value)
 
         # pairwise consistency maximization parameters for loop closure (loaded from localization.yaml)
         self.fg.pcm_queue_size = self.get_parameter('pcm_queue_size').value
@@ -494,10 +516,13 @@ class SLAMNode(Node):
 
         # Subscribe to sonar image and odometry
         # NOTE: Feature extraction is now INTERNAL - no external feature topic subscription
+        # Topic overrides support real-bag replay (e.g. compressed FLS + external nav).
         vehicle_name = self.get_parameter('vehicle_name').value
-        sonar_image_topic = f'/{vehicle_name}/fls/image'
-        odom_topic = f'/{vehicle_name}/odometry'
-        self.sonar_sub = Subscriber(self, Image, sonar_image_topic, qos_profile=qos_sub_profile)
+        sonar_image_topic = self.get_parameter('sonar_topic').value or f'/{vehicle_name}/fls/image'
+        odom_topic = self.get_parameter('odom_topic').value or f'/{vehicle_name}/odometry'
+        self.sonar_compressed = self.get_parameter('sonar_compressed').value
+        sonar_msg_type = CompressedImage if self.sonar_compressed else Image
+        self.sonar_sub = Subscriber(self, sonar_msg_type, sonar_image_topic, qos_profile=qos_sub_profile)
         self.odom_sub = Subscriber(self, Odometry, odom_topic, qos_profile=qos_sub_profile)
 
         # Add debug prints for topic names
@@ -643,14 +668,15 @@ class SLAMNode(Node):
 
         return len(info['reasons']) == 0, info
 
-    def slam_callback_integrated(self, sonar_msg: Image, odom_msg: Odometry) -> None:
+    def slam_callback_integrated(self, sonar_msg, odom_msg: Odometry) -> None:
         """Integrated SLAM callback with internal feature extraction.
 
         Replaces the old 3-way synchronization (feature + odom + sonar).
         Now uses 2-way sync (sonar + odom) with internal feature extraction.
 
         Args:
-            sonar_msg (Image): Sonar image message (polar coordinates)
+            sonar_msg (Image | CompressedImage): Sonar image message (polar
+                coordinates); type follows the sonar_compressed parameter
             odom_msg (Odometry): Dead reckoning odometry
         """
         # 1. Extract features internally using FeatureExtraction module
@@ -670,14 +696,26 @@ class SLAMNode(Node):
         polar_sonar = None
         if self.enable_2d_mapping or self.enable_3d_mapping or self.fft_enable:
             try:
-                sonar_image = self.bridge.imgmsg_to_cv2(sonar_msg, desired_encoding="mono8")
+                if self.sonar_compressed:
+                    sonar_image = self.bridge.compressed_imgmsg_to_cv2(
+                        sonar_msg, desired_encoding="passthrough")
+                    if sonar_image.ndim == 3:
+                        import cv2 as _cv2
+                        sonar_image = _cv2.cvtColor(sonar_image, _cv2.COLOR_BGR2GRAY)
 
-                # FFT localization (polar sonar image 필요)
-                if self.fft_enable:
-                    # Polar image는 sonar_msg.data를 직접 변환
-                    polar_sonar = np.frombuffer(sonar_msg.data, dtype=np.uint8).reshape(
-                        sonar_msg.height, sonar_msg.width
-                    )
+                    # FFT localization reuses the decoded mono8 polar image
+                    # (CompressedImage has no raw height/width buffer to reshape)
+                    if self.fft_enable:
+                        polar_sonar = sonar_image
+                else:
+                    sonar_image = self.bridge.imgmsg_to_cv2(sonar_msg, desired_encoding="mono8")
+
+                    # FFT localization (polar sonar image 필요)
+                    if self.fft_enable:
+                        # Polar image는 sonar_msg.data를 직접 변환
+                        polar_sonar = np.frombuffer(sonar_msg.data, dtype=np.uint8).reshape(
+                            sonar_msg.height, sonar_msg.width
+                        )
 
             except Exception as e:
                 self.get_logger().error(f"Failed to convert sonar image: {e}")
@@ -807,8 +845,11 @@ class SLAMNode(Node):
                 # Update factor graph
                 self.fg.update_graph(frame)
 
-                # Loop closure (slam mode only)
-                if self.mode == 'slam' and self.localization.nssm_params.enable and self.add_nonsequential_scan_matching():
+                # Loop closure (slam mode only) — throttled via nssm.try_interval
+                # to bound NSSM's O(N) candidate search on long runs
+                if self.mode == 'slam' and self.localization.nssm_params.enable \
+                        and (self.fg.current_key % self.nssm_try_interval == 0) \
+                        and self.add_nonsequential_scan_matching():
                     self.fg.update_graph()
             else:
                 # mapping-only mode: use DR pose directly
@@ -905,7 +946,8 @@ class SLAMNode(Node):
         if current_frame_status:
             self.publish_trajectory()
             self.publish_constraint()
-            self.publish_point_cloud()
+            if self.get_parameter('publish_point_cloud').value:
+                self.publish_point_cloud()
 
     def publish_pose(self) -> None:
         """Append dead reckoning from Localization to SLAM estimate to achieve realtime TF.
@@ -939,14 +981,22 @@ class SLAMNode(Node):
         # Simulator provides world_ned → base_link_frd directly
         # If navigation stack integration needed, re-add map → odom TF
 
+        # Single-topic SLAM output:
+        #   header.frame_id        : global frame  (world_ned)
+        #   pose.pose              : position + orientation (global frame)
+        #   pose.covariance        : 6x6 SLAM pose uncertainty
+        #   child_frame_id         : vehicle frame ({rov_id}_base_link)
+        #   twist.twist            : linear/angular velocity (vehicle frame)
         odom_msg = Odometry()
         odom_msg.header = pose_msg.header
         odom_msg.pose.pose = pose_msg.pose.pose
+        odom_msg.pose.covariance = pose_msg.pose.covariance
         if self.rov_id == "":
             odom_msg.child_frame_id = "base_link"
         else:
             odom_msg.child_frame_id = self.rov_id + "_base_link"
         odom_msg.twist.twist = current_frame.twist
+        # Twist covariance: left as default zeros — SLAM does not estimate velocity uncertainty.
         self.odom_pub.publish(odom_msg)
 
     def publish_constraint(self) -> None:
@@ -1063,63 +1113,74 @@ class SLAMNode(Node):
         # Create ICP result
         ret2 = ICPResult(ret, self.localization.ssm_params.cov_samples > 0)
 
-        # Compute transform (FFT or ICP)
-        use_fft = self.fft_enable and hasattr(keyframe, 'fft_success') and keyframe.fft_success
-        if use_fft:
-            # Use FFT transform (already validated in slam_callback_integrated)
-            ret2.estimated_transform = keyframe.fft_transform
-            ret2.status.description = "FFT"
-        else:
-            # Compute ICP
-            with CodeTimer("SLAM - sequential scan matching - ICP"):
-                if self.localization.ssm_params.initialization and self.localization.ssm_params.cov_samples > 0:
-                    message, odom, cov, sample_transforms = self.localization.compute_icp_with_cov(
-                        ret2.source_points,
-                        ret2.target_points,
-                        ret2.initial_transforms[: self.localization.ssm_params.cov_samples],
-                    )
+        # If FFT succeeded, seed ICP with the FFT transform as the initial guess.
+        # ICP then refines both rotation and translation starting from that seed
+        # (previously the FFT transform replaced ICP entirely and skipped the
+        # SSM validation below; refining + always validating proved more robust).
+        fft_seeded = False
+        if self.fft_enable \
+                and hasattr(keyframe, 'fft_success') and keyframe.fft_success \
+                and keyframe.fft_transform is not None:
+            ret2.initial_transform = keyframe.fft_transform
+            if ret2.initial_transforms is not None and len(ret2.initial_transforms) > 0:
+                # Replace every sampled initial guess with the FFT seed
+                ret2.initial_transforms = [keyframe.fft_transform for _ in ret2.initial_transforms]
+            fft_seeded = True
 
-                    if message != "success":
-                        ret2.status = STATUS.NOT_CONVERGED
-                        ret2.status.description = message
-                    else:
-                        ret2.estimated_transform = odom
-                        ret2.cov = cov
-                        ret2.sample_transforms = sample_transforms
-                        ret2.status.description = f"{len(ret2.sample_transforms)} samples"
-                else:
-                    message, odom = self.localization.compute_icp(
-                        ret2.source_points, ret2.target_points, ret2.initial_transform
-                    )
-
-                    if message != "success":
-                        ret2.status = STATUS.NOT_CONVERGED
-                        ret2.status.description = message
-                    else:
-                        ret2.estimated_transform = odom
-                        ret2.status.description = ""
-
-            # ICP-specific validation (skip for FFT - already validated)
-            # Verify transform is reasonable
-            if ret2.status:
-                delta = ret2.initial_transform.between(ret2.estimated_transform)
-                delta_translation = np.linalg.norm(delta.translation())
-                delta_rotation = abs(delta.theta())
-                if (
-                    delta_translation > self.localization.ssm_params.max_translation
-                    or delta_rotation > self.localization.ssm_params.max_rotation
-                ):
-                    ret2.status = STATUS.LARGE_TRANSFORMATION
-                    ret2.status.description = f"trans {delta_translation:.2f} rot {delta_rotation:.2f}"
-
-            # Check overlap
-            if ret2.status:
-                overlap = self.localization.get_overlap(
-                    ret2.source_points, ret2.target_points, ret2.estimated_transform
+        # Always compute ICP (both rotation and translation come from ICP,
+        # seeded with FFT when available)
+        with CodeTimer("SLAM - sequential scan matching - ICP"):
+            if self.localization.ssm_params.initialization and self.localization.ssm_params.cov_samples > 0:
+                message, odom, cov, sample_transforms = self.localization.compute_icp_with_cov(
+                    ret2.source_points,
+                    ret2.target_points,
+                    ret2.initial_transforms[: self.localization.ssm_params.cov_samples],
                 )
-                if overlap < self.localization.ssm_params.min_points:
-                    ret2.status = STATUS.NOT_ENOUGH_OVERLAP
-                    ret2.status.description = f"overlap {overlap}"
+
+                if message != "success":
+                    ret2.status = STATUS.NOT_CONVERGED
+                    ret2.status.description = message
+                else:
+                    ret2.estimated_transform = odom
+                    ret2.cov = cov
+                    ret2.sample_transforms = sample_transforms
+                    ret2.status.description = f"{len(ret2.sample_transforms)} samples"
+            else:
+                message, odom = self.localization.compute_icp(
+                    ret2.source_points, ret2.target_points, ret2.initial_transform
+                )
+
+                if message != "success":
+                    ret2.status = STATUS.NOT_CONVERGED
+                    ret2.status.description = message
+                else:
+                    ret2.estimated_transform = odom
+                    ret2.status.description = ""
+
+        if ret2.status and fft_seeded:
+            desc = ret2.status.description or ""
+            ret2.status.description = (desc + " [FFT_SEED]").strip()
+
+        # ICP validation — verify transform is reasonable
+        if ret2.status:
+            delta = ret2.initial_transform.between(ret2.estimated_transform)
+            delta_translation = np.linalg.norm(delta.translation())
+            delta_rotation = abs(delta.theta())
+            if (
+                delta_translation > self.localization.ssm_params.max_translation
+                or delta_rotation > self.localization.ssm_params.max_rotation
+            ):
+                ret2.status = STATUS.LARGE_TRANSFORMATION
+                ret2.status.description = f"trans {delta_translation:.2f} rot {delta_rotation:.2f}"
+
+        # Check overlap
+        if ret2.status:
+            overlap = self.localization.get_overlap(
+                ret2.source_points, ret2.target_points, ret2.estimated_transform
+            )
+            if overlap < self.localization.ssm_params.min_points:
+                ret2.status = STATUS.NOT_ENOUGH_OVERLAP
+                ret2.status.description = f"overlap {overlap}"
 
         # Add to graph if successful
         if ret2.status:
