@@ -373,6 +373,65 @@ class SonarMapping2D:
         if not keyframes:
             return
 
+        self._initialize_map_if_needed(keyframes)
+
+        # 3. Transform and add each keyframe's sonar image
+        # Adaptive sampling based on number of keyframes
+        sample_step = 4 if len(keyframes) > self.keyframe_sample_threshold else 2
+
+        # Track newly processed keyframes in this update
+        newly_processed_count = 0
+
+        for kf in keyframes:
+            # Extract keyframe key for tracking (Option 2: incremental update)
+            if isinstance(kf, dict):
+                kf_key = kf['key']
+            else:
+                kf_key = kf.key if hasattr(kf, 'key') else None
+
+            # Skip already processed keyframes (incremental update)
+            if kf_key is not None and kf_key in self.processed_keyframe_keys:
+                continue
+
+            # Extract image and pose (duck typing: dict or object)
+            if isinstance(kf, dict):
+                polar_img = kf['image']
+                pose = kf['pose']
+                timestamp = kf.get('time', None)  # For dict mode
+            else:
+                # SLAM Keyframe object
+                if not hasattr(kf, 'image') or kf.image is None:
+                    continue
+                polar_img = kf.image
+                pose = kf.pose  # Default pose
+                # Use sonar acquisition time if available, otherwise fall back to feature time
+                timestamp = kf.sonar_time if hasattr(kf, 'sonar_time') and kf.sonar_time is not None else kf.time
+
+            # No preprocessing - use raw sonar intensity
+
+            pose = self._resolve_keyframe_pose(pose, timestamp, tf2_buffer, target_frame, source_frame)
+
+            processed = self._accumulate_keyframe_into_map(pose, polar_img, sample_step)
+            if not processed:
+                continue
+
+            # Mark this keyframe as processed (incremental update)
+            if kf_key is not None:
+                self.processed_keyframe_keys.add(kf_key)
+                newly_processed_count += 1
+
+        # Log incremental update statistics
+        if newly_processed_count > 0:
+            self.logger.info(
+                f"Incremental map update: processed {newly_processed_count} new keyframes "
+                f"(total processed: {len(self.processed_keyframe_keys)})"
+            )
+
+    def _initialize_map_if_needed(
+        self,
+        keyframes: Union[List[Dict], List[KeyframeType]]
+    ) -> None:
+        """Initializes the global map ONCE with fixed bounds centered at the first keyframe."""
         # Initialize map ONCE with fixed bounds centered at first keyframe
         if self.global_map_accum is None:
             # Get first keyframe pose to center the map
@@ -413,262 +472,228 @@ class SonarMapping2D:
                 f"bounds X=[{self.min_x:.1f}, {self.max_x:.1f}], Y=[{self.min_y:.1f}, {self.max_y:.1f}]"
             )
 
+    def _resolve_keyframe_pose(self, pose, timestamp, tf2_buffer, target_frame, source_frame):
+        """Resolves a keyframe's pose via tf2 lookup at sonar acquisition time, falling back to the keyframe pose."""
+        # Debug log for keyframe processing
+        if timestamp is not None:
+            self.logger.debug(
+                f"Processing keyframe: pose=({pose.x():.2f}, {pose.y():.2f}), "
+                f"timestamp_type={type(timestamp).__name__}, "
+                f"tf2_available={tf2_buffer is not None}"
+            )
 
-        # 3. Transform and add each keyframe's sonar image
-        # Adaptive sampling based on number of keyframes
-        sample_step = 4 if len(keyframes) > self.keyframe_sample_threshold else 2
-
-        # Track newly processed keyframes in this update
-        newly_processed_count = 0
-
-        for kf in keyframes:
-            # Extract keyframe key for tracking (Option 2: incremental update)
-            if isinstance(kf, dict):
-                kf_key = kf['key']
-            else:
-                kf_key = kf.key if hasattr(kf, 'key') else None
-
-            # Skip already processed keyframes (incremental update)
-            if kf_key is not None and kf_key in self.processed_keyframe_keys:
-                continue
-
-            # Extract image and pose (duck typing: dict or object)
-            if isinstance(kf, dict):
-                polar_img = kf['image']
-                pose = kf['pose']
-                timestamp = kf.get('time', None)  # For dict mode
-            else:
-                # SLAM Keyframe object
-                if not hasattr(kf, 'image') or kf.image is None:
-                    continue
-                polar_img = kf.image
-                pose = kf.pose  # Default pose
-                # Use sonar acquisition time if available, otherwise fall back to feature time
-                timestamp = kf.sonar_time if hasattr(kf, 'sonar_time') and kf.sonar_time is not None else kf.time
-
-            # No preprocessing - use raw sonar intensity
-
-            # Debug log for keyframe processing
-            if timestamp is not None:
-                self.logger.debug(
-                    f"Processing keyframe: pose=({pose.x():.2f}, {pose.y():.2f}), "
-                    f"timestamp_type={type(timestamp).__name__}, "
-                    f"tf2_available={tf2_buffer is not None}"
+        # Use tf2 to get accurate pose at sonar acquisition time
+        if tf2_buffer is not None and timestamp is not None:
+            try:
+                # Lookup transform at the exact sonar acquisition time
+                transform = tf2_buffer.lookup_transform(
+                    target_frame,
+                    source_frame,
+                    timestamp,
+                    timeout=Duration(seconds=0.1)
                 )
 
-            # Use tf2 to get accurate pose at sonar acquisition time
-            if tf2_buffer is not None and timestamp is not None:
-                try:
-                    # Lookup transform at the exact sonar acquisition time
-                    transform = tf2_buffer.lookup_transform(
-                        target_frame,
-                        source_frame,
-                        timestamp,
-                        timeout=Duration(seconds=0.1)
+                # Convert transform to gtsam.Pose2
+                from stonefish_slam.utils.conversions import r2g, pose322
+                from geometry_msgs.msg import Pose
+                ros_pose = Pose()
+                ros_pose.position.x = transform.transform.translation.x
+                ros_pose.position.y = transform.transform.translation.y
+                ros_pose.position.z = transform.transform.translation.z
+                ros_pose.orientation = transform.transform.rotation
+
+                pose3 = r2g(ros_pose)
+                pose = pose322(pose3)  # Extract 2D pose (x, y, yaw)
+
+                # Update statistics
+                self.tf2_stats['success'] += 1
+
+                if self.tf2_stats['success'] % 10 == 0:
+                    self.logger.info(
+                        f"tf2 stats: success={self.tf2_stats['success']}, "
+                        f"failed={self.tf2_stats['failed']}"
                     )
 
-                    # Convert transform to gtsam.Pose2
-                    from stonefish_slam.utils.conversions import r2g, pose322
-                    from geometry_msgs.msg import Pose
-                    ros_pose = Pose()
-                    ros_pose.position.x = transform.transform.translation.x
-                    ros_pose.position.y = transform.transform.translation.y
-                    ros_pose.position.z = transform.transform.translation.z
-                    ros_pose.orientation = transform.transform.rotation
+            except Exception as e:
+                # Update statistics
+                self.tf2_stats['failed'] += 1
 
-                    pose3 = r2g(ros_pose)
-                    pose = pose322(pose3)  # Extract 2D pose (x, y, yaw)
-
-                    # Update statistics
-                    self.tf2_stats['success'] += 1
-
-                    if self.tf2_stats['success'] % 10 == 0:
-                        self.logger.info(
-                            f"tf2 stats: success={self.tf2_stats['success']}, "
-                            f"failed={self.tf2_stats['failed']}"
-                        )
-
-                except Exception as e:
-                    # Update statistics
-                    self.tf2_stats['failed'] += 1
-
-                    # Log tf2 lookup failures (use debug for common extrapolation errors)
-                    error_msg = str(e)
-                    if 'Lookup would require extrapolation' in error_msg:
-                        # Common when mapping old keyframes, use debug level
-                        self.logger.debug(
-                            f"tf2 extrapolation needed (using keyframe pose): {error_msg[:80]}"
-                        )
-                    elif 'Could not find transform' in error_msg:
-                        self.logger.warning(
-                            f"Transform not available ({target_frame} → {source_frame}). "
-                            f"Using keyframe pose."
-                        )
-                    else:
-                        self.logger.warning(
-                            f"tf2 lookup failed: {error_msg[:200]}. Using keyframe pose."
-                        )
-                    # Fallback to keyframe pose (pose already set above)
-            else:
-                if timestamp is None:
-                    self.tf2_stats['no_timestamp'] += 1
-
-            # ===== STEP 1: Convert polar sonar to fan-shaped cartesian =====
-            fan_img, range_resolution = self.polar_to_cartesian_image(polar_img, self.sonar_range, self.sonar_fov)
-            fan_h, fan_w = fan_img.shape
-
-            # ===== STEP 2: Prepare rotation matrix (NED convention) =====
-            # NED uses clockwise yaw (navigation), gtsam uses counterclockwise (math) → negate
-            theta = -pose.theta()
-            cos_theta = np.cos(theta)
-            sin_theta = np.sin(theta)
-
-            # ===== STEP 3: Downsample and extract valid pixels (vectorized) =====
-            fan_sampled = fan_img[::sample_step, ::sample_step]
-            sampled_h, sampled_w = fan_sampled.shape
-
-            # Create pixel coordinate grids
-            yy, xx = np.meshgrid(
-                np.arange(0, fan_h, sample_step),
-                np.arange(0, fan_w, sample_step),
-                indexing='ij'
-            )
-
-            # Filter low-intensity pixels (intensity threshold)
-            mask = fan_sampled > self.intensity_threshold
-            if not np.any(mask):
-                continue
-
-            # ===== Check if map expansion is needed (using only valid pixels) =====
-            yy_valid = yy[mask]
-            xx_valid = xx[mask]
-
-            # Convert VALID pixels to local coordinates (use actual range_resolution)
-            # TODO: Apply vehicle pitch correction for more accurate distance calculation
-            # Current: Uses fixed sonar_tilt (30°) regardless of vehicle pitch
-            # Issue: If vehicle pitch = 10°, actual sonar tilt = 20°, causing ~8.5% distance error
-            # Solution: actual_tilt = self.sonar_tilt_rad - pose3.rotation().pitch()
-            #           local_x = local_x_raw * np.cos(actual_tilt)
-            # Requires: Preserve pose3 (gtsam.Pose3) instead of only pose (gtsam.Pose2)
-
-            # Use pixel center (+ 0.5 offset) for consistency with polar_to_cartesian
-            local_x_raw = (fan_h - yy_valid - 0.5) * range_resolution
-            local_x = local_x_raw * np.cos(self.sonar_tilt_rad)
-            local_y = (xx_valid - fan_w / 2.0 + 0.5) * range_resolution
-
-            # Transform to global coordinates
-            theta = -pose.theta()
-            cos_theta = np.cos(theta)
-            sin_theta = np.sin(theta)
-            global_x_preview = local_x * cos_theta - local_y * sin_theta + pose.x()
-            global_y_preview = -(local_x * sin_theta + local_y * cos_theta) + pose.y()
-
-            # Get min/max extents of VALID sonar data only
-            sonar_min_x = np.min(global_x_preview)
-            sonar_max_x = np.max(global_x_preview)
-            sonar_min_y = np.min(global_y_preview)
-            sonar_max_y = np.max(global_y_preview)
-
-            # Check if expansion is needed
-            needs_expansion = (
-                sonar_min_x < self.min_x or sonar_max_x > self.max_x or
-                sonar_min_y < self.min_y or sonar_max_y > self.max_y
-            )
-
-            if needs_expansion:
-                self._expand_map(sonar_min_x, sonar_max_x, sonar_min_y, sonar_max_y)
-
-            intensities = fan_sampled[mask]
-
-            # ===== STEP 4 & 5: Use already computed global coordinates =====
-            # (Already computed in expansion check above)
-            global_x = global_x_preview
-            global_y = global_y_preview
-
-            # Log tilt info once
-            if not hasattr(self, '_tilt_logged'):
-                self.logger.info(
-                    f"Sonar tilt correction: {np.rad2deg(self.sonar_tilt_rad):.1f}° "
-                    f"(range correction factor: {np.cos(self.sonar_tilt_rad):.3f})"
-                )
-                self._tilt_logged = True
-
-            # ===== STEP 6: Convert to map pixel coordinates =====
-            # NED→Image mapping: X(North)→rows, Y(East)→cols
-            map_row = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
-            map_col = ((global_y - self.min_y) / self.map_resolution).astype(np.int32)
-
-            # Boundary check (vectorized)
-            valid_idx = (
-                (map_row >= 0) & (map_row < self.map_height) &
-                (map_col >= 0) & (map_col < self.map_width)
-            )
-
-            # Extract valid points
-            map_row_valid = map_row[valid_idx]
-            map_col_valid = map_col[valid_idx]
-            intensities_raw = intensities[valid_idx].astype(np.float32)
-
-            # Normalize intensity from [threshold, 255] to [0, 255] for better contrast
-            # This makes the difference between weak and strong signals more visible
-            intensities_normalized = (intensities_raw - self.intensity_threshold) / (255.0 - self.intensity_threshold) * 255.0
-            intensities_valid = np.clip(intensities_normalized, 0, 255).astype(np.float32)
-
-            # Debug: log mapping statistics
-            total_sampled_pixels = sampled_h * sampled_w
-            total_pixels_after_intensity_filter = len(intensities)
-            valid_pixels = len(intensities_valid)
-            filtered_by_intensity = total_sampled_pixels - total_pixels_after_intensity_filter
-
-            if total_pixels_after_intensity_filter > 0:
-                if valid_pixels > 0:
-                    self.logger.info(
-                        f"Keyframe mapping: sampled={total_sampled_pixels}, "
-                        f"filtered_by_intensity={filtered_by_intensity} (threshold>{self.intensity_threshold}), "
-                        f"after_filter={total_pixels_after_intensity_filter}, "
-                        f"valid_in_bounds={valid_pixels} ({100*valid_pixels/total_pixels_after_intensity_filter:.1f}%), "
-                        f"intensity_range=[{intensities_valid.min():.1f}, {intensities_valid.max():.1f}]"
+                # Log tf2 lookup failures (use debug for common extrapolation errors)
+                error_msg = str(e)
+                if 'Lookup would require extrapolation' in error_msg:
+                    # Common when mapping old keyframes, use debug level
+                    self.logger.debug(
+                        f"tf2 extrapolation needed (using keyframe pose): {error_msg[:80]}"
+                    )
+                elif 'Could not find transform' in error_msg:
+                    self.logger.warning(
+                        f"Transform not available ({target_frame} → {source_frame}). "
+                        f"Using keyframe pose."
                     )
                 else:
                     self.logger.warning(
-                        f"Keyframe mapping: sampled={total_sampled_pixels}, "
-                        f"filtered_by_intensity={filtered_by_intensity} (threshold>{self.intensity_threshold}), "
-                        f"after_filter={total_pixels_after_intensity_filter}, "
-                        f"valid_in_bounds=0 (0.0%) - ALL PIXELS OUT OF BOUNDS! "
-                        f"map_bounds=({self.min_x:.1f}, {self.max_x:.1f}, {self.min_y:.1f}, {self.max_y:.1f}), "
-                        f"pose=({pose.x():.1f}, {pose.y():.1f})"
+                        f"tf2 lookup failed: {error_msg[:200]}. Using keyframe pose."
                     )
+                # Fallback to keyframe pose (pose already set above)
+        else:
+            if timestamp is None:
+                self.tf2_stats['no_timestamp'] += 1
 
-            # EMA fusion - blend new observations with previous values
-            if len(intensities_valid) > 0:
-                linear_indices = map_row_valid * self.map_width + map_col_valid
-                map_flat = self.global_map_accum.ravel()
-                count_flat = self.global_map_count.ravel()
+        return pose
 
-                # Apply Exponential Moving Average fusion (alpha=0.3, ~3-4 frames effective)
-                old_intensities = map_flat[linear_indices]
-                new_intensities = ema_fusion(
-                    old_map=old_intensities,
-                    new_data=intensities_valid,
-                    observation_count=count_flat[linear_indices],
-                    alpha=0.3,
-                    threshold=0.0
+    def _accumulate_keyframe_into_map(self, pose, polar_img, sample_step: int) -> bool:
+        """Converts one keyframe's sonar image to cartesian and fuses it into the global map.
+
+        Returns:
+            bool: False if there were no valid (above-threshold) pixels to fuse
+                (mirrors the original loop's `continue` on an empty mask), True otherwise.
+        """
+        # ===== STEP 1: Convert polar sonar to fan-shaped cartesian =====
+        fan_img, range_resolution = self.polar_to_cartesian_image(polar_img, self.sonar_range, self.sonar_fov)
+        fan_h, fan_w = fan_img.shape
+
+        # ===== STEP 2: Prepare rotation matrix (NED convention) =====
+        # NED uses clockwise yaw (navigation), gtsam uses counterclockwise (math) → negate
+        theta = -pose.theta()
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+
+        # ===== STEP 3: Downsample and extract valid pixels (vectorized) =====
+        fan_sampled = fan_img[::sample_step, ::sample_step]
+        sampled_h, sampled_w = fan_sampled.shape
+
+        # Create pixel coordinate grids
+        yy, xx = np.meshgrid(
+            np.arange(0, fan_h, sample_step),
+            np.arange(0, fan_w, sample_step),
+            indexing='ij'
+        )
+
+        # Filter low-intensity pixels (intensity threshold)
+        mask = fan_sampled > self.intensity_threshold
+        if not np.any(mask):
+            return False
+
+        # ===== Check if map expansion is needed (using only valid pixels) =====
+        yy_valid = yy[mask]
+        xx_valid = xx[mask]
+
+        # Convert VALID pixels to local coordinates (use actual range_resolution)
+        # TODO: Apply vehicle pitch correction for more accurate distance calculation
+        # Current: Uses fixed sonar_tilt (30°) regardless of vehicle pitch
+        # Issue: If vehicle pitch = 10°, actual sonar tilt = 20°, causing ~8.5% distance error
+        # Solution: actual_tilt = self.sonar_tilt_rad - pose3.rotation().pitch()
+        #           local_x = local_x_raw * np.cos(actual_tilt)
+        # Requires: Preserve pose3 (gtsam.Pose3) instead of only pose (gtsam.Pose2)
+
+        # Use pixel center (+ 0.5 offset) for consistency with polar_to_cartesian
+        local_x_raw = (fan_h - yy_valid - 0.5) * range_resolution
+        local_x = local_x_raw * np.cos(self.sonar_tilt_rad)
+        local_y = (xx_valid - fan_w / 2.0 + 0.5) * range_resolution
+
+        # Transform to global coordinates
+        theta = -pose.theta()
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+        global_x_preview = local_x * cos_theta - local_y * sin_theta + pose.x()
+        global_y_preview = -(local_x * sin_theta + local_y * cos_theta) + pose.y()
+
+        # Get min/max extents of VALID sonar data only
+        sonar_min_x = np.min(global_x_preview)
+        sonar_max_x = np.max(global_x_preview)
+        sonar_min_y = np.min(global_y_preview)
+        sonar_max_y = np.max(global_y_preview)
+
+        # Check if expansion is needed
+        needs_expansion = (
+            sonar_min_x < self.min_x or sonar_max_x > self.max_x or
+            sonar_min_y < self.min_y or sonar_max_y > self.max_y
+        )
+
+        if needs_expansion:
+            self._expand_map(sonar_min_x, sonar_max_x, sonar_min_y, sonar_max_y)
+
+        intensities = fan_sampled[mask]
+
+        # ===== STEP 4 & 5: Use already computed global coordinates =====
+        # (Already computed in expansion check above)
+        global_x = global_x_preview
+        global_y = global_y_preview
+
+        # Log tilt info once
+        if not hasattr(self, '_tilt_logged'):
+            self.logger.info(
+                f"Sonar tilt correction: {np.rad2deg(self.sonar_tilt_rad):.1f}° "
+                f"(range correction factor: {np.cos(self.sonar_tilt_rad):.3f})"
+            )
+            self._tilt_logged = True
+
+        # ===== STEP 6: Convert to map pixel coordinates =====
+        # NED→Image mapping: X(North)→rows, Y(East)→cols
+        map_row = ((global_x - self.min_x) / self.map_resolution).astype(np.int32)
+        map_col = ((global_y - self.min_y) / self.map_resolution).astype(np.int32)
+
+        # Boundary check (vectorized)
+        valid_idx = (
+            (map_row >= 0) & (map_row < self.map_height) &
+            (map_col >= 0) & (map_col < self.map_width)
+        )
+
+        # Extract valid points
+        map_row_valid = map_row[valid_idx]
+        map_col_valid = map_col[valid_idx]
+        intensities_raw = intensities[valid_idx].astype(np.float32)
+
+        # Normalize intensity from [threshold, 255] to [0, 255] for better contrast
+        # This makes the difference between weak and strong signals more visible
+        intensities_normalized = (intensities_raw - self.intensity_threshold) / (255.0 - self.intensity_threshold) * 255.0
+        intensities_valid = np.clip(intensities_normalized, 0, 255).astype(np.float32)
+
+        # Debug: log mapping statistics
+        total_sampled_pixels = sampled_h * sampled_w
+        total_pixels_after_intensity_filter = len(intensities)
+        valid_pixels = len(intensities_valid)
+        filtered_by_intensity = total_sampled_pixels - total_pixels_after_intensity_filter
+
+        if total_pixels_after_intensity_filter > 0:
+            if valid_pixels > 0:
+                self.logger.info(
+                    f"Keyframe mapping: sampled={total_sampled_pixels}, "
+                    f"filtered_by_intensity={filtered_by_intensity} (threshold>{self.intensity_threshold}), "
+                    f"after_filter={total_pixels_after_intensity_filter}, "
+                    f"valid_in_bounds={valid_pixels} ({100*valid_pixels/total_pixels_after_intensity_filter:.1f}%), "
+                    f"intensity_range=[{intensities_valid.min():.1f}, {intensities_valid.max():.1f}]"
+                )
+            else:
+                self.logger.warning(
+                    f"Keyframe mapping: sampled={total_sampled_pixels}, "
+                    f"filtered_by_intensity={filtered_by_intensity} (threshold>{self.intensity_threshold}), "
+                    f"after_filter={total_pixels_after_intensity_filter}, "
+                    f"valid_in_bounds=0 (0.0%) - ALL PIXELS OUT OF BOUNDS! "
+                    f"map_bounds=({self.min_x:.1f}, {self.max_x:.1f}, {self.min_y:.1f}, {self.max_y:.1f}), "
+                    f"pose=({pose.x():.1f}, {pose.y():.1f})"
                 )
 
-                map_flat[linear_indices] = new_intensities
-                np.add.at(count_flat, linear_indices, 1)  # Track observation count
+        # EMA fusion - blend new observations with previous values
+        if len(intensities_valid) > 0:
+            linear_indices = map_row_valid * self.map_width + map_col_valid
+            map_flat = self.global_map_accum.ravel()
+            count_flat = self.global_map_count.ravel()
 
-            # Mark this keyframe as processed (incremental update)
-            if kf_key is not None:
-                self.processed_keyframe_keys.add(kf_key)
-                newly_processed_count += 1
-
-        # Log incremental update statistics
-        if newly_processed_count > 0:
-            self.logger.info(
-                f"Incremental map update: processed {newly_processed_count} new keyframes "
-                f"(total processed: {len(self.processed_keyframe_keys)})"
+            # Apply Exponential Moving Average fusion (alpha=0.3, ~3-4 frames effective)
+            old_intensities = map_flat[linear_indices]
+            new_intensities = ema_fusion(
+                old_map=old_intensities,
+                new_data=intensities_valid,
+                observation_count=count_flat[linear_indices],
+                alpha=0.3,
+                threshold=0.0
             )
+
+            map_flat[linear_indices] = new_intensities
+            np.add.at(count_flat, linear_indices, 1)  # Track observation count
+
+        return True
 
     def update_global_map(self, buffer_m: float = 30.0) -> None:
         """Update global map from self.keyframes (independent operation mode).
