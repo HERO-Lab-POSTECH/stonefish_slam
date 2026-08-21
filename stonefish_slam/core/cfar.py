@@ -125,9 +125,3 @@ class CFAR(object):
         Return target mask array.
         """
         return self.detector[alg](mat, *self.params[alg])
-
-    def detect2(self, mat, alg="CA"):
-        """
-        Return target mask array and threshold array.
-        """
-        return self.detector2[alg](mat, *self.params[alg])
