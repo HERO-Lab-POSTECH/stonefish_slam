@@ -82,6 +82,20 @@
 - **현재 처리**: P3는 동작 보존이라 현 동작(=0)을 그대로 둠. 현재 출력이 이미 상수 0이라 P3에서 건드릴 것 없음.
 - **수정안**: P4에서 깊이를 실제 압력 변환으로 복원할지 결정(복원 시 pressure 1000배 버그를 정답식으로 동시 수정). pressure→depth 플래그와 함께 처리.
 
+## dead_reckoning 깊이 부호 — **문서 결함으로 판정(2026-08-21), 실기 검증 이월**
+
+- **파일**: `core/depth.py::pressure_to_depth`(NED 반환) → `core/dead_reckoning.py:165`(`curr_depth`) → `send_odometry`의 pose z → `/dead_reck/odom`·`odom→base_link` TF.
+- **제기된 의심**: NED 깊이(+ = 깊음)가 문서상 REP-105 ENU(z-up)로 기술된 `odom→base_link` 체인에 `+z`로 그대로 발행된다 → 부호 오류인가?
+- **소비자 전수 추적 결과 — 코드 무결함, 문서 결함**:
+  1. dead_reckoning이 발행하는 `/dead_reck/odom`·`/dead_reck/path`·`/dead_reck/key_traj`를 **repo 내에서 구독하는 곳이 0개**(전수 grep, `.py`·`.yaml`·`.rviz`).
+  2. SLAM은 `LOCALIZATION_ODOM_TOPIC = "/bluerov2/odometry"` — 시뮬레이터의 NED odometry를 직접 구독(`utils/topics.py:18`의 명시 결정 주석).
+  3. `launch/slam.launch.py`는 dead_reckoning 노드를 include하지 않음.
+  4. `rviz/stonefish_slam.rviz`에 `/dead_reck` 참조 없음.
+  5. 이 체인의 TF는 모두 identity → 어디에도 회전 변환 없음.
+  - 따라서 체인 전체가 **NED로 자기정합**이고 하위 보상 부호반전도 없다. 부호를 뒤집으면 발행 깊이가 오히려 틀려진다.
+- **처리**: 코드 무변경. `docs/CONVENTIONS.md` §2.0과 `CLAUDE.md`의 "로컬 체인은 REP-105 ENU" 기술을 "이름만 REP-105, 데이터는 NED"로 정정. `test/test_dead_reckoning_depth_frame.py`가 (a) 깊이 positive-down, (b) `curr_depth`에 부호반전 없음, (c) `/dead_reck` 구독자 0 — 이 추적의 전제 3개를 동결한다. 특히 (c)가 깨지면 새 소비자가 규약을 결정하므로 부호 문제를 **재개**해야 한다.
+- **이월(실기 sign-off 필요)**: 이 판정은 정적 추적이다. 실제 pressure 센서를 단 차량에서 하강 시 `/dead_reck/odom`의 `pose.position.z`가 **증가**하는지(NED), RViz에서 `odom→base_link` TF가 수면 아래로 내려가는지 GPU 머신 실기로 확인한다(`docs/RUN_TEST.md` 절차). dead_reckoning을 SLAM 입력으로 재배선하는 작업이 생기면 그 시점에 반드시 함께 검증한다.
+
 ## dead_reckoning.py docstring 내부 탭 (P3 T2 잔여)
 
 - **파일**: `stonefish_slam/core/dead_reckoning.py` — 4개 docstring(클래스 + 메서드 Args 블록)의 내부 들여쓰기가 여전히 탭.
