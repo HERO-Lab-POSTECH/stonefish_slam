@@ -10,6 +10,8 @@ from ament_index_python.packages import get_package_share_directory
 import os
 import tempfile
 
+import yaml
+
 
 def launch_setup(context, *args, **kwargs):
     """
@@ -50,7 +52,9 @@ def launch_setup(context, *args, **kwargs):
         'mode': mode,
         'enable_2d_mapping': enable_2d_mapping.lower() == 'true',
         'enable_3d_mapping': enable_3d_mapping.lower() == 'true',
-        'update_method': update_method,
+        # Dot notation: the node declares mapping_3d.update_method, not a
+        # bare top-level 'update_method' (which would be dropped).
+        'mapping_3d.update_method': update_method,
         'vehicle_name': vehicle_name,
         'use_sim_time': use_sim_time.lower() == 'true'
     }
@@ -168,9 +172,24 @@ def generate_launch_description():
         description='Enable 3D mapping'
     )
 
+    # Default comes from mapping.yaml so the config file is the single source
+    # of truth for the update method (same resolution as
+    # mapping_3d_standalone.launch.py); the argument still overrides it.
+    mapping_yaml_path = os.path.join(
+        get_package_share_directory('stonefish_slam'), 'config', 'mapping.yaml'
+    )
+    with open(mapping_yaml_path, 'r') as f:
+        _mapping_config = yaml.safe_load(f)
+    default_update_method = (
+        _mapping_config.get('slam_node', {})
+        .get('ros__parameters', {})
+        .get('mapping_3d', {})
+        .get('update_method', 'log_odds')
+    )
+
     update_method_arg = DeclareLaunchArgument(
         'update_method',
-        default_value='log_odds',
+        default_value=default_update_method,
         description='3D mapping probability update method: log_odds, weighted_avg, iwlo'
     )
 

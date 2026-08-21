@@ -132,6 +132,14 @@ class SLAMNode(Node):
         self.declare_parameter('mapping_3d.enable_gaussian_weighting', False)
         self.declare_parameter('mapping_3d.use_dda_traversal', True)
         self.declare_parameter('mapping_3d.bearing_step', 1)
+        # Probability update method + its method-specific parameters
+        # (config/mapping/method_*.yaml). Defaults mirror mapping_3d.py's own
+        # fallbacks so an undeclared method file cannot shift behaviour.
+        self.declare_parameter('mapping_3d.update_method', 'log_odds')
+        self.declare_parameter('mapping_3d.intensity_threshold', 35)
+        self.declare_parameter('mapping_3d.sharpness', 1.0)
+        self.declare_parameter('mapping_3d.decay_rate', 0.05)
+        self.declare_parameter('mapping_3d.min_alpha', 0.3)
 
         # SLAM integration parameters (slam.yaml)
         self.declare_parameter('enable_2d_mapping', False)
@@ -351,7 +359,9 @@ class SLAMNode(Node):
                 'num_bins': sonar_config['num_bins'],
                 'sonar_position': sonar_config['sonar_position'],
                 'sonar_tilt_deg': sonar_config['sonar_tilt_deg'],
-                'intensity_threshold': self.intensity_threshold,
+                # 3D threshold, not self.intensity_threshold (that one is the
+                # 2D occupancy grid's, mapping_2d.intensity_threshold).
+                'intensity_threshold': self.get_parameter('mapping_3d.intensity_threshold').value,
 
                 # 3D mapping specific
                 'voxel_resolution': self.get_parameter('mapping_3d.map_3d_voxel_size').value,
@@ -370,6 +380,14 @@ class SLAMNode(Node):
                 'enable_gaussian_weighting': self.get_parameter('mapping_3d.enable_gaussian_weighting').value,
                 'use_dda_traversal': self.get_parameter('mapping_3d.use_dda_traversal').value,
                 'bearing_step': self.get_parameter('mapping_3d.bearing_step').value,
+
+                # Update method + its method-specific params. Without these
+                # SonarMapping3D falls back to log_odds regardless of what
+                # config/mapping.yaml and the method_*.yaml file select.
+                'update_method': self.get_parameter('mapping_3d.update_method').value,
+                'sharpness': self.get_parameter('mapping_3d.sharpness').value,
+                'decay_rate': self.get_parameter('mapping_3d.decay_rate').value,
+                'min_alpha': self.get_parameter('mapping_3d.min_alpha').value,
 
                 # Fixed parameters
                 'max_frames': 0,
