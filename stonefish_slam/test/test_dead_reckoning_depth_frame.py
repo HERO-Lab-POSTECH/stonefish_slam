@@ -83,6 +83,9 @@ def test_dead_reckoning_output_has_no_in_repo_consumer():
         if "__pycache__" not in p.parts and p != DR_PY and "test" not in p.parts
     ]
     sources += list((REPO_ROOT / "launch").glob("*.py"))
+    # The stated premise covers rviz and config too, so scan them as well.
+    sources += list((REPO_ROOT / "rviz").glob("*.rviz"))
+    sources += list((REPO_ROOT / "config").rglob("*.yaml"))
 
     offenders = [
         str(p.relative_to(REPO_ROOT))

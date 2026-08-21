@@ -4,6 +4,6 @@ slam_node:
   ros__parameters:
     mapping_3d:
       intensity_threshold: 35     # Minimum intensity for observation
-      intensity_max: 255          # Maximum intensity value
-      occupied_threshold: 0.7     # Probability threshold for occupied
-      # Intensity -> Probability mapping: [threshold, max] -> [0.7, 0.95]
+      # Intensity -> Probability mapping: [threshold, 255] -> [0.7, 0.95]
+      # (max intensity and the 0.7 occupied cut are hardcoded in
+      # mapping_3d.py - keys advertising them here were never read)

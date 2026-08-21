@@ -154,6 +154,32 @@ def test_launch_default_method_comes_from_mapping_yaml():
     pytest.fail("update_method DeclareLaunchArgument not found")
 
 
+def test_every_mapping_3d_yaml_key_is_declared():
+    """Category gate: no mapping_3d.* YAML key may be silently dropped.
+
+    The IWLO fix closed four instances of this defect class; this test closes
+    the class. Any key advertised under slam_node.ros__parameters.mapping_3d
+    in config/mapping.yaml or config/mapping/method_*.yaml must be declared
+    by core/slam.py, or ROS discards it without a sound.
+    """
+    yaml = pytest.importorskip("yaml")
+    declared = _declared_parameters(_slam_tree())
+    yaml_files = [REPO_ROOT / "config" / "mapping.yaml"] + sorted(
+        (REPO_ROOT / "config" / "mapping").glob("method_*.yaml")
+    )
+    missing = []
+    for path in yaml_files:
+        with open(path) as fh:
+            params = yaml.safe_load(fh)["slam_node"]["ros__parameters"]
+        for key in params.get("mapping_3d", {}):
+            if f"mapping_3d.{key}" not in declared:
+                missing.append(f"{path.name}: mapping_3d.{key}")
+    assert not missing, (
+        "YAML advertises mapping_3d keys core/slam.py never declares "
+        f"(silently dropped): {missing}"
+    )
+
+
 def test_3d_mapper_gets_the_3d_intensity_threshold():
     """The 3D config must not be fed the 2D grid's intensity threshold."""
     config = _mapping_3d_config_dict(_slam_tree())

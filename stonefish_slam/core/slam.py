@@ -140,6 +140,7 @@ class SLAMNode(Node):
         self.declare_parameter('mapping_3d.sharpness', 1.0)
         self.declare_parameter('mapping_3d.decay_rate', 0.05)
         self.declare_parameter('mapping_3d.min_alpha', 0.3)
+        self.declare_parameter('mapping_3d.use_cpp_ray_processor', True)
 
         # SLAM integration parameters (slam.yaml)
         self.declare_parameter('enable_2d_mapping', False)
@@ -388,6 +389,7 @@ class SLAMNode(Node):
                 'sharpness': self.get_parameter('mapping_3d.sharpness').value,
                 'decay_rate': self.get_parameter('mapping_3d.decay_rate').value,
                 'min_alpha': self.get_parameter('mapping_3d.min_alpha').value,
+                'use_cpp_ray_processor': self.get_parameter('mapping_3d.use_cpp_ray_processor').value,
 
                 # Fixed parameters
                 'max_frames': 0,
