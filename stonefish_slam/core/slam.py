@@ -203,6 +203,15 @@ class SLAMNode(Node):
         Args:
             ns (str, optional): The namespace of the node. Defaults to "~".
         """
+        self._init_keyframe_and_noise_params()
+        self._init_sonar_and_scan_matching_params()
+        self._init_mappers()
+        self._init_fft_localizer()
+        self._init_subscribers_and_publishers()
+        self._finalize_node_config()
+
+    def _init_keyframe_and_noise_params(self) -> None:
+        """Configures keyframe criteria and noise models (loaded from localization.yaml)."""
         # keyframe paramters, how often to add them (loaded from localization.yaml)
         keyframe_duration_sec = self.get_parameter('keyframe_duration').value
         keyframe_duration = Duration(seconds=keyframe_duration_sec)
@@ -230,6 +239,8 @@ class SLAMNode(Node):
             self.localization.odom_sigmas = odom_sigmas
             self.localization.icp_odom_sigmas = icp_odom_sigmas
 
+    def _init_sonar_and_scan_matching_params(self) -> None:
+        """Configures sonar hardware, SSM, NSSM, and PCM parameters (loaded from sonar.yaml/localization.yaml)."""
         # resultion for map downsampling (loaded from localization.yaml)
         point_resolution = self.get_parameter('point_downsample_resolution').value
         if self.localization is not None:
@@ -293,6 +304,8 @@ class SLAMNode(Node):
         self.fg.pcm_queue_size = self.get_parameter('pcm_queue_size').value
         self.fg.min_pcm = self.get_parameter('min_pcm').value
 
+    def _init_mappers(self) -> None:
+        """Configures and creates the 2D and 3D sonar mappers (loaded from sonar.yaml/mapping.yaml/slam.yaml)."""
         # ===== Sonar Hardware Parameters ===== (loaded from sonar.yaml)
         # ===== 2D Mapping Parameters ===== (loaded from mapping.yaml)
         # ===== 3D Mapping Parameters ===== (loaded from mapping.yaml)
@@ -403,6 +416,8 @@ class SLAMNode(Node):
                 f"range_max={mapping_3d_config['range_max']}m, tilt={mapping_3d_config['sonar_tilt_deg']}°"
             )
 
+    def _init_fft_localizer(self) -> None:
+        """Configures the optional FFT localizer (loaded from fft_localization.* params)."""
         # FFT localizer initialization (optional)
         self.fft_enable = self.get_parameter('fft_localization.enable').value
         if self.fft_enable:
@@ -444,6 +459,8 @@ class SLAMNode(Node):
             self.fft_localizer = None
             self.get_logger().info("FFT localization disabled")
 
+    def _init_subscribers_and_publishers(self) -> None:
+        """Sets up QoS profiles, subscribers, the time synchronizer, and all publishers."""
         # max delay between an incoming point cloud and dead reckoning
         self.feature_odom_sync_max_delay = 0.5
 
@@ -541,6 +558,8 @@ class SLAMNode(Node):
         # cv bridge object
         self.CVbridge = cv_bridge.CvBridge()
 
+    def _finalize_node_config(self) -> None:
+        """Loads ICP config, extracts the robot ID, and calls configure() to finish init."""
         # get the ICP configuration from the yaml file (loaded from slam.yaml)
         icp_config = self.get_parameter('icp_config').value
         if icp_config and self.localization is not None:
