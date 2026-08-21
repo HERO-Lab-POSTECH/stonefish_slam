@@ -26,7 +26,7 @@ colcon build --merge-install --packages-up-to stonefish_slam stonefish_ros2
 
 ## 2. 토픽 계약 (왜 이 순서로 띄우나)
 
-slam은 sim이 발행하는 두 토픽을 **2-way 시간동기**로 구독한다(`core/slam.py:465-466`). 따라서 **sim이 먼저, slam이 나중**.
+slam은 sim이 발행하는 두 토픽을 **2-way 시간동기**로 구독한다(`core/slam.py:463-464`). 따라서 **sim이 먼저, slam이 나중**.
 
 | 토픽 | 발행 | 구독 | 비고 |
 |---|---|---|---|
