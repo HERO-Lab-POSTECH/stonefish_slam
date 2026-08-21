@@ -110,6 +110,25 @@ install(PROGRAMS
   RENAME mapping_2d_standalone
 )
 
+# Evaluation / real-bag support nodes
+install(PROGRAMS
+  stonefish_slam/nodes/slam_accuracy_monitor_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME slam_accuracy_monitor
+)
+
+install(PROGRAMS
+  stonefish_slam/nodes/traj_2d_error_accumulator_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME traj_2d_error_accumulator
+)
+
+install(PROGRAMS
+  stonefish_slam/nodes/odom_tf_bridge_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME odom_tf_bridge
+)
+
 # Build pybind11 modules
 # Get Python include directories
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
