@@ -501,8 +501,11 @@ class Localization:
             return ret
 
         with CodeTimer("SLAM - nonsequential scan matching - sampling"):
-            translation_std = np.sqrt(np.max(np.linalg.eigvals(cov[:2, :2])))
-            rotation_std = np.sqrt(cov[2, 2])
+            # Size the search box from the covariance this result carries. A
+            # bare `cov` here picks up the field-of-view loop's leftover, which
+            # is the OLDEST source frame's covariance, not the source key's.
+            translation_std = np.sqrt(np.max(np.linalg.eigvals(ret.cov[:2, :2])))
+            rotation_std = np.sqrt(ret.cov[2, 2])
             pose_stds = np.array([[translation_std, translation_std, rotation_std]]).T
             pose_bounds = 5.0 * np.c_[-pose_stds, pose_stds]
 

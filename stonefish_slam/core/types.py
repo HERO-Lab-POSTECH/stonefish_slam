@@ -1,5 +1,3 @@
-from enum import Enum
-
 import gtsam
 import numpy as np
 from rclpy.time import Time
@@ -7,20 +5,64 @@ from rclpy.time import Time
 from stonefish_slam.utils.conversions import g2n, n2g, pose322
 
 
-class STATUS(Enum):
-    """A class for the status of a ICP call"""
+class _StatusMeta(type):
+    """Hands out a FRESH status object on every ``STATUS.MEMBER`` access.
 
-    NOT_ENOUGH_POINTS = "Not enough points"
-    LARGE_TRANSFORMATION = "Large transformation"
-    NOT_ENOUGH_OVERLAP = "Not enough overlap"
-    NOT_CONVERGED = "Not converged"
-    INITIALIZATION_FAILURE = "Initialization failure"
-    SUCCESS = "Success"
+    Call sites write a per-result message onto the status
+    (``ret.status = STATUS.SUCCESS`` then ``ret.status.description = ...``).
+    With ``enum.Enum`` the members are singletons, so that write landed on an
+    object shared by every holder and one scan-matching result read another's
+    text. Returning a copy per access keeps each holder's description private.
+    """
 
-    def __init__(self, *args, **kwargs):
-        """Class constructor"""
-        Enum.__init__(*args, **kwargs)
+    def __getattr__(cls, name: str) -> "STATUS":
+        try:
+            value = cls._VALUES[name]
+        except KeyError:
+            raise AttributeError(
+                f"type object '{cls.__name__}' has no attribute '{name}'"
+            ) from None
+        return cls(name, value)
+
+
+class STATUS(metaclass=_StatusMeta):
+    """The status of an ICP call, plus an optional per-result description.
+
+    Compares by member name, so ``status == STATUS.SUCCESS`` and
+    ``bool(status)`` behave exactly as they did under ``enum.Enum``; only the
+    identity (``is``) of two references differs, and nothing compares statuses
+    with ``is``.
+    """
+
+    _VALUES = {
+        "NOT_ENOUGH_POINTS": "Not enough points",
+        "LARGE_TRANSFORMATION": "Large transformation",
+        "NOT_ENOUGH_OVERLAP": "Not enough overlap",
+        "NOT_CONVERGED": "Not converged",
+        "INITIALIZATION_FAILURE": "Initialization failure",
+        "SUCCESS": "Success",
+    }
+
+    def __init__(self, name: str, value: str):
+        """Class constructor
+
+        Args:
+            name (str): member name, e.g. ``"SUCCESS"``.
+            value (str): human-readable text for that member.
+        """
+        self.name = name
+        self.value = value
         self.description = None
+
+    def __eq__(self, other) -> bool:
+        """Two statuses are equal when they name the same member."""
+        if isinstance(other, STATUS):
+            return self.name == other.name
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        """Hash by member name so statuses stay usable as dict/set keys."""
+        return hash(self.name)
 
     def __bool__(self) -> bool:
         """boolean override
@@ -28,7 +70,7 @@ class STATUS(Enum):
         Returns:
             bool: returns true if the status is SUCCESS else returns false
         """
-        return self == STATUS.SUCCESS
+        return self.name == "SUCCESS"
 
     def __nonzero__(self) -> bool:
         """_summary_
@@ -36,7 +78,11 @@ class STATUS(Enum):
         Returns:
             bool: returns true if the status is SUCCESS else returns false
         """
-        return self == STATUS.SUCCESS
+        return self.__bool__()
+
+    def __repr__(self) -> str:
+        """Match the old Enum repr so logs stay recognizable."""
+        return f"<STATUS.{self.name}: {self.value!r}>"
 
     def __str__(self) -> str:
         """Convert this class to a string

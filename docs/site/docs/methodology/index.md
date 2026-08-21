@@ -109,4 +109,4 @@ prior(`PriorFactorPose2`), odometry(`BetweenFactorPose2`), ICP(`BetweenFactorPos
 `test/static_import_gate.py`와 `test/test_wildcard_gate.py`가 AST 분석으로 import 규약과 wildcard import 금지(wildcard 0)를 정적 검증한다. 런타임 실행 없이 코드 구조 위반을 잡아내므로 ROS 의존성이 없는 환경에서도 동작 보존을 검증할 수 있다.
 
 !!! note "좌표계 정책"
-    전역 frame_id는 `world_ned`(NED)로 통일되어 있고(sim이 NED 전역을 발행), 로컬 TF(dead_reckoning의 odom→base_link 체인)는 REP-105 ENU를 유지한다. 두 경계 사이의 TF는 identity로, 회전 없이 frame_id 이름만 정합한다(CONVENTIONS §2.0, P4d).
+    전역 frame_id는 `world_ned`(NED)로 통일되어 있고(sim이 NED 전역을 발행), 로컬 TF(dead_reckoning의 odom→base_link 체인)도 frame 이름만 REP-105에서 빌렸을 뿐 데이터는 NED(z-down)다(2026-08-21 소비자 추적으로 확정). 두 경계 사이의 TF는 identity로, 회전 없이 frame_id 이름만 정합한다(CONVENTIONS §2.0, P4d).

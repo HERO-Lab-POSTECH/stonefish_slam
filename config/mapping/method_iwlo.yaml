@@ -12,7 +12,6 @@ slam_node:
 
       # Intensity weighting parameters
       intensity_threshold: 35     # Minimum intensity for observation
-      intensity_max: 255.0        # Maximum intensity value (float)
       sharpness: 0.1              # Sigmoid steepness for intensity-to-weight
 
       # Learning rate decay
