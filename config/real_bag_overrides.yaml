@@ -1,0 +1,40 @@
+# Parameter profile for real sea-trial bag replay (KMU/LIG dataset).
+# Loaded AFTER the default config files via the override_config launch
+# argument (slam.launch.py / slam_real_bag.launch.py), so every value here
+# beats the sim-tuned defaults; explicit launch arguments still win.
+# Values validated on the girona500 sea-trial bag (compressed FLS + LIG nav).
+slam_node:
+  ros__parameters:
+    # ---- Data source: bag topics instead of simulator topics ----
+    sonar_topic: '/vehicle_synced/image/fls2/image/compressed'
+    odom_topic: '/lig_nav'
+    sonar_compressed: true
+
+    # ---- Keyframe cadence ----
+    # Real bag segments move slowly; force a steady keyframe cadence so the
+    # graph keeps growing even when translation/rotation thresholds never trip.
+    keyframe_duration: 0.5
+    keyframe_duration_max: 1.5
+
+    # ---- Localization pipeline (FFT seed + ICP refine) ----
+    ssm.enable: true
+    ssm.target_frames: 5
+    fft_localization.max_position_error: 1.0  # real nav vs FFT disagree more than sim
+
+    # ---- Feature extraction: real sonar is noisier and sparser ----
+    CFAR.Pfa: 0.05
+    filter.threshold: 40
+    filter.skip: 2
+
+    # ---- Loop closure: relaxed gates, bounded cost ----
+    nssm.min_points: 50
+    nssm.max_translation: 10.0
+    nssm.max_rotation: 1.047   # 60 degrees
+    nssm.source_frames: 3
+    nssm.cov_samples: 0        # skip covariance sampling (too slow on real data)
+    nssm.try_interval: 5       # try a loop closure every 5 keyframes only
+
+    # ---- Output ----
+    # Cloud topic unused during bag runs; publishing was measured blocking the
+    # callback thread ~30s at 45 keyframes.
+    publish_point_cloud: false

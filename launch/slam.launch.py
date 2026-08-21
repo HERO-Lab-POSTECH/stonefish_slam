@@ -31,7 +31,12 @@ def launch_setup(context, *args, **kwargs):
     factor_graph_config = os.path.join(pkg_share, 'config', 'factor_graph.yaml')
     mapping_config = os.path.join(pkg_share, 'config', 'mapping.yaml')
     slam_config = os.path.join(pkg_share, 'config', 'slam.yaml')
-    icp_config = os.path.join(pkg_share, 'config', 'icp.yaml')
+    icp_config = os.path.join(
+        pkg_share, 'config',
+        LaunchConfiguration('icp_config_file').perform(context))
+    # Optional profile overriding the yaml defaults above (e.g.
+    # real_bag_overrides.yaml). Empty string = no override.
+    override_config = LaunchConfiguration('override_config').perform(context)
 
     # Get launch argument values
     vehicle_name = LaunchConfiguration('vehicle_name').perform(context)
@@ -66,21 +71,27 @@ def launch_setup(context, *args, **kwargs):
         param_dict['nssm.enable'] = nssm_enable.lower() == 'true'
 
     # SLAM node with integrated feature extraction
+    parameters = [
+        sonar_config,         # Sonar hardware + common parameters
+        feature_config,       # Feature extraction params (CFAR, filters)
+        localization_config,  # SLAM keyframes, noise models, SSM, ICP config path
+        factor_graph_config,  # Loop closure (NSSM) and consistency verification (PCM)
+        mapping_config,       # 2D/3D mapping parameters
+        method_config,        # Method-specific config (log_odds, weighted_avg, iwlo)
+        slam_config,          # Integration settings (ssm.enable, nssm.enable defaults)
+    ]
+    if override_config:
+        # Profile overrides beat the yaml defaults; explicit launch arguments
+        # (param_dict below) still win over the profile.
+        parameters.append(override_config)
+    parameters.append(param_dict)  # Runtime overrides
+
     slam_node = Node(
         package='stonefish_slam',
         executable='slam_node',
         name='slam_node',
         output='screen',
-        parameters=[
-            sonar_config,         # Sonar hardware + common parameters
-            feature_config,       # Feature extraction params (CFAR, filters)
-            localization_config,  # SLAM keyframes, noise models, SSM, ICP config path
-            factor_graph_config,  # Loop closure (NSSM) and consistency verification (PCM)
-            mapping_config,       # 2D/3D mapping parameters
-            method_config,        # Method-specific config (log_odds, weighted_avg, iwlo)
-            slam_config,          # Integration settings (ssm.enable, nssm.enable defaults)
-            param_dict            # Runtime overrides
-        ]
+        parameters=parameters
     )
 
     # Static TF: world_ned -> {vehicle_name}_map (identity transform)
@@ -205,6 +216,84 @@ def generate_launch_description():
         description='Override nssm.enable (true/false, empty = use yaml)'
     )
 
+    icp_config_file_arg = DeclareLaunchArgument(
+        'icp_config_file',
+        default_value='icp.yaml',
+        description='ICP config file name under config/ (e.g. icp_real_bag.yaml)'
+    )
+
+    override_config_arg = DeclareLaunchArgument(
+        'override_config',
+        default_value='',
+        description='Optional yaml path overriding config defaults '
+                    '(e.g. config/real_bag_overrides.yaml). Empty = none.'
+    )
+
+    accuracy_monitor_arg = DeclareLaunchArgument(
+        'enable_accuracy_monitor',
+        default_value='true',
+        description='Enable SLAM vs ground-truth accuracy monitor'
+    )
+
+    accuracy_log_every_n_arg = DeclareLaunchArgument(
+        'accuracy_log_every_n',
+        default_value='1',
+        description='Accuracy monitor: log stats every N samples (0 disables periodic logs)'
+    )
+
+    traj_error_arg = DeclareLaunchArgument(
+        'enable_traj_error_accumulator',
+        default_value='true',
+        description='Enable 2D error accumulator (SLAM pose vs ground truth)'
+    )
+
+    traj_error_log_every_n_arg = DeclareLaunchArgument(
+        'traj_error_log_every_n',
+        default_value='1',
+        description='Trajectory 2D error: log every N samples (0 disables periodic logs)'
+    )
+
+    traj_error_pose_topic_arg = DeclareLaunchArgument(
+        'traj_error_slam_pose_topic',
+        default_value='/stonefish_slam/slam/pose',
+        description='SLAM pose topic for 2D error accumulator'
+    )
+
+    traj_error_ground_truth_topic_arg = DeclareLaunchArgument(
+        'traj_error_ground_truth_topic',
+        default_value='',
+        description='Ground truth topic (empty => /{vehicle_name}/odometry)'
+    )
+
+    # Evaluation observers (read-only; they never feed back into SLAM)
+    accuracy_monitor_node = Node(
+        package='stonefish_slam',
+        executable='slam_accuracy_monitor',
+        name='slam_accuracy_monitor',
+        output='screen',
+        parameters=[{
+            'vehicle_name': LaunchConfiguration('vehicle_name'),
+            'log_every_n': LaunchConfiguration('accuracy_log_every_n'),
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }],
+        condition=IfCondition(LaunchConfiguration('enable_accuracy_monitor'))
+    )
+
+    traj_error_node = Node(
+        package='stonefish_slam',
+        executable='traj_2d_error_accumulator',
+        name='traj_2d_error_accumulator',
+        output='screen',
+        parameters=[{
+            'vehicle_name': LaunchConfiguration('vehicle_name'),
+            'slam_pose_topic': LaunchConfiguration('traj_error_slam_pose_topic'),
+            'ground_truth_topic': LaunchConfiguration('traj_error_ground_truth_topic'),
+            'log_every_n': LaunchConfiguration('traj_error_log_every_n'),
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }],
+        condition=IfCondition(LaunchConfiguration('enable_traj_error_accumulator'))
+    )
+
     return LaunchDescription([
         # Arguments
         rviz_arg,
@@ -216,7 +305,17 @@ def generate_launch_description():
         update_method_arg,
         ssm_enable_arg,
         nssm_enable_arg,
+        icp_config_file_arg,
+        override_config_arg,
+        accuracy_monitor_arg,
+        accuracy_log_every_n_arg,
+        traj_error_arg,
+        traj_error_log_every_n_arg,
+        traj_error_pose_topic_arg,
+        traj_error_ground_truth_topic_arg,
 
         # Nodes (created via OpaqueFunction for conditional param handling)
         OpaqueFunction(function=launch_setup),
+        accuracy_monitor_node,
+        traj_error_node,
     ])
