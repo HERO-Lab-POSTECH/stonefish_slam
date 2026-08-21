@@ -57,12 +57,12 @@ standalone·dead_reckoning 노드의 발행 토픽은 다음과 같다.
 |------|------|-----------------|
 | `/feature_extraction/points` | `sensor_msgs/PointCloud2` | feature_extraction_node |
 | `/fft_localization/transform` | - | fft_localization_node |
-| `/dead_reck/odom` | `nav_msgs/Odometry` | `odom` (ENU) |
+| `/dead_reck/odom` | `nav_msgs/Odometry` | `odom` (이름만 REP-105, 데이터 NED) |
 | `/dead_reck/key_traj` | `sensor_msgs/PointCloud2` | dead_reckoning_node |
 | `/dead_reck/path` | `nav_msgs/Path` | dead_reckoning_node |
 
-!!! note "전역 NED, 로컬 ENU"
-    SLAM 출력은 전역 `world_ned`(NED)로 통일되지만, `dead_reckoning`의 `odom→base_link` TF 체인은 REP-105 ENU를 유지한다(`CONVENTIONS §2.0`). NED 전역과 ENU 로컬의 경계에서 TF는 identity이며 회전이 없다 — `frame_id` 이름만 정합시킨다.
+!!! note "전역도 로컬도 데이터는 NED"
+    SLAM 출력은 전역 `world_ned`(NED)로 통일되고, `dead_reckoning`의 `odom→base_link` TF 체인도 frame **이름**만 REP-105에서 빌렸을 뿐 데이터는 NED(z-down)다(`CONVENTIONS §2.0`, 2026-08-21 소비자 전수 추적으로 확정). 경계 TF는 identity이며 회전이 없다 — `frame_id` 이름만 정합시킨다.
 
 ## 토픽 그래프
 
@@ -86,7 +86,7 @@ flowchart TD
     CLOUD["/slam/cloud (PointCloud2)"]
     MAP2D["/mapping/map_2d_image (Image)"]
     MAP3D["/mapping/map_3d_octomap (Octomap)"]
-    DRODOM["/dead_reck/odom (odom ENU)"]
+    DRODOM["/dead_reck/odom (odom, NED 데이터)"]
 
     FLS --> SLAM
     ODOM --> SLAM

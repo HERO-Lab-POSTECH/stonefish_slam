@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **메인 파이프라인 3D 갱신법이 설정 의도대로 IWLO로 동작** (`fix/audit-bugs`,
+  런타임 수치 변경): `slam_node`가 `mapping_3d.{update_method,sharpness,decay_rate,
+  min_alpha,use_cpp_ray_processor}`를 선언·전달하지 않아 `config/mapping.yaml`의
+  `update_method: 'iwlo'`가 조용히 무시되고 항상 log_odds로 동작하던 3중 단절을 배선.
+  3D intensity threshold도 2D 값(10) 대신 `mapping_3d.intensity_threshold`(35)를 사용.
+  launch 기본값은 하드코딩 대신 mapping.yaml에서 해석(standalone launch와 동일 패턴).
+  **닫힌루프 맵 품질은 RTX4070 실기 sign-off 이월**(P4_FLAGS). method YAML의
+  무소비 키(`intensity_max`·`occupied_threshold`)는 제거(하드코딩 실측 근거 주석화)
+
 ### Added
 
 - README Docker 설치 안내 — 전용 배포 repo
