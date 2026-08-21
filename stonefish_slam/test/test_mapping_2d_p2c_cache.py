@@ -11,6 +11,9 @@ mapping_2d.py imports cv2 and tf2 helpers at module top, so the class is
 exercised through a bound-method call on an object built with
 `__new__` - only the handful of attributes the method reads are set.
 """
+import sys
+import types
+
 import numpy as np
 import pytest
 
@@ -18,17 +21,47 @@ cv2 = pytest.importorskip("cv2")
 
 REL = "stonefish_slam/core/mapping_2d.py"
 
+# mapping_2d.py really imports cv2/gtsam/scipy, but also rclpy.duration and
+# (through the utils package chain) cv_bridge — ROS deps absent in CI. Stub
+# exactly those before loading and drop everything the load added afterwards,
+# the same pattern as conftest's load_localization fixture.
+_ROS_STUBS = {
+    "cv_bridge": {"CvBridge": object},
+    "sensor_msgs_py": {},
+    "sensor_msgs_py.point_cloud2": {},
+    "rclpy": {},
+    "rclpy.duration": {"Duration": object},
+    "geometry_msgs": {},
+    "geometry_msgs.msg": {"Pose": object},
+    "std_msgs": {},
+    "std_msgs.msg": {"Header": object},
+}
+
 
 @pytest.fixture
 def mapper(load_module):
     """A SonarMapping2D carrying only what polar_to_cartesian_image reads."""
-    module = load_module(REL, "mapping_2d_p2c")
-    m = module.SonarMapping2D.__new__(module.SonarMapping2D)
-    m.sonar_range = 15.0
-    m.sonar_fov = 130.0
-    m.range_min = 0.5
-    m.p2c_cache = None
-    return m
+    preexisting = set(sys.modules)
+    for name, attrs in _ROS_STUBS.items():
+        if name not in sys.modules:
+            mod = types.ModuleType(name)
+            for k, v in attrs.items():
+                setattr(mod, k, v)
+            sys.modules[name] = mod
+    sys.modules["sensor_msgs_py"].point_cloud2 = sys.modules[
+        "sensor_msgs_py.point_cloud2"
+    ]
+    try:
+        module = load_module(REL, "mapping_2d_p2c")
+        m = module.SonarMapping2D.__new__(module.SonarMapping2D)
+        m.sonar_range = 15.0
+        m.sonar_fov = 130.0
+        m.range_min = 0.5
+        m.p2c_cache = None
+        yield m
+    finally:
+        for name in set(sys.modules) - preexisting:
+            del sys.modules[name]
 
 
 def _polar(rows, cols):
