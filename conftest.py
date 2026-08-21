@@ -86,6 +86,67 @@ def load_factor_graph():
 
 
 @pytest.fixture
+def load_localization():
+    """localization.py를 clean env(rclpy/cv_bridge 부재)에서 로드.
+
+    localization.py는 형제 절대 import(core.types → rclpy.time, core.factor_graph,
+    cpp.pcl, utils.sonar/conversions/io)를 끌어오는데, 그 중 ROS 의존만 stub으로
+    채우고 패키지 __init__을 우회하면 clean env에서도 Localization 클래스에
+    도달한다. gtsam·cv2·sklearn·scipy는 실제로 import된다.
+
+    load_factor_graph와 동일 패턴 — 형제를 정확한 패키지 이름으로 먼저 로드한다.
+    """
+    preexisting = set(sys.modules)
+
+    stub_specs = {
+        "cv_bridge": {"CvBridge": object},
+        "sensor_msgs_py": {},
+        "sensor_msgs_py.point_cloud2": {},
+        "rclpy": {},
+        "rclpy.time": {"Time": object},
+        "geometry_msgs": {},
+        "geometry_msgs.msg": {"Pose": object},
+        "std_msgs": {},
+        "std_msgs.msg": {"Header": object},
+    }
+    for name, attrs in stub_specs.items():
+        if name not in sys.modules:
+            mod = types.ModuleType(name)
+            for k, v in attrs.items():
+                setattr(mod, k, v)
+            sys.modules[name] = mod
+    sys.modules["sensor_msgs_py"].point_cloud2 = sys.modules["sensor_msgs_py.point_cloud2"]
+
+    for pkg in ("stonefish_slam", "stonefish_slam.core",
+                "stonefish_slam.utils", "stonefish_slam.cpp"):
+        if pkg not in sys.modules:
+            m = types.ModuleType(pkg)
+            m.__path__ = [str(REPO_ROOT / pkg.replace(".", "/"))]
+            sys.modules[pkg] = m
+
+    def _load(relpath, name):
+        spec = importlib.util.spec_from_file_location(name, str(REPO_ROOT / relpath))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    _load("stonefish_slam/utils/conversions.py", "stonefish_slam.utils.conversions")
+    _load("stonefish_slam/utils/sonar.py", "stonefish_slam.utils.sonar")
+    _load("stonefish_slam/utils/io.py", "stonefish_slam.utils.io")
+    _load("stonefish_slam/core/types.py", "stonefish_slam.core.types")
+    _load("stonefish_slam/core/factor_graph.py", "stonefish_slam.core.factor_graph")
+    _load("stonefish_slam/cpp/pcl.py", "stonefish_slam.cpp.pcl")
+    loc = _load("stonefish_slam/core/localization.py", "stonefish_slam.core.localization")
+
+    yield loc
+
+    for name in list(sys.modules):
+        if name not in preexisting:
+            sys.modules.pop(name, None)
+
+
+@pytest.fixture
 def load_mapping_3d():
     """mapping_3d.py를 clean env(cv_bridge 부재)에서 로드.
 
