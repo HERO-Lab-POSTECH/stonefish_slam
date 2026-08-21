@@ -19,4 +19,9 @@ try:
 except ImportError:
     pass
 
-__all__ = ['cfar', 'dda_traversal', 'octree_mapping', 'ray_processor']
+try:
+    from . import pcl
+except ImportError:
+    pass
+
+__all__ = ['cfar', 'dda_traversal', 'octree_mapping', 'ray_processor', 'pcl']

@@ -133,9 +133,9 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 - ⚠️ **한계(정직하게)**: AST 게이트는 경로·타겟집합·심볼집합 불변을 *정적으로* 증명할 뿐, 런타임 심볼 binding(동명이클래스, `__init__` re-export 섀도잉, 메서드→함수 추출의 외부 동적 호출자)은 증명하지 못한다. `getattr`/문자열 디스패치는 별도 grep으로 확인한다. 런타임 검증(`colcon build` + `ros2 launch` 스모크)은 **P4 sign-off**로 미룬다.
 
 ### 2.9 C++ / pybind11 확장
-- `CMakeLists.txt`가 확장별로 별도 **pybind11 MODULE 타겟**을 정의(`cfar`, `dda_traversal`, `octree_mapping`, `ray_processor`, `pcl_module`). `.so` 네이밍은 `SET_TARGET_PROPERTIES`로 지정. 재사용 코어는 static lib로 빼서 다른 모듈이 링크(`octree_mapping_core`, `CMakeLists.txt:183` STATIC). 근거: `CMakeLists.txt`의 MODULE 타겟 — cfar(115)·dda_traversal(149)·octree_mapping(205)·ray_processor(250)·pcl_module(297).
+- `CMakeLists.txt`가 확장별로 별도 **pybind11 MODULE 타겟**을 정의(`cfar`, `dda_traversal`, `octree_mapping`, `ray_processor`, `pcl_module`). `.so` 네이밍은 `SET_TARGET_PROPERTIES`로 지정. 재사용 코어는 static lib로 빼서 다른 모듈이 링크(`octree_mapping_core`, `CMakeLists.txt:192` STATIC). 근거: `CMakeLists.txt`의 MODULE 타겟 — cfar(124)·dda_traversal(158)·octree_mapping(214)·ray_processor(259)·pcl_module(306).
 - 설치 경로: `local/lib/python3.X/dist-packages/stonefish_slam/`.
-- C++/Python 경계: `PYBIND11_MODULE()`로 노출. **각 C++ 모듈은 `__init__.py`에서 `try/except ImportError`로 감싸고**, 가능한 경우 **순수파이썬 fallback**을 제공한다(예: `cpp/pcl.py`가 `remove_outlier`/`density_filter`/`downsample`의 순수 Python 구현 제공). C++ 동작을 바꾸면 fallback도 동기화한다.
+- C++/Python 경계: `PYBIND11_MODULE()`로 노출. **각 C++ 모듈은 `__init__.py`에서 `try/except ImportError`로 감싸고**, 가능한 경우 **순수파이썬 fallback**을 제공한다(예: `cpp/pcl.py`가 `downsample`/`match`/`ICP`의 순수 Python 구현 제공). C++ 동작을 바꾸면 fallback도 동기화한다.
 
 ---
 

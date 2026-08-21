@@ -1,0 +1,59 @@
+# What the code graph indexes here: source code, nothing else.
+#
+# The graph answers structural questions — who calls what, what breaks if this
+# changes, what tests cover it. Anything that contributes no such edge is
+# excluded. Measured on this repo: `git ls-files` tracks 107 files, of which 58
+# are code (50 .py + 5 .cpp + 3 .h). The rest is what follows.
+#
+# Syntax note: this file does NOT support gitignore negation (`!pattern`) —
+# code_review_graph/incremental.py:_load_ignore_patterns appends every
+# non-comment line as an exclusion. A trailing `/` matches a directory at any
+# depth, matching gitignore's rule.
+
+# Documentation, including the built MkDocs site (vendored .js/.html bundles).
+docs/
+*.md
+*.rst
+
+# RViz layouts — panel positions and colors.
+*.rviz
+
+# Images.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.webp
+
+# Build output and bytecode. `/build/`, `__pycache__/` and `*.pyc` are already
+# in DEFAULT_IGNORE_PATTERNS; the pybind11 `.so` extensions staged into the
+# source tree for pytest are not — they are build artifacts of cpp/, and the
+# graph should carry the C++ sources instead.
+install/
+log/
+*.so
+
+# Harness state and tooling config, not source. Named individually rather than
+# left to a `.*/` glob: measured elsewhere (claudebase
+# templates/project-code-review-graphignore, 2026-08-10), that glob drops a
+# nested `.omx/` but lets a root-level `.vscode/` through.
+.*/
+.omc/
+.omp/
+.omx/
+.omd/
+.sp/
+.claude/
+.github/
+.vscode/
+.idea/
+.superpowers/
+.pytest_cache/
+
+# Captured artifacts and data.
+*.npz
+*.jsonl
+*.diff
+*.bag
+*.db3

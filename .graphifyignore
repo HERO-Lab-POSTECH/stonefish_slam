@@ -1,0 +1,95 @@
+# What the knowledge graph indexes in this workspace: source code, nothing else.
+#
+# Base rules come from ~/claudebase/templates/project-graphifyignore; the
+# per-project section at the bottom is this workspace's own call.
+
+
+# Everything hidden — dot-directories AND dotfiles, at any depth. Tooling config
+# and harness state (.claude/, .omp/, .omx/, .sp/, .omc/, .github/, .mcp.json),
+# never corpus content. Measured here: .omc/ session state alone accounts for
+# most of the 184 json files under src/.
+.*
+
+# Build artifacts of the graph itself, for repos predating GRAPHIFY_OUT=.graphify.
+graphify-out/
+
+# Images and video. A vision pass on these costs minutes and yields no nodes.
+# PDFs are deliberately NOT excluded: papers are text worth carrying.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tif
+*.tiff
+*.webp
+*.svg
+*.heic
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# Matching is case-sensitive.
+*.PNG
+*.JPG
+*.JPEG
+*.HEIC
+*.MP4
+*.MOV
+
+
+# ── This workspace's own exclusions ──────────────────────────────────────
+#
+# The graph exists to answer structural questions about the control and SLAM
+# code — who calls what, what breaks if this changes, what covers it in tests.
+# Everything below contributes no such edge, and measured counts show it would
+# otherwise dominate: of ~850 files under src/, only 146 are code
+# (126 .py + 12 .cpp + 8 .h). The rest is what follows.
+
+# colcon build trees and Python bytecode. Build output duplicates every source
+# file it was generated from, so indexing it double-counts the whole codebase.
+build/
+install/
+log/
+__pycache__/
+*.pyc
+*.so
+
+# Documentation is deliberately NOT excluded here — this is the one place the
+# two ignore files diverge on purpose.
+#
+# `.code-review-graphignore` drops all prose, because CRG's tree-sitter pass
+# emits no nodes for it. graphify's semantic pass is the opposite: prose is the
+# only thing it reads, and CONVENTIONS.md / P4_FLAGS.md / the design docs carry
+# the decisions the code cannot state — why odom->base_link stays ENU while the
+# world frame is NED, why the load_module fixture exists at all. Excluding them
+# left semantic extraction with nothing to do.
+#
+# What stays excluded is the MkDocs *build*, not the sources: docs/site/ is
+# generated from docs/*.md, so indexing it duplicates every page and adds the
+# theme's vendored JavaScript.
+docs/site/
+
+# 3D assets and simulator scene descriptions. 75 .obj + 37 .mtl meshes and 41
+# .scn scene files describe vehicle geometry and world layout — data the
+# simulator loads at runtime, with no call graph of their own.
+*.obj
+*.mtl
+*.dae
+*.stl
+*.scn
+
+# RViz layouts. Pure display configuration — panel positions and colors.
+*.rviz
+
+# Data and captured artifacts, not source.
+*.npz
+*.jsonl
+*.diff
+*.bag
+*.db3
+
+# Experiment run outputs (SSOT tree, per this workspace's .gitignore).
+experiments/

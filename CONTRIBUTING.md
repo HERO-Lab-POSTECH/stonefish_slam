@@ -38,7 +38,7 @@ stonefish_sim · stonefish_slam · stonefish(fork) 세 repo와 이 워크스페�
 ```
 
 - **type**: `feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert`
-- **scope**: 패키지/모듈명 — 예: `feat(albc_bridge):`, `fix(slam.core):`, `docs(control):`
+- **scope**: 패키지/모듈명 — 예: `feat(albc):`, `fix(slam.core):`, `docs(control):`
 - **호환성 깨는 변경**: type 뒤 `!` + 본문에 `BREAKING CHANGE:` 설명 — SemVer MAJOR 대상
 - 커밋은 **원자적으로**(한 커밋 = 한 논리 변경). 서로 무관한 변경을 한 커밋에 섞지 않습니다.
 

@@ -16,6 +16,32 @@ All notable changes to this project will be documented in this file.
 
 - `fft_localization.min_ppr`·`reject_on_failure` 파라미터 제거 — 선언·로드만 되고
   검증 경로 어디서도 미적용이던 dead knobs (참조 전수 추적으로 확인, 동작 불변)
+- **동작 불변 dead code 일괄 정리** (grep 재확증 후 삭제, `.so` 재빌드·37 passed 불변 확인):
+  - `utils/conversions.py::pose223` (0 호출자; `pose322`·`build_rgb_cloud`/`n2r`는 live 유지)
+  - `core/cfar.py::CFAR.detect2`/`self.detector2` + `cpp/cfar.cpp`의 `ca2`/`soca2`/`goca2`/`os2`
+    C++ 함수 4종과 PYBIND11 바인딩 (`.detect`/`.detector`만 실사용; `calc_WGN_pfa_*`는 threshold
+    계산에서 호출돼 live 유지)
+  - `cpp/pcl.py`(Python fallback)·`cpp/pcl.cpp`(pointmatcher/PCL 백엔드) 양쪽의
+    `remove_outlier`·`density_filter` — 비대칭 삭제 방지를 위해 양쪽 호출자 0 동시 확증
+    (`pcl.ICP`/`match`/`downsample`은 live). 부수적으로 orphan된
+    `sklearn.neighbors.NearestNeighbors` import(pcl.py)와
+    `pcl/filters/radius_outlier_removal.h`/`pcl/point_types.h` include(pcl.cpp) 정리
+  - `utils/sonar.py::OculusProperty.deconvolve`/`.polygon`/`.plot`/`.adjust_gamma`
+    (`remap`/`configure`/`__str__`은 live 유지)
+  - `utils/visualization.py`의 `apply_custom_colormap`·`colorline`·`make_segments`·
+    `plot_cov_ellipse`·`ros_colorline`·`plot_polygon` (`make_color_rgba`는 모듈 로드시
+    `colors` dict 구성에 6회 호출되는 live로 확증 후 유지; `ros_colorline_trajectory`·
+    `ros_constraints`도 live)
+
+### Fixed
+
+- `stonefish_slam/__init__.py`의 `__all__`에서 누락된 `pcl` 모듈 추가 —
+  `cpp/__init__.py`(cfar·dda_traversal·octree_mapping·ray_processor·pcl 5종 모두 import+export)와
+  정합
+- `docs/CONVENTIONS.md` §2.9의 `CMakeLists.txt` add_library 줄번호 인용 drift 정정
+  (cfar 115→124, dda_traversal 149→158, octree_mapping 205→214, ray_processor 250→259,
+  pcl_module 297→306, octree_mapping_core STATIC 183→192 — grep 재측정)
+- `docs/RUN_TEST.md`의 `core/slam.py` Subscriber 줄번호 인용 drift 정정 (465-466 → 463-464)
 
 ### Changed
 
