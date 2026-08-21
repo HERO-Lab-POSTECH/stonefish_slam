@@ -5,9 +5,6 @@
 #include <Eigen/Dense>
 #include <fstream>
 
-#include <pcl/filters/radius_outlier_removal.h>
-#include <pcl/point_types.h>
-
 namespace py = pybind11;
 typedef PointMatcher<float> PM;
 typedef PM::Matrix Matrix;
@@ -49,80 +46,6 @@ DPPtr fromEigen(const Matrix &mat, const Matrix &desc)
 
   DPPtr pc(new DP(padded_mat, labels, desc.transpose(), desc_labels));
   return pc;
-}
-
-Matrix remove_outlier(const Matrix &mat_in, double radius, int min_points)
-{
-  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in(new pcl::PointCloud<pcl::PointXYZ>(mat_in.rows(), 1));
-  for (int row = 0; row < mat_in.rows(); ++row)
-  {
-    cloud_in->at(row).x = mat_in(row, 0);
-    cloud_in->at(row).y = mat_in(row, 1);
-    if (mat_in.cols() == 3)
-      cloud_in->at(row).z = mat_in(row, 2);
-  }
-
-  pcl::RadiusOutlierRemoval<pcl::PointXYZ> sor;
-  sor.setInputCloud(cloud_in);
-  sor.setRadiusSearch(radius);
-  sor.setMinNeighborsInRadius(min_points);
-
-  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_out(new pcl::PointCloud<pcl::PointXYZ>);
-  sor.filter(*cloud_out);
-  Matrix mat_out = cloud_out->getMatrixXfMap();
-  return mat_out.topRows(mat_in.cols()).transpose();
-}
-
-Matrix density_filter(const Matrix &mat_in, int knn, float min_density, float max_density)
-{
-  if (mat_in.rows() == 0)
-    return mat_in;
-
-  PointMatcherSupport::Parametrizable::Parameters params1;
-  params1["knn"] = std::to_string(knn);
-  params1["keepNormals"] = "0";
-  params1["keepDensities"] = "1";
-
-  std::shared_ptr<PM::DataPointsFilter> filter =
-      PM::get().DataPointsFilterRegistrar.create("SurfaceNormalDataPointsFilter", params1);
-  DPPtr cloud_in = fromEigen(mat_in);
-  filter->inPlaceFilter(*cloud_in);
-
-  PointMatcherSupport::Parametrizable::Parameters params2;
-  params2["minDensity"] = std::to_string(min_density);
-  params2["maxDensity"] = std::to_string(max_density);
-
-  filter = PM::get().DataPointsFilterRegistrar.create("MaxDensityDataPointsFilter", params2);
-  filter->inPlaceFilter(*cloud_in);
-  return cloud_in->features.topRows(mat_in.cols()).transpose();
-}
-
-std::pair<Matrix, Matrix> density_filter(const Matrix &mat_in, const Matrix &desc_in, int knn, float min_density,
-                                         float max_density)
-{
-  if (mat_in.rows() == 0)
-    return std::make_pair(mat_in, desc_in);
-
-  PointMatcherSupport::Parametrizable::Parameters params1;
-  params1["knn"] = std::to_string(knn);
-  params1["keepNormals"] = "0";
-  params1["keepDensities"] = "1";
-
-  std::shared_ptr<PM::DataPointsFilter> filter =
-      PM::get().DataPointsFilterRegistrar.create("SurfaceNormalDataPointsFilter", params1);
-  DPPtr cloud_in = fromEigen(mat_in, desc_in);
-  filter->inPlaceFilter(*cloud_in);
-
-  PointMatcherSupport::Parametrizable::Parameters params2;
-  params2["minDensity"] = std::to_string(min_density);
-  params2["maxDensity"] = std::to_string(max_density);
-
-  filter = PM::get().DataPointsFilterRegistrar.create("MaxDensityDataPointsFilter", params2);
-  filter->inPlaceFilter(*cloud_in);
-
-  Matrix mat_out = cloud_in->features.topRows(mat_in.cols()).transpose();
-  Matrix desc_out = cloud_in->descriptors.transpose();
-  return std::make_pair(mat_out, desc_out);
 }
 
 Matrix downsample(const Matrix &mat_in, float resolution)
@@ -177,10 +100,6 @@ std::pair<IntMatrix, Matrix> match(const Matrix &mat_ref, const Matrix &mat_in, 
 
 PYBIND11_MODULE(pcl, m)
 {
-  m.def("remove_outlier", &remove_outlier);
-  m.def("density_filter", (Matrix(*)(const Matrix &, int, float, float)) & density_filter);
-  m.def("density_filter",
-        (std::pair<Matrix, Matrix>(*)(const Matrix &, const Matrix &, int, float, float)) & density_filter);
   m.def("downsample", (Matrix(*)(const Matrix &, float)) & downsample);
   m.def("downsample", (std::pair<Matrix, Matrix>(*)(const Matrix &, const Matrix &, float)) & downsample);
   m.def("match", &match);
