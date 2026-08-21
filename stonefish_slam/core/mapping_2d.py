@@ -215,8 +215,13 @@ class SonarMapping2D:
 
         rows, cols = polar_img.shape
 
-        # Build or use cached transformation maps (performance optimization)
-        if self.p2c_cache is None:
+        # Build or use cached transformation maps (performance optimization).
+        # The maps are derived from the input shape and the range/FOV, so they
+        # are only valid for those; reusing them across a change would silently
+        # emit the previous geometry at the new call's range_resolution.
+        cache_key = (rows, cols, range_max, fov_deg, self.range_min)
+
+        if self.p2c_cache is None or self.p2c_cache.get('key') != cache_key:
             # Calculate range resolution
             range_resolution = (range_max - self.range_min) / rows
 
@@ -269,6 +274,7 @@ class SonarMapping2D:
 
             # Cache the transformation maps
             self.p2c_cache = {
+                'key': cache_key,
                 'map_x': map_x,
                 'map_y': map_y,
                 'cart_height': cart_height,
