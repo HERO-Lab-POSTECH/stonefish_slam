@@ -1,0 +1,34 @@
+# ICP profile for real sea-trial bag replay (KMU/LIG dataset).
+# Tighter outlier rejection than icp.yaml: real sonar returns are noisier and
+# denser than the simulator's, so distant correspondences are less trustworthy.
+readingDataPointsFilters:
+
+referenceDataPointsFilters:
+
+matcher:
+  KDTreeMatcher:
+    knn: 1
+    epsilon: 0
+    maxDist: 10.0
+
+outlierFilters:
+  - MaxDistOutlierFilter:
+      maxDist: 1.5
+  - TrimmedDistOutlierFilter:
+      ratio: 0.7
+
+errorMinimizer:
+  # PointToPlaneErrorMinimizer:
+  #   force2D: 1
+  PointToPointErrorMinimizer
+
+transformationCheckers:
+  - CounterTransformationChecker:
+      maxIterationCount: 40
+  - DifferentialTransformationChecker:
+      minDiffRotErr: 0.01
+      minDiffTransErr: 0.1
+      smoothLength: 4
+
+inspector:
+  NullInspector

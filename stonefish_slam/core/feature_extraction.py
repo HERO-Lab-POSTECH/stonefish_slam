@@ -230,8 +230,13 @@ class FeatureExtraction:
         if self.frame_count % self.skip != 0:
             return np.zeros((0, 2), dtype=np.float32)
 
-        # Decode the image
-        polar_img = self.BridgeInstance.imgmsg_to_cv2(sonar_msg, desired_encoding="passthrough")
+        # Decode the image (supports both Image and CompressedImage; sensor_msgs
+        # is imported lazily to keep this module path-loadable without ROS)
+        from sensor_msgs.msg import CompressedImage as _CompressedImage
+        if isinstance(sonar_msg, _CompressedImage):
+            polar_img = self.BridgeInstance.compressed_imgmsg_to_cv2(sonar_msg, desired_encoding="passthrough")
+        else:
+            polar_img = self.BridgeInstance.imgmsg_to_cv2(sonar_msg, desired_encoding="passthrough")
 
         # Ensure grayscale
         if len(polar_img.shape) == 3:

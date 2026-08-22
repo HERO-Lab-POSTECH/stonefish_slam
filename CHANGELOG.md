@@ -4,7 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **실해역 bag 재생 지원** (김민종 colcon_ws2 통합): `sonar_topic`/`odom_topic`/
+  `sonar_compressed` 파라미터로 데이터 소스 전환(기본값은 기존 시뮬 토픽 그대로),
+  CompressedImage 디코드(BGR→GRAY 포함), `config/real_bag_overrides.yaml` +
+  `config/icp_real_bag.yaml` 프로파일, `launch/slam_real_bag.launch.py`
+  (odom→TF 브리지 + real-bag rviz 포함), `rviz/real_bag.rviz`
+- **평가 노드 2종 + TF 브리지**: `slam_accuracy_monitor`(GT 대비 ATE/Acc@r/경로 오차),
+  `traj_2d_error_accumulator`(SLAM pose vs GT 2D 오차 누적), `odom_tf_bridge`
+  (bag의 Odometry를 TF로 재발행). slam.launch.py에서 launch 인자로 on/off
+  (`enable_accuracy_monitor`·`enable_traj_error_accumulator`, 기본 on)
+- `keyframe_duration_max` 파라미터 — 초과 시 이동량 무관 keyframe 강제(저속 구간
+  cadence 유지). 기본 0.0(비활성)으로 기존 동작 불변
+- slam.launch.py에 `override_config`(프로파일 yaml 후순위 로드)·`icp_config_file` 인자 추가
+
 ### Changed
+
+- **SSM에서 FFT 성공 시 ICP 대체 → ICP 초기해 시드로 변경** (김민종 통합): FFT 변환이
+  ICP를 건너뛰던 경로를 제거하고 FFT를 초기 추정으로 넘겨 ICP가 회전·병진을 정밀화.
+  검증(LARGE_TRANSFORMATION·overlap)이 FFT 경로에도 항상 적용됨. status에
+  `[FFT_SEED]` 표기
+- `FactorGraph.update_graph`가 매 갱신마다 전체 keyframe 대신 최근 10개 윈도우만
+  재갱신(루프 클로저 대기열이 있으면 전체 갱신) — 장기 주행에서 O(N) 비용 상한
+- `nssm.try_interval` 파라미터(기본 1=기존 동작): N keyframe마다만 루프 클로저 시도
+- `publish_point_cloud` 파라미터(기본 true=기존 동작): 실데이터에서 콜백 스레드를
+  ~30s 블로킹(N=45 실측)하던 클라우드 발행을 끌 수 있게 게이트
+- SLAM odom 출력에 pose covariance 복사(기존엔 0으로 발행)
+- `mapping_combined_standalone.launch.py`에 `use_sim_time` 인자 전파
 
 - **메인 파이프라인 3D 갱신법이 설정 의도대로 IWLO로 동작** (`fix/audit-bugs`,
   런타임 수치 변경): `slam_node`가 `mapping_3d.{update_method,sharpness,decay_rate,

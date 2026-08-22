@@ -189,14 +189,22 @@ class FactorGraph:
         self.graph.resize(0)
         self.values.clear()
 
-        # Update all keyframe poses
+        # Update keyframe poses — only the most recent window each tick, unless
+        # a pending loop closure (nssm_queue) may have moved older poses.
+        # Full-history refresh is O(N) per update and was measured dominating
+        # the callback on long real-data runs; ISAM2 rarely moves old poses
+        # without loop closures. ponytail: fixed window of 10, parameterize if
+        # a consumer needs always-fresh full history.
         values = self.isam.calculateEstimate()
-        for x in range(values.size()):
+        n = values.size()
+        update_window = 10
+        start_idx = max(0, n - update_window) if not self.nssm_queue else 0
+        for x in range(start_idx, n):
             pose = values.atPose2(X(x))
             self.keyframes[x].update(pose)
 
         # Update latest covariance
-        cov = self.isam.marginalCovariance(X(values.size() - 1))
+        cov = self.isam.marginalCovariance(X(n - 1))
         self.keyframes[-1].update(pose, cov)
 
         # Update poses in pending loop closures for PCM
