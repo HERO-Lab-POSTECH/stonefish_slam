@@ -42,12 +42,6 @@ class CFAR(object):
             "GOCA": cfar.goca,
             "OS": cfar.os,
         }
-        self.detector2 = {
-            "CA": cfar.ca2,
-            "SOCA": cfar.soca2,
-            "GOCA": cfar.goca2,
-            "OS": cfar.os2,
-        }
 
     def __str__(self):
         return "".join(
