@@ -29,7 +29,6 @@ __pycache__/
 # MkDocs build output
 docs/site/site/
 
-# code graph indexes (build artifacts, rebuildable via graph-init)
-.code-review-graph/
+# code graph index (build artifact, rebuildable via graph-init)
 .graphify/
 .tokensave/

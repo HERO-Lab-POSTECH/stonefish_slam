@@ -57,11 +57,10 @@ __pycache__/
 *.pyc
 *.so
 
-# Documentation is deliberately NOT excluded here — this is the one place the
-# two ignore files diverge on purpose.
+# Documentation is deliberately NOT excluded here.
 #
-# `.code-review-graphignore` drops all prose, because CRG's tree-sitter pass
-# emits no nodes for it. graphify's semantic pass is the opposite: prose is the
+# The retired code-review-graph dropped all prose, because its tree-sitter pass
+# emitted no nodes for it. graphify's semantic pass is the opposite: prose is the
 # only thing it reads, and CONVENTIONS.md / P4_FLAGS.md / the design docs carry
 # the decisions the code cannot state — why odom->base_link stays ENU while the
 # world frame is NED, why the load_module fixture exists at all. Excluding them
