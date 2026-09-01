@@ -316,8 +316,6 @@ class Localization:
         )
         target_grids = cv2.dilate(target_grids, kernel)
 
-        source_pose_info = np.linalg.inv(source_pose_cov) if source_pose_cov is not None else None
-
         def subroutine(x: np.ndarray) -> float:
             """Optimization subroutine for scipy.shgo.
 

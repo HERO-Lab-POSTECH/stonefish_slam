@@ -270,8 +270,3 @@ class ICP:
 
         return "success", T
 
-    def getCovariance(self):
-        """
-        Get covariance estimate (simplified - returns identity)
-        """
-        return np.eye(3, dtype=np.float32) * 0.1

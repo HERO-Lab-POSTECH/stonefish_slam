@@ -115,7 +115,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 
 ### 2.7 config·상수·단위·좌표계
 - **YAML 기반 config**가 `config/`에 모듈별로(`sonar.yaml`, `slam.yaml`, `factor_graph.yaml`, `localization.yaml`, `mapping.yaml`, `feature.yaml`, `icp.yaml`). 계층 네임스페이스(`ros__parameters`, `sonar.*`, `ssm.*`).
-- 센서 상수는 클래스 속성(예: `OculusProperty.OCULUS_VERTICAL_APERTURE = {1: np.deg2rad(20), ...}` — `utils/sonar.py`)이나 YAML.
+- 센서 상수는 클래스 속성이나 YAML. (`OculusProperty` 의 하드웨어 상수 표는 2026-09-01 `chore/dead-code-cleanup` 에서 삭제됐다 — 시뮬은 ROS 파라미터로 소나를 구성한다.)
 - ⚠️ frame_id(전역 `'world_ned'`, 로컬 `'odom'`·`'base_link'`)가 노드 코드에 **하드코딩**되어 있다(sim의 `world_ned` 중앙화와 대조). 새 코드는 가능하면 상수/파라미터로 중앙화하는 것을 권장하되, 기존 값과 일관성을 우선한다. (전역 frame_id 통일 경위는 §2.0 좌표계 항목 참조.)
 
 ### 2.8 테스트 (P2에서 정립)
@@ -123,7 +123,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 - **import-time 오염(rclpy/gtsam)을 피하려고 루트 `conftest.py`의 `load_module` fixture**(`importlib.util.spec_from_file_location` + `sys.modules` 정리)로 `.py` 파일을 직접 로드한다. 근거: `conftest.py:1-22`, `test/test_fusion.py:1-7`.
 - `pytest.ini`: `testpaths = stonefish_slam`, vendored pybind11 디렉토리는 discovery에서 배제(이중 격리).
 - sklearn 등 선택 의존성은 `pytest.importorskip('sklearn')`로 가드. 알려진 실패는 `@pytest.mark.xfail(strict=True)` + 사유.
-- 기대값은 **수학적 정답**으로 작성한다. 코드 출력과 불일치하면 코드 버그로 보고 `P4_FLAGS.md`에 기록(테스트를 코드에 맞추지 않는다). 현재 미해결로 등록된 것: fusion `observation_count` 미사용·docstring 내부 탭. (ICP 수렴은 P4a에서 해결 — 근본원인은 float32가 아니라 `outlier_ratio` 비대칭 trim으로 판명; kalman 관련 항목은 모듈 제거로 무효. `P4_FLAGS.md` 참조.)
+- 기대값은 **수학적 정답**으로 작성한다. 코드 출력과 불일치하면 코드 버그로 보고 `P4_FLAGS.md`에 기록(테스트를 코드에 맞추지 않는다). (fusion `observation_count` 미사용·docstring 내부 탭은 2026-09-01 `chore/dead-code-cleanup` 에서 해소.) (ICP 수렴은 P4a에서 해결 — 근본원인은 float32가 아니라 `outlier_ratio` 비대칭 trim으로 판명; kalman 관련 항목은 모듈 제거로 무효. `P4_FLAGS.md` 참조.)
 - 테스트 추가 시 **live 코드 0줄 변경** 원칙(P2). 코드 변경이 필요한 테스트(`slam`·`factor_graph`·`mapping_3d`는 module-top import가 rclpy/gtsam/cv_bridge를 끌어와 import 자체가 크래시)는 추출 리팩토링 또는 conftest stub-fixture 후 다룬다(P4에서 `load_factor_graph`·`load_mapping_3d` fixture로 해소).
 - CI: `.github/workflows/ci.yml`(Python 3.10, transforms3d 미포함).
 

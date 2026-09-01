@@ -5,6 +5,10 @@ import csv
 import time
 from pathlib import Path
 
+__all__ = [
+    'MappingProfiler',
+]
+
 
 class MappingProfiler:
     """CSV-based profiler for 3D mapping performance tracking"""

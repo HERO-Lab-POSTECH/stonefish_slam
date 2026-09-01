@@ -200,7 +200,10 @@ P3(기업표준 구조·명명 통일·재구조화·모듈화)에서 **동작 �
 
 ---
 
-## localization.yaml — icp_config 하드코딩 절대경로 (P3 재감사에서 발견) — **P4 측정: dead fallback 확정, 제거 미실행**
+## ✅ localization.yaml — icp_config 하드코딩 절대경로 — **해소(`chore/dead-code-cleanup`, 2026-09-01)**
+
+> 계획 §4.3 으로 `config/localization.yaml` 에서 이 키를 삭제했다. 이제 `slam.py:105-107` 의
+> package-share 기본값에 위임된다. 아래 서술은 이력으로 보존한다.
 
 > **P4d 측정(O9)**: `localization.yaml:29`의 하드코딩 경로 `/workspace/colcon_ws/...`는 파일이 **존재하지 않고**, `launch.py:30,46`이 이미 패키지 상대 경로로 오버라이드하므로 **dead fallback**. 즉 런타임에 이 값은 실제로 안 쓰임 → 안전 제거 가능. 단 코드 동작에 영향 없는 cleanup이라 P4 핵심 수정에선 제외(미실행). 향후 cleanup pass 또는 sim 통합 단계에서 제거.
 >
@@ -218,3 +221,33 @@ P3(기업표준 구조·명명 통일·재구조화·모듈화)에서 **동작 �
 - **근거 표준**: ROS2 launch는 `ament_index`(`get_package_share_directory`)로 패키지 상대 config 경로를 런타임 해석하는 게 표준 — 절대경로 하드코딩은 비표준([ROS2 Launch substitutions](https://docs.ros.org/en/humble/Tutorials/Intermediate/Launch/Using-Substitutions.html)).
 - **현재 처리**: 보류. 이 값을 바꾸면 `loadFromYaml`이 로드하는 파일이 달라져 런타임 거동이 변하므로(동작보존 불가) P3에서 손대지 않았다.
 - **수정안**: P4에서 `localization.yaml:29`의 절대경로를 제거(코드의 패키지 상대 기본값에 위임)하거나 launch substitution으로 대체. ICP 설정 로드 거동 변화를 명시 수용 후 처리.
+
+## Phase 3 `chore/dead-code-cleanup` 의 의도적 미포함 (2026-09-01)
+
+- **`profiling_enabled` 가 게이트하는 `perf_counter` 계측 체인** — P1-8 이 두 통계
+  딕셔너리(`performance_stats`·`profiling_data`)를 지우면서 이 계측의 **소비자가
+  사라졌다**. 그런데 `t_ray_total`·`t_octree_total` 은 `_process_bearing_rays` 등
+  헬퍼 3개의 **반환 시그니처에 박혀** 있어 제거가 시그니처 수술이 되고, 그건 계획
+  §4.4(god-method 분해)의 범위다. 게다가 바로 다음 브랜치
+  `feat/loc-instrumentation`(계획 §5 의 I1~I11)이 이 층을 재설계하므로, 지금
+  걷어내면 곧 다시 세워야 한다. **그 브랜치에서 함께 판단한다** — 재사용하든
+  걷어내든 결정을 미루는 것이지 잊는 것이 아니다.
+
+  같은 이유로 `MappingProfiler` 도 남겼다. `mapping_3d.py:328` 이 `start()`,
+  `:1396` 이 `close()` 를 부르지만 `record_frame()` 의 호출자는 이제 0이라
+  `/tmp/mapping_profiling.csv` 에 **헤더만 있는 빈 파일**이 남는다. ⚠️ 이건
+  P1-8 이 만든 상태가 아니다 — `record_frame` 은 `_print_profiling_stats` 안에
+  있었고 그 함수의 호출부는 **main 에서 이미 주석 처리**돼 있어서
+  (`mapping_3d.py:1285-1290`) 삭제 전에도 실행된 적이 없다. 달라진 것은 죽어
+  있던 사실이 드러난 것뿐이다.
+
+- **`utils/topics.py` 의 미참조 상수 15/22** — 계획이 명시적으로 범위 밖에 뒀다.
+  `test_wildcard_gate.py` 가 골든 심볼 집합을 동결하므로 삭제하면 그 골든도 함께
+  갱신해야 하는데, 상수는 향후 배선 지점을 이름으로 예약하는 성격이 있어 삭제
+  이득이 회귀 위험보다 크지 않다. 이번에 `__all__` 을 추가하면서 22개 전부를
+  넣었다 — 노출 범위를 명시했을 뿐 어느 것도 삭제하지 않았다.
+
+- **`query_cell` 과 `RayProcessorConfig::bearing_resolution`** — 계획의 dead 목록에
+  있었으나 이 트리에서 **살아 있음이 확인돼** 삭제하지 않았다. 전자는 PR #18 이
+  추가한 `test_cpp_extensions.py` 가 3곳에서 쓰고, 후자는 `mapping_3d.py:235` 가
+  설정한다. 계획의 "호출자 0" 은 #18·#19 머지 이전 기준이었다.

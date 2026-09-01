@@ -74,7 +74,7 @@ class SonarMapping2D:
         >>> # After SLAM processing
         >>> mapper.update_global_map_from_slam(slam.keyframes)
         >>> map_image = mapper.get_map_image()
-        >>> mapper.save_map('/path/to/map.png')
+        >>> cv2.imwrite('/path/to/map.png', map_image)
 
     Example (Independent mode):
         >>> mapper = SonarMapping2D()
@@ -139,7 +139,6 @@ class SonarMapping2D:
 
         # SLAM keyframe reference (for SLAM integration mode)
         # Stores reference to all SLAM keyframes for bounds calculation
-        self.all_slam_keyframes: List[KeyframeType] = []
 
         # Global map buffers (initialized when first keyframe is added)
         self.global_map_accum: Optional[np.ndarray] = None  # Latest-write-wins overlay map
@@ -298,45 +297,6 @@ class SonarMapping2D:
         range_resolution = (range_max - self.range_min) / rows
 
         return cartesian_img, range_resolution
-
-    def get_map_bounds(
-        self,
-        keyframes: Optional[Union[List[Dict], List[KeyframeType]]] = None,
-        buffer_m: float = 30.0
-    ) -> Tuple[float, float, float, float]:
-        """Calculate map bounds from keyframe poses.
-
-        Args:
-            keyframes: List of keyframes (dict or SLAM Keyframe objects).
-                      If None, uses self.keyframes (default: None)
-            buffer_m: Buffer margin in meters (default: 30.0)
-
-        Returns:
-            Tuple of (min_x, max_x, min_y, max_y) in meters
-        """
-        if keyframes is None:
-            keyframes = self.keyframes
-
-        if not keyframes:
-            return 0.0, 0.0, 0.0, 0.0
-
-        # Extract poses from either dict or object format
-        xs = []
-        ys = []
-        for kf in keyframes:
-            if isinstance(kf, dict):
-                pose = kf['pose']
-            else:
-                pose = kf.pose
-            xs.append(pose.x())
-            ys.append(pose.y())
-
-        min_x = min(xs) - buffer_m
-        max_x = max(xs) + buffer_m
-        min_y = min(ys) - buffer_m
-        max_y = max(ys) + buffer_m
-
-        return min_x, max_x, min_y, max_y
 
     def _process_keyframes_to_map(
         self,
@@ -692,7 +652,6 @@ class SonarMapping2D:
             new_intensities = ema_fusion(
                 old_map=old_intensities,
                 new_data=intensities_valid,
-                observation_count=count_flat[linear_indices],
                 alpha=0.3,
                 threshold=0.0
             )
@@ -721,8 +680,7 @@ class SonarMapping2D:
         buffer_m: float = 30.0,
         tf2_buffer=None,
         target_frame: str = 'world_ned',
-        source_frame: str = 'base_link',
-        all_slam_keyframes: Optional[List[KeyframeType]] = None
+        source_frame: str = 'base_link'
     ) -> None:
         """Update global map directly from SLAM keyframes (SLAM integration mode).
 
@@ -736,8 +694,6 @@ class SonarMapping2D:
             tf2_buffer: tf2_ros.Buffer for timestamp-based pose lookup (optional)
             target_frame: Target frame for tf2 lookup (default: 'world_ned')
             source_frame: Source frame for tf2 lookup (default: 'base_link')
-            all_slam_keyframes: Complete list of all SLAM keyframes (for bounds calculation)
-                               If None, uses slam_keyframes (default: None)
 
         Example:
             >>> from stonefish_slam.core.slam import SLAM
@@ -746,18 +702,10 @@ class SonarMapping2D:
             >>> # After SLAM processes data
             >>> mapper.update_global_map_from_slam(
             >>>     new_keyframes,
-            >>>     all_slam_keyframes=slam.keyframes,
             >>>     tf2_buffer=tf_buffer
             >>> )
             >>> map_img = mapper.get_map_image()
         """
-        # Update all keyframes reference (for bounds calculation)
-        if all_slam_keyframes is not None:
-            self.all_slam_keyframes = all_slam_keyframes
-        else:
-            # Backward compatibility: use slam_keyframes if all not provided
-            self.all_slam_keyframes = slam_keyframes
-
         # Filter new keyframes with valid images (for processing)
         valid_keyframes = [
             kf for kf in slam_keyframes
@@ -870,36 +818,6 @@ class SonarMapping2D:
                 f"Y=[{old_bounds[2]:.2f}, {old_bounds[3]:.2f}] -> [{self.min_y:.2f}, {self.max_y:.2f}]"
             )
 
-    def get_colored_map(self) -> np.ndarray:
-        """Get colored visualization of the global map.
-
-        Reference: slam_2d.py Line 1366-1367
-
-        Returns:
-            Colored map image (height × width × 3), uint8, BGR format
-        """
-        grayscale_map = self.get_map_image()
-        colored_map = cv2.applyColorMap(grayscale_map, cv2.COLORMAP_JET)
-        return colored_map
-
-    def save_map(self, filepath: str, save_colored: bool = True) -> None:
-        """Save global map to file.
-
-        Reference: slam_2d.py Line 1362-1368
-
-        Args:
-            filepath: Path to save grayscale map (e.g., '/path/to/2d_map.png')
-            save_colored: Whether to also save colored version (default: True)
-        """
-        grayscale_map = self.get_map_image()
-        cv2.imwrite(filepath, grayscale_map)
-
-        if save_colored:
-            # Save colored version
-            colored_map = self.get_colored_map()
-            colored_filepath = filepath.replace('.png', '_colored.png')
-            cv2.imwrite(colored_filepath, colored_map)
-
     def clear(self) -> None:
         """Clear all keyframes and reset the map."""
         self.keyframes.clear()
@@ -913,26 +831,3 @@ class SonarMapping2D:
         self.map_width = 0
         self.map_height = 0
 
-    def get_map_info(self) -> Dict:
-        """Get map metadata.
-
-        Returns:
-            Dictionary containing map parameters and statistics
-        """
-        valid_pixels = 0
-        if self.global_map_count is not None:
-            valid_pixels = int(np.sum(self.global_map_count > 0))
-
-        return {
-            'num_keyframes': len(self.keyframes),
-            'map_width': self.map_width,
-            'map_height': self.map_height,
-            'map_resolution': self.map_resolution,
-            'valid_pixels': valid_pixels,
-            'bounds': {
-                'min_x': self.min_x,
-                'max_x': self.max_x,
-                'min_y': self.min_y,
-                'max_y': self.max_y
-            }
-        }

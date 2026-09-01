@@ -115,7 +115,6 @@ class HierarchicalOctree:
         self.log_odds_free = -2.0
         self.log_odds_min = -10.0
         self.log_odds_max = 10.0
-        self.log_odds_threshold = 0.0
         self.adaptive_update = True
         self.adaptive_threshold = 0.5
         self.adaptive_max_ratio = 0.5
@@ -331,10 +330,6 @@ class HierarchicalOctree:
         iy = int(np.floor(y / self.resolution))
         iz = int(np.floor(z / self.resolution))
         return (ix, iy, iz)
-
-    def get_voxel_key(self, point):
-        """Compatibility method"""
-        return self.world_to_key(point[0], point[1], point[2])
 
     @property
     def voxels(self):

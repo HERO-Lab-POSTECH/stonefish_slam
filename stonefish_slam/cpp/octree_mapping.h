@@ -139,14 +139,6 @@ public:
     size_t get_num_nodes() const;
 
     /**
-     * @brief Set log-odds thresholds for occupied/free classification
-     *
-     * @param occupied Log-odds value for occupied updates (e.g., 0.85)
-     * @param free Log-odds value for free space updates (e.g., -0.4)
-     */
-    void set_log_odds_thresholds(double occupied, double free);
-
-    /**
      * @brief Set probability clamping limits
      *
      * Prevents extreme probabilities that could cause numerical issues.
@@ -207,25 +199,6 @@ public:
      * @return Binary data as Python bytes object
      */
     py::bytes serialize_to_binary();
-
-    /**
-     * @brief C++ native batch insert (zero NumPy overhead)
-     *
-     * Internal-only method for use by C++ components (e.g., ray_processor).
-     * Bypasses NumPy array creation and Python binding overhead.
-     *
-     * @param points Vector of voxel centers in world coordinates
-     * @param log_odds Vector of log-odds updates per point
-     * @param sensor_origin Sensor position [x, y, z]
-     *
-     * Note: This method is NOT exposed to Python. It is identical in logic
-     *       to insert_point_cloud() but uses pure C++ containers.
-     */
-    void insert_voxels_batch_native(
-        const std::vector<Eigen::Vector3d>& points,
-        const std::vector<double>& log_odds,
-        const Eigen::Vector3d& sensor_origin
-    );
 
 private:
     std::unique_ptr<octomap::OcTree> tree_;  // OctoMap tree instance

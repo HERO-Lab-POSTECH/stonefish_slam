@@ -402,15 +402,6 @@ void RayProcessor::process_single_ray_internal(
 
 // Find first hit in intensity profile (image scan order: far to near)
 // Returns the first index with intensity above threshold
-int RayProcessor::find_first_hit(const std::vector<uint8_t>& intensity_profile) const {
-    for (size_t i = 0; i < intensity_profile.size(); ++i) {
-        if (intensity_profile[i] > config_.intensity_threshold) {
-            return static_cast<int>(i);
-        }
-    }
-    return -1;  // No hit found
-}
-
 // Compute range weight
 double RayProcessor::compute_range_weight(double range_m) const {
     // Exponential decay: w(r) = exp(-λ × r / r_max)
@@ -433,13 +424,6 @@ double RayProcessor::compute_range_weight(double range_m) const {
 // w(I) = sigmoid((I - I_mid) / (sharpness * scale))
 // High intensity (>127) → weight > 0.5 → stronger occupied update
 // Low intensity (<127) → weight < 0.5 → weaker occupied update
-double RayProcessor::compute_intensity_weight(uint8_t intensity) const {
-    double I_mid = config_.intensity_max / 2.0;  // 127.5
-    double scale = config_.intensity_max / 5.0;   // 51.0
-    double x = (static_cast<double>(intensity) - I_mid) / (config_.sharpness * scale);
-    return 1.0 / (1.0 + std::exp(-x));
-}
-
 // Compute vertical angle
 double RayProcessor::compute_vertical_angle(int v_step, int num_vertical_steps) const {
     // Linear interpolation within vertical aperture
@@ -462,16 +446,6 @@ double RayProcessor::compute_bearing_angle(int bearing_idx, int num_beams) const
 }
 
 // Compute ray direction
-Eigen::Vector3d RayProcessor::compute_ray_direction(double bearing_angle) const {
-    // Sonar frame: X=forward, Y=right, Z=down (FRD)
-    // Bearing: 0=forward, positive=right, negative=left
-    return Eigen::Vector3d(
-        std::cos(bearing_angle),  // X component
-        std::sin(bearing_angle),  // Y component
-        0.0                       // Z component (horizontal ray)
-    );
-}
-
 // Compute number of vertical steps (full voxel coverage)
 int RayProcessor::compute_num_vertical_steps(double range_m) const {
     // Full voxel coverage: sample every voxel in vertical aperture
@@ -632,14 +606,6 @@ bool RayProcessor::is_voxel_in_shadow(
 
 
 // Convert world coordinates to voxel key
-std::array<int, 3> RayProcessor::world_to_voxel_key(const Eigen::Vector3d& point) const {
-    return {
-        static_cast<int>(std::floor(point.x() / config_.voxel_resolution)),
-        static_cast<int>(std::floor(point.y() / config_.voxel_resolution)),
-        static_cast<int>(std::floor(point.z() / config_.voxel_resolution))
-    };
-}
-
 // Get ray processing statistics (P3.1 profiling)
 RayStats RayProcessor::get_ray_stats() const {
     return {

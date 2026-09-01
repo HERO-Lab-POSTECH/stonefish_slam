@@ -5,7 +5,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from tf2_ros import TransformBroadcaster, Buffer, TransformListener
+from tf2_ros import TransformBroadcaster
 import cv_bridge
 from nav_msgs.msg import Odometry
 from message_filters import Subscriber, ApproximateTimeSynchronizer
@@ -193,14 +193,9 @@ class SLAMNode(Node):
 
         # No lock needed (synchronous processing)
 
-        # TF2 buffer for timestamp synchronization (30s cache for delayed mapping)
-        self.tf_buffer = Buffer(cache_time=Duration(seconds=30))
-        self.tf_listener = TransformListener(self.tf_buffer, self)
-
         # Mapping statistics
         self.mapping_stats = {
-            'keyframes_total': 0,
-            'maps_published': 0
+            'keyframes_total': 0
         }
 
         # Mapping initialization (configured in init_node)
@@ -581,7 +576,6 @@ class SLAMNode(Node):
         self.tf = TransformBroadcaster(self)
 
         # cv bridge object
-        self.CVbridge = cv_bridge.CvBridge()
 
     def _finalize_node_config(self) -> None:
         """Loads ICP config, extracts the robot ID, and calls configure() to finish init."""
@@ -875,8 +869,7 @@ class SLAMNode(Node):
                                 new_keyframes,
                                 tf2_buffer=None,
                                 target_frame='world_ned',
-                                source_frame=source_frame,
-                                all_slam_keyframes=self.fg.keyframes
+                                source_frame=source_frame
                             )
 
                             map_image = self.mapper.get_map_image()
@@ -894,8 +887,7 @@ class SLAMNode(Node):
                         if self.enable_3d_mapping and self.mapper_3d:
                             try:
                                 self.mapper_3d.update_map_from_slam(
-                                    new_keyframes,
-                                    all_slam_keyframes=self.fg.keyframes
+                                    new_keyframes
                                 )
 
                                 octomap_msg = self.mapper_3d.get_octomap_msg(
@@ -1058,9 +1050,6 @@ class SLAMNode(Node):
 
         # 2. Transform each keyframe's points to global coordinate system
         for key in range(len(self.fg.keyframes)):
-
-            # get the pose
-            pose = self.fg.keyframes[key].pose
 
             # get the registered point cloud
             transf_points = self.fg.keyframes[key].transf_points

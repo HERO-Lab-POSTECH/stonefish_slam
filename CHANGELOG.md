@@ -19,8 +19,52 @@ All notable changes to this project will be documented in this file.
   cadence 유지). 기본 0.0(비활성)으로 기존 동작 불변
 - slam.launch.py에 `override_config`(프로파일 yaml 후순위 로드)·`icp_config_file` 인자 추가
 
+### Removed
+
+- **호출자 없는 코드 954줄**(`chore/dead-code-cleanup`): Python 메서드 14개
+  (`feature_extraction.polar_to_cartesian` 106줄로 `polar_to_cartesian` 이 3벌→2벌 ·
+  `FactorGraph` 4개 · `SonarMapping2D` 4개 · `SonarMapping3D` 4개 ·
+  `ICP.getCovariance` · `HierarchicalOctree.get_voxel_key`) · `OculusProperty` 의 실
+  Oculus 하드웨어 드라이버 군(`configure`·`remap`·72줄 psf 커널·`noise`·부품번호 표,
+  216→64줄, 클래스 자체는 살아 있다) · C++ 6개 함수와 헤더 선언
+  (`insert_voxels_batch_native` 115줄 · `set_log_odds_thresholds` 바인딩 포함 ·
+  `compute_ray_direction` · `find_first_hit` · `world_to_voxel_key` ·
+  `compute_intensity_weight`) · write-only 배선 `all_slam_keyframes`(속성·파라미터·
+  호출부 전부, 2D 는 저장만 하고 3D 는 docstring 이 "not used in 3D" 라고 적고 있었다) ·
+  단일 줄 7건(tf2 Buffer/Listener — `/tf`·`/tf_static` 를 30초 버퍼로 실제 구독하는데
+  참조 0이었다 · 중복 `CVbridge` · 미사용 `pose` · `mapping_stats['maps_published']` ·
+  미사용 `dt` · `source_pose_info` — `np.linalg.inv` 결과를 안 써서 shgo 의
+  prior-covariance 가중이 조용히 무효였다 · `log_odds_threshold`).
+  **판정은 이 트리에서 재측정했다** — 계획의 "호출자 0" 은 PR #18·#19 이전 기준이라
+  두 건이 이미 틀렸다: `query_cell`(#18 의 `test_cpp_extensions.py` 가 3곳에서 사용)과
+  `RayProcessorConfig::bearing_resolution`(`mapping_3d.py:235` 가 설정)은 **삭제하지
+  않았다**
+- **`config/localization.yaml` 의 절대경로 `icp_config`**: 값이
+  `/workspace/colcon_ws/...` 로 이 컨테이너에도 없는 경로다. launch 경로에서는
+  `slam.launch.py` 가 이겨 무해했지만 `ros2 run` 직접 실행 시 없는 파일을 읽었다.
+  `slam.py:105-107` 의 package-share 기본값에 위임한다
+
 ### Changed
 
+- **3D 매퍼의 두 무한 성장 통계 딕셔너리 제거**(P1-8, 메모리 누수): `performance_stats`
+  (5개 리스트)와 `profiling_data`(9개 리스트) 모두 상한이 없고, trim 하던 호출부는
+  주석 처리돼 있었다. 두 딕셔너리를 읽던 `get_performance_summary`·
+  `_print_profiling_stats` 는 호출자가 0이라 같은 커밋에서 함께 삭제했다 —
+  나눠 하면 한쪽이 다른 쪽을 깬다. `enable_profiling` 플래그는 남는다
+  (`MappingProfiler` CSV 시작이 여전히 읽는다). ⚠️ `profiling_enabled` 가 게이트하는
+  `perf_counter` 계측 체인은 **의도적으로 남겼다** — 소비자를 잃었지만 헬퍼 3개의 반환
+  시그니처에 박혀 있고 `feat/loc-instrumentation` 이 이 층을 재설계한다
+- **`utils/fusion.py::ema_fusion` 시그니처에서 `observation_count` 제거**: 본문이 한
+  번도 읽지 않는 파라미터였다. 판정 로직은 불변
+- **`utils/` 7개 모듈에 `__all__` 추가**: P4_FLAGS 는 5개로 적었으나 실측 7개 전부다
+  (`fusion.py`·`profiler.py` 누락). wildcard 게이트가 `__all__` 을 export set 으로
+  읽으므로 각 모듈의 public 심볼 전부를 넣었다
+- **주석·docstring 의 사실 오류 4건**: `localization_fft` 의 `# Left` →
+  `# Starboard (+y, NED body)`(코드는 정상, 주석만 반대였다) · `CodeTimer` docstring 의
+  "Disable output by setting silent = False" → `True` · `conversions.r2g` 의
+  `-> gtsam.Pose3` 힌트 제거(Quaternion 분기는 `Rot3` 를 반환한다) · `mapping_3d` 모듈
+  docstring 에 C++/Python 두 경로와 갱신법 3종 명시. `dead_reckoning.py` 의 탭 34개도
+  공백으로
 - **SSM에서 FFT 성공 시 ICP 대체 → ICP 초기해 시드로 변경** (김민종 통합): FFT 변환이
   ICP를 건너뛰던 경로를 제거하고 FFT를 초기 추정으로 넘겨 ICP가 회전·병진을 정밀화.
   검증(LARGE_TRANSFORMATION·overlap)이 FFT 경로에도 항상 적용됨. status에

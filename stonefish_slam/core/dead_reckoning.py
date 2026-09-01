@@ -22,7 +22,7 @@ from stonefish_slam.utils.visualization import ros_colorline_trajectory
 
 class DeadReckoningNode(Node):
     '''A class to support dead reckoning using DVL and IMU readings
-	'''
+    '''
     def __init__(self):
         super().__init__('dead_reckoning_node')
         self.get_logger().info("Dead reckoning node initializing...")
@@ -152,10 +152,10 @@ class DeadReckoningNode(Node):
     def callback(self, imu_msg: Imu, dvl_msg: DVL) -> None:
         """Handle the dead reckoning using the IMU and DVL only. Fuse and publish an odometry message.
 
-		Args:
-			imu_msg (Imu): the message from IMU
-			dvl_msg (DVL): the message from the DVL
-		"""
+        Args:
+            imu_msg (Imu): the message from IMU
+            dvl_msg (DVL): the message from the DVL
+        """
         # get the previous pressure msg
         pressure_msg = self.latest_pressure_msg
         # if there is no depth msg, then skip this time step
@@ -193,12 +193,12 @@ class DeadReckoningNode(Node):
     def send_odometry(self, vel: np.array, rot: gtsam.Rot3, dvl_time, depth: float) -> None:
         """Package the odometry given all the DVL, rotation matrix, and depth
 
-		Args:
-			vel (np.array): a numpy array (1D) of the DVL velocities
-			rot (gtsam.Rot3): the rotation matrix of the vehicle
-			dvl_time: the time stamp for the DVL message (builtin_interfaces.msg.Time)
-			depth (float): vehicle depth
-		"""
+        Args:
+            vel (np.array): a numpy array (1D) of the DVL velocities
+            rot (gtsam.Rot3): the rotation matrix of the vehicle
+            dvl_time: the time stamp for the DVL message (builtin_interfaces.msg.Time)
+            depth (float): vehicle depth
+        """
 
         # Convert ROS2 time to seconds
         current_time_sec = dvl_time.sec + dvl_time.nanosec / 1e9
@@ -287,9 +287,9 @@ class DeadReckoningNode(Node):
     def publish_pose(self, publish_traj: bool = False) -> None:
         """Publish the pose
 
-		Args:
-			publish_traj (bool, optional): Are we publishing the whole set of keyframes?. Defaults to False.
-		"""
+        Args:
+            publish_traj (bool, optional): Are we publishing the whole set of keyframes?. Defaults to False.
+        """
         if self.pose is None:
             return
 
