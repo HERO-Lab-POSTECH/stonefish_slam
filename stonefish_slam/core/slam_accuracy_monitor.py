@@ -314,8 +314,14 @@ class TrajPathGtAteMonitor(Node):
         # length over the window instead. With ate_window_size == 0 the deques
         # are unbounded and this equals the whole-run distance.
         gt_path_length = float(np.linalg.norm(np.diff(dst, axis=0), axis=1).sum())
-        denom = max(gt_path_length, self.distance_epsilon)
-        drift_window = 100.0 * (rmse / denom)
+        if gt_path_length <= self.distance_epsilon:
+            # Drift-per-distance is undefined when the window covers no motion
+            # (station keeping). The old cumulative denominator hid this because
+            # it never shrank; clamping instead would report a confident 0%
+            # accuracy for a vehicle that is simply holding position.
+            return rmse, float("nan"), float("nan")
+
+        drift_window = 100.0 * (rmse / gt_path_length)
         acc_window = clamp(100.0 - drift_window, 0.0, 100.0)
         return rmse, float(drift_window), float(acc_window)
 

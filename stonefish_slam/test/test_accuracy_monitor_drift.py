@@ -126,6 +126,25 @@ def test_larger_error_reports_larger_drift(monitor_module):
     assert large > small
 
 
+def test_station_keeping_reports_nan_not_zero_accuracy(monitor_module):
+    """A window with no GT motion has no drift RATE to report.
+
+    This is the hazard the windowed denominator introduces and the cumulative
+    one hid: hovering drives the GT path length to zero, so any nonzero RMSE
+    would divide out to a huge drift and clamp to 0% accuracy — a confident
+    wrong answer about a vehicle that is simply holding position.
+    """
+    stationary_gt = [(0.0, 0.0)] * 50
+    est = [(0.0, 0.05 * (i % 2)) for i in range(50)]  # jitter, no net motion
+
+    rmse, drift, acc = _monitor(monitor_module, est, stationary_gt, total_distance=500.0)
+
+    assert not np.isnan(rmse), "RMSE is still well defined while hovering"
+    assert np.isnan(drift) and np.isnan(acc), (
+        f"station keeping reported drift={drift}, acc={acc} instead of NaN"
+    )
+
+
 def test_too_few_samples_stays_nan(monitor_module):
     gt = _straight_leg(5)
     rmse, drift, acc = _monitor(monitor_module, _with_drift(gt, 1.0), gt, 10.0)

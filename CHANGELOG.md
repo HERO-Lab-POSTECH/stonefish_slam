@@ -104,6 +104,33 @@ All notable changes to this project will be documented in this file.
 - `ray_processor.cpp`의 intensity 임계 비교를 strict `>`로 통일 — 생성 시점(`:314`)과
   merge 시점(`:179`)이 갈려 있었다. `final_log_odds = free_sum + occupied_sum`이라 합은
   동일하므로 동작 보존적 일관성 정리이고, 나머지 전 경로가 이미 strict `>`
+- **2D 맵 좌표에서 `range_min` 항 누락** (`fix/map-and-metrics`, 맵 출력 변경):
+  `_accumulate_keyframe_into_map`의 `local_x_raw`가 `(fan_h - yy - 0.5) *
+  range_resolution`뿐이라, `polar_to_cartesian_image`가 행을 `x = range_max -
+  range_resolution * YY`(`range_resolution = (range_max - range_min)/rows`)로 만드는
+  것과 어긋났다. 전 맵 점이 `range_min`만큼(config 0.5 m, tilt 30°에서 수평 0.433 m)
+  차량 쪽으로 밀렸다. 위치추정 경로는 이 함수를 타지 않아 pose는 불변
+- **`gaussian_sigma_factor`가 프로덕션 3D 경로에 전달되지 않음** (런타임 수치 변경):
+  `mapping_3d.py`가 C++ config를 둘 만드는데 `dda_config`에만 넘기고
+  `RayProcessorConfig` 빌드에는 빠뜨려, `slam_node`가 실제로 쓰는 경로에서 오퍼레이터
+  노브가 무효였다. 기본값도 갈려 있었다 — Python 셋은 모두 2.5인데
+  `cpp/ray_processor.h`만 3.0이라 같은 노브가 경로마다 다른 의미였다. 헤더를 2.5로
+  통일. 어떤 YAML도 이 키를 설정하지 않으므로 지금까지는 항상 기본값이 이겼다
+- **드리프트 지표가 윈도 RMSE를 누적 거리로 나눔** (`slam_accuracy_monitor`):
+  분자는 롤링 윈도(최근 500쌍, 매 호출 SE(2) 재정렬)인데 분모 `total_distance`는
+  리셋이 없어, 주행이 길어질수록 실제 드리프트와 무관하게 `drift_total`이 0%로
+  `acc_total`이 100%로 수렴했다 — 해상시험 평가 목적과 정반대. 분모를 같은 윈도의 GT
+  경로 길이로 바꾸고 이름을 `drift_window`·`acc_window`로 정정(로그 전용 지표라 토픽
+  영향 없음). `total_distance`는 `dist_total=`로 같은 줄에 유지
+- **standalone 노드 소나 기본값이 `sonar.yaml`과 모순**: 두 노드 모두 "defaults match
+  sonar.yaml" 주석 아래 `range_max=15.0`·`sonar_tilt_deg=10.0`을 선언했으나 실제
+  yaml은 40.0·30.0이다. 파라미터 파일 없이 돌리는 standalone 실행에서 2.7배 range
+  오차와 20° 틸트 오차가 조용히 들어갔다. (config 30° vs 시뮬 실물 80° 문제는 별건으로
+  계측 후 판단 — 여기서는 기본값을 config에 맞출 뿐)
+- `feature_extraction_node`의 feature cloud가 `header.frame_id`는 소나 메시지에서
+  가져오면서 `header.stamp`만 벽시계를 썼다. 한 헤더의 두 반쪽이 다른 출처라 시간 동기가
+  불가능하다(형제 `fft_localization_node.py:161`이 정답). 현재 구독자 0이라 미래
+  소비자를 위한 정합
 - `stonefish_slam/__init__.py`의 `__all__`에서 누락된 `pcl` 모듈 추가 —
   `cpp/__init__.py`(cfar·dda_traversal·octree_mapping·ray_processor·pcl 5종 모두 import+export)와
   정합
