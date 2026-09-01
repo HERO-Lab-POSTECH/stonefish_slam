@@ -22,7 +22,6 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 import time  # For performance profiling
 
-from stonefish_slam.utils.profiler import MappingProfiler
 from stonefish_slam.core.octree import HierarchicalOctree
 
 # C++ Ray Processor import (with fallback)
@@ -310,22 +309,13 @@ class SonarMapping3D:
         self.propagation_radius = config.get('propagation_radius', 2)
         self.propagation_sigma = config.get('propagation_sigma', 1.5)
 
-        # Performance profiling
-        self.enable_profiling = config.get('enable_profiling', True)
-        # Wall-clock accumulators for the C++/Python ray paths. Nothing consumes
-        # them today -- the two unbounded stats dicts that did were removed as a
-        # leak (P1-8). Kept because feat/loc-instrumentation redesigns this layer.
+        # C++/Python ray 경로의 wall-clock 누산기. 지금 이 값을 읽는 곳은 없다 --
+        # 소비하던 두 통계 딕셔너리는 무한 성장 누수라 제거됐고(P1-8), CSV 로 뽑던
+        # MappingProfiler 도 record_frame 호출자가 0 이라 걷어냈다. 그럼에도 남기는
+        # 이유는 t_ray_total/t_octree_total 이 헬퍼 3개의 **반환 시그니처에 박혀**
+        # 있어서다 -- 떼어내는 것은 시그니처 수술이고 그건 god-method 분해(계획
+        # 4.4)의 범위다. 매핑 성능을 다시 묻게 되면 이 값들이 출발점이다.
         self.profiling_enabled = True
-
-        # CSV profiling infrastructure (P3.1/P3.2)
-        self.csv_sample_interval = config.get('frame_interval', 10)  # Use frame_interval
-        self.csv_path = '/tmp/mapping_profiling.csv'
-        self.profiler = MappingProfiler(
-            csv_path=self.csv_path,
-            sample_interval=self.csv_sample_interval
-        )
-        if self.enable_profiling:
-            self.profiler.start()
 
         # Print all loaded parameters (한번만 출력)
         self._print_all_parameters(config)
@@ -1390,7 +1380,3 @@ class SonarMapping3D:
 
         return msg
 
-    def __del__(self):
-        """Cleanup resources on destruction"""
-        if hasattr(self, 'profiler'):
-            self.profiler.close()

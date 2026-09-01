@@ -73,7 +73,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
 - **단일 패키지 레이아웃** `stonefish_slam/`의 서브모듈로 관심사 분리:
   - `core/` — 알고리즘 구현(`factor_graph.py`, `mapping_2d.py`, `feature_extraction.py`, `slam.py`). 대부분 ROS Node가 아니다.
   - `nodes/` — ROS2 실행 진입점(얇은 wrapper, `core`의 `main()`을 import).
-  - `utils/` — 헬퍼(`conversions.py`, `profiler.py`, `visualization.py`, `topics.py`).
+  - `utils/` — 헬퍼(`conversions.py`, `visualization.py`, `topics.py`, `sonar.py`).
   - `cpp/` — C++ 바인딩 wrapper + 순수파이썬 fallback.
   - `test/` — 테스트.
 - ⚠️ 의도된 예외: `core/`의 ROS Node 진입 클래스(`SLAMNode`=`core/slam.py:35`, `DeadReckoningNode`=`core/dead_reckoning.py:22`)는 알고리즘 계층인 `core/`에 두고, `nodes/*_node.py`(각 ~10줄)는 그 `main()`을 import하는 얇은 진입점이다. ROS2 라이프사이클과 알고리즘을 분리하기 위함이며, 두 노드 모두 동일 패턴이다 — 이 분리를 깨지 않는다.

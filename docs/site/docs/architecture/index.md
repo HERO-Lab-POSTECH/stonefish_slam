@@ -38,7 +38,7 @@ stonefish_slam/
 │   │   ├── pcl.cpp            libpointmatcher ICP 래퍼
 │   │   ├── pcl.py             ICP fallback(순수 Python numpy/scipy)
 │   │   └── __init__.py        try/except ImportError로 확장 감쌈
-│   ├── utils/        # topics.py, conversions.py, visualization.py, sonar.py, fusion.py, profiler.py, io.py
+│   ├── utils/        # topics.py, conversions.py, visualization.py, sonar.py, fusion.py, io.py
 │   └── test/         # test_*.py + static_import_gate.py + test_wildcard_gate.py(AST 게이트)
 ├── launch/   # 9개 launch
 ├── config/   # 8 + mapping/3 = 11개 YAML
@@ -55,7 +55,7 @@ stonefish_slam/
 | `core/` | ROS에 독립적인 알고리즘 구현. SLAM 통합, factor graph, localization, mapping, feature extraction, dead reckoning 등이 모두 여기에 있다. |
 | `nodes/` | ROS2 진입점. 약 10줄 수준의 얇은 wrapper로, `core`의 클래스를 `rclpy`로 띄우는 역할만 한다. |
 | `cpp/` | pybind11로 빌드되는 5개 C++ 확장(`.so`)과 각 확장의 순수 Python fallback. |
-| `utils/` | 토픽 정의(`topics.py`), 메시지 변환(`conversions.py`), 시각화(`visualization.py`), 소나 속성(`sonar.py`의 `OculusProperty`), 융합(`fusion.py`의 EMA), 프로파일러(`profiler.py`), I/O(`io.py`) 등 공용 유틸. |
+| `utils/` | 토픽 정의(`topics.py`), 메시지 변환(`conversions.py`), 시각화(`visualization.py`), 소나 속성(`sonar.py`의 `OculusProperty`), 융합(`fusion.py`의 EMA), I/O(`io.py`) 등 공용 유틸. |
 | `test/` | `test_*.py` 단위 테스트와 AST 기반 정적 게이트(`static_import_gate.py`, `test_wildcard_gate.py`). |
 
 !!! note "core와 nodes 분리 의도"

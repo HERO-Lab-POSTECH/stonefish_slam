@@ -76,7 +76,6 @@ class Mapping3DStandaloneNode(Node):
         self.declare_parameter('gaussian_sigma_factor', 2.5)
         self.declare_parameter('propagation_radius', 2)
         self.declare_parameter('propagation_sigma', 1.5)
-        self.declare_parameter('enable_profiling', True)
         self.declare_parameter('use_cpp_ray_processor', True)
 
         # Get parameters
@@ -123,7 +122,6 @@ class Mapping3DStandaloneNode(Node):
             'enable_propagation': self.get_parameter('mapping_3d.enable_propagation').value,
             'propagation_radius': self.get_parameter('propagation_radius').value,
             'propagation_sigma': self.get_parameter('propagation_sigma').value,
-            'enable_profiling': self.get_parameter('enable_profiling').value,
             # IWLO parameters
             'sharpness': self.get_parameter('mapping_3d.sharpness').value,
             'decay_rate': self.get_parameter('mapping_3d.decay_rate').value,

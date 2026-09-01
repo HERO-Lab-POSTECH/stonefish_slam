@@ -1049,6 +1049,11 @@ class FFTLocalizer:
             'rotation_override_used': rotation_override is not None,
             'translation': translation,
             'covariance': covariance,
+            # P1-5: 여기까지 왔다는 것 외에 어떤 품질 판정도 거치지 않은 리터럴이다.
+            # `rot_peak`·`trans_peak` 는 계산만 되고 어떤 임계값과도 비교되지 않는다
+            # — 임계값을 정하려면 분포가 먼저 필요해서(I8) 이번 사이클은 로깅만 하고
+            # 게이트는 다음 사이클로 미뤘다. 현재 유일한 품질 방어선은 slam.py 의
+            # `validate_fft_with_odom` (DR 비교) 하나뿐이다.
             'success': True,
             'rot_peak': rot_peak,
             'trans_peak': trans_peak

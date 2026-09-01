@@ -6,6 +6,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **위치 추정 파이프라인 계측 I1~I11** (`feat/loc-instrumentation`): "icp 0%" 도
+  "DR seed 17%" 도 **분모가 없는 보고**였다 — 어느 경로를 몇 번 탔는지 세는 곳이
+  하나도 없었다. 판정은 그대로 두고 세기만 한다. `Localization.ssm_disabled_count`
+  (I1, 이 값이 **키프레임 총수 -1** 과 같으면 원인이 알고리즘이 아니라
+  `ssm.enable: false` 라는 **설정**임이 확정된다 — 첫 키프레임은 prior 만 넣고 SSM 을
+  부르지 않으므로 분모가 하나 작다), `icp_attempted`/`icp_converged`(I2, 비율의 분모),
+  `icp_factor_added`/`odom_factor_fallback`/`ssm_init_failed`(I3, factor graph 실제
+  구성비 — **odometry factor 수는 뒤 둘의 합**이다. 초기화 실패는 `ssm_init_failed`,
+  ICP 를 돌리고 실패한 것만 `odom_factor_fallback` 으로 갈린다),
+  seed 출처 분해(I4·I5) · 기각 사유 분리(I6) · `dr_ty` 동시 기록(I7) ·
+  FFT `rot_peak`/`trans_peak`/`covariance`/`rotation_fft` 소비(I8·I9·I10) ·
+  병진 스케일 비율(I11). 로그 태그는 `[INSTR]`.
+  **I4 는 버그 수정이기도 하다** — `fft_is_dr_fallback` 이 write-only 라 DR
+  fallback 시드에도 `[FFT_SEED]` 가 붙어 **로그가 거짓을 말했다**. 읽어서
+  `[DR_SEED]` 로 분기한다. I8·I9·I10 이 읽는 값은 FFT 가 이미 계산해 반환 dict 에
+  실어 보내던 것이라 `localization_fft.py` 는 주석 외에 한 줄도 안 바뀐다.
+  I12(tilt A/B 이중 점군)는 오프라인 bag 전용이라 제외했고 I11 이 같은 질문에 더
+  싸게 답한다. I13 은 기존 `mean_err` 재사용이라 코드 0줄
+- 계측 배선 회귀 테스트 7개 — `slam.py` 는 import-time 에 rclpy·gtsam·cv_bridge 를
+  끌어와 path-load 가 닿지 않으므로 AST 로 배선의 **존재**를 고정한다. 막으려는 것은
+  값의 오류가 아니라 그 이전 단계, 즉 계측이 조용히 끊겨 로그가 영영 안 나오는
+  상황이다. 특히 `fft_is_dr_fallback` 이 다시 write-only 가 되는 회귀를 못 박는다
+
 - **실해역 bag 재생 지원** (김민종 colcon_ws2 통합): `sonar_topic`/`odom_topic`/
   `sonar_compressed` 파라미터로 데이터 소스 전환(기본값은 기존 시뮬 토픽 그대로),
   CompressedImage 디코드(BGR→GRAY 포함), `config/real_bag_overrides.yaml` +
@@ -21,6 +44,16 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- **`MappingProfiler` — 헤더만 있는 빈 CSV 만 남기던 프로파일러**
+  (`feat/loc-instrumentation`): `start()`·`close()` 는 불리는데 `record_frame()` 의
+  호출자가 0이라 매 실행 `/tmp/mapping_profiling.csv` 에 행이 하나도 없는 파일이
+  생겼다. `record_frame` 은 `_print_profiling_stats` 안에 있었고 그 호출부는 main
+  에서 이미 주석 처리돼 있어 **삭제 전에도 실행된 적이 없다** — 죽어 있던 사실이
+  드러난 것뿐이다. 클래스·재수출·배선과 함께, 소비자를 잃은 `enable_profiling`
+  ROS 파라미터도 제거했다(효과 없는 노브를 오퍼레이터에게 보여주느니 없애는 편이
+  정직하다). **`profiling_enabled` 가 게이트하는 `perf_counter` 체인은 남긴다** —
+  `t_ray_total`·`t_octree_total` 이 헬퍼 3개의 반환 시그니처에 박혀 있어 떼어내는
+  것이 시그니처 수술이고, 그건 god-method 분해의 범위다
 - **호출자 없는 코드 954줄**(`chore/dead-code-cleanup`): Python 메서드 14개
   (`feature_extraction.polar_to_cartesian` 106줄로 `polar_to_cartesian` 이 3벌→2벌 ·
   `FactorGraph` 4개 · `SonarMapping2D` 4개 · `SonarMapping3D` 4개 ·
