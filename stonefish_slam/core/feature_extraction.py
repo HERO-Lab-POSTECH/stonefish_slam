@@ -51,9 +51,6 @@ class FeatureExtraction:
         # Frame counter for skip
         self.frame_count = 0
 
-        # Cache for polar_to_cartesian conversion (performance optimization)
-        self.p2c_cache = None
-
         # CV bridge
         self.BridgeInstance = cv_bridge.CvBridge()
 

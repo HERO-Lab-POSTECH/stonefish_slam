@@ -33,23 +33,6 @@ class OculusProperty(object):
         self.tilt_angle_deg = tilt_angle_deg
         self.tilt_angle_rad = np.deg2rad(tilt_angle_deg)
 
-        ##################################################
-        # polar <-> Cartesian
-        ##################################################
-        # functions to transform between bearings and cols
-        # col -> bearing
-        self.c2b = None
-        # col <- bearing
-        self.b2c = None
-        # row -> range
-        self.ro2ra = None
-        # row <- range
-        self.ra2ro = None
-
-        # parameters for remapping from polar to Cartesian
-        self.remap_x = None
-        self.remap_y = None
-
     def __str__(self):
         d = dict(self.__dict__)
         d["angular_resolution"] = np.degrees(d["angular_resolution"])

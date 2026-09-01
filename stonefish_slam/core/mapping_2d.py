@@ -74,7 +74,7 @@ class SonarMapping2D:
         >>> # After SLAM processing
         >>> mapper.update_global_map_from_slam(slam.keyframes)
         >>> map_image = mapper.get_map_image()
-        >>> mapper.save_map('/path/to/map.png')
+        >>> cv2.imwrite('/path/to/map.png', map_image)
 
     Example (Independent mode):
         >>> mapper = SonarMapping2D()
