@@ -1,9 +1,13 @@
+import logging
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 pytest.importorskip("sklearn")  # pcl.py module-top import; 없는 머신은 모듈 전체 skip
 
 REL = "stonefish_slam/cpp/pcl.py"
+CONFIG_ICP_YAML = Path(__file__).resolve().parents[2] / "config" / "icp.yaml"
 
 
 def _pcl(load_module):
@@ -50,6 +54,72 @@ def test_icp_recovers_small_rotation(load_module):
     assert status == "success"
     recovered = np.arctan2(T[1, 0], T[0, 0])
     assert np.isclose(recovered, th, atol=np.deg2rad(2.0))
+
+
+def test_loadfromyaml_applies_the_two_supported_keys(load_module, tmp_path):
+    # P0-1: loadFromYaml was a print-only no-op, so operator ICP tuning was
+    # silently discarded on the pure-Python path. The values here deliberately
+    # differ from ICP.__init__'s defaults (3.0 / 40) — shipped config/icp.yaml
+    # happens to repeat the defaults, so it cannot tell parsing from a no-op.
+    cfg = tmp_path / "icp.yaml"
+    cfg.write_text(
+        "outlierFilters:\n"
+        "  - MaxDistOutlierFilter:\n"
+        "      maxDist: 7.5\n"
+        "transformationCheckers:\n"
+        "  - CounterTransformationChecker:\n"
+        "      maxIterationCount: 12\n"
+    )
+    m = _pcl(load_module)
+    icp = m.ICP()
+    icp.loadFromYaml(str(cfg))
+    assert icp.max_correspondence_distance == pytest.approx(7.5)
+    assert icp.max_iterations == 12
+
+
+def test_loadfromyaml_parses_the_shipped_config(load_module):
+    # Structure compatibility against the REAL config/icp.yaml — the nested
+    # libpointmatcher layout (list-of-single-key-mappings, bare component name
+    # for errorMinimizer) must resolve to its stated values.
+    m = _pcl(load_module)
+    icp = m.ICP()
+    icp.loadFromYaml(str(CONFIG_ICP_YAML))
+    # outlierFilters[MaxDistOutlierFilter].maxDist
+    assert icp.max_correspondence_distance == pytest.approx(3.0)
+    # transformationCheckers[CounterTransformationChecker].maxIterationCount
+    assert icp.max_iterations == 40
+
+
+def test_loadfromyaml_keeps_outlier_ratio_at_one(load_module):
+    # TrimmedDistOutlierFilter.ratio: 0.8 is present in config/icp.yaml and must
+    # NOT be mapped — a fixed trim below the true overlap biases the Kabsch
+    # centroid on this path (the bug P4a fixed; see ICP.__init__).
+    m = _pcl(load_module)
+    icp = m.ICP()
+    icp.loadFromYaml(str(CONFIG_ICP_YAML))
+    assert icp.outlier_ratio == 1.0
+
+
+def test_loadfromyaml_names_the_settings_it_ignores(load_module, caplog):
+    m = _pcl(load_module)
+    with caplog.at_level(logging.WARNING):
+        m.ICP().loadFromYaml(str(CONFIG_ICP_YAML))
+    warned = "\n".join(r.getMessage() for r in caplog.records)
+    for name in ("TrimmedDistOutlierFilter", "KDTreeMatcher",
+                 "DifferentialTransformationChecker"):
+        assert name in warned
+
+
+def test_loadfromyaml_missing_file_keeps_defaults(load_module, caplog):
+    # Mirrors the C++ binding (cpp/pcl.cpp:108), which falls back to defaults
+    # when the file cannot be opened.
+    m = _pcl(load_module)
+    icp = m.ICP()
+    with caplog.at_level(logging.WARNING):
+        icp.loadFromYaml("/nonexistent/icp.yaml")
+    assert icp.max_correspondence_distance == 3.0
+    assert icp.max_iterations == 40
+    assert icp.outlier_ratio == 1.0
 
 
 def test_match_returns_zero_distance_for_identical_clouds(load_module):
