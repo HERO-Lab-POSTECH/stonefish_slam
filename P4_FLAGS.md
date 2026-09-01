@@ -1,5 +1,12 @@
 # P4 Investigation Flags
 
+> **2026-09-01 갱신 패스.** 양 repo 코드 건강 감사(37건 적대 검증)에 맞춰 이 파일의 **유령 백로그를
+> 정리**했다 — 삭제된 파일을 가리키던 항목, 이미 분해된 god-method, 반증된 가설에 각각 종결·정정
+> 배너를 달았다(원 서술은 이력으로 보존). **이번 감사에서 새로 확정된 결함은 이 파일이 아니라
+> `.hq/community/posts/finding/008-2026-09-01-code-health-audit.md`가 SSOT**이며, 원 보고 전문은
+> `.hq/work/project/audit-2026-09-01/`에 있다. 두 곳에 같은 항목을 중복 기재하지 말 것.
+
+
 ## ✅ 압력→깊이 변환 Pa/kPa 1000배 단위 버그 — **P4b 해결(`683ea4a`, 2026-06-24)**
 
 > **해결**: `core/depth.py` 순수함수 `pressure_to_depth()`로 정답식 구현 — `(P − 101325) / (1025 · 9.80665)`, NED z-down(수면→0, 10m→+10). `dead_reckoning.py`가 이를 사용(`curr_depth=0.0` 하드코딩 제거), `offset=2.5` fudge 제거. 출처 `kalman_filter.py::pressure_to_depth`는 kalman 모듈과 함께 삭제됨(`3e2a2b4`). 아래는 발견 당시 기록(보존).
@@ -27,7 +34,19 @@
   - ~~`pcl.py` ICP.compute의 `T_delta = np.eye(3, dtype=np.float32)` 다운캐스트가 근본 수정 후보~~ → **반박**: float32/float64 동일 결과. 실제 원인은 `outlier_ratio=0.8`의 비대칭 trim(위 해결 노트).
   - `outlier_ratio=0.8`이 7점 점군에서 2점을 버리는데, 순수 shift라 → centroid 추정 불안정. **이것이 진짜 근본원인이었음**(0.8→1.0으로 해결).
 
-## fusion.ema_fusion — observation_count 인자 미사용 (의도 검증 필요)
+## fusion.ema_fusion — observation_count 인자 미사용 — **2026-09-01 판정: 실버그 아님, 순수 정리 건**
+
+> **적대 검증 결과(SLAM-M2, PARTIAL)**: "실버그로 승격"은 성립하지 않는다. 두 판정이 갈리려면
+> `count>0 ∧ old_map<=0.0`, 즉 어떤 셀이 **정확히 0.0인 관측값으로** 한 번 쓰여야 하는데,
+> `mapping_2d.py:573`의 정규화가 `raw > threshold`(strict, uint8)를 항상 >0으로 보내므로 그 상태를
+> 만드는 코드 경로가 없다. 노이즈 저감이 "다수 셀에서 무너진다"는 서술은 반증됐다.
+> 다만 이 동치성은 (a) 그 strict `>` 필터와 (b) 호출부가 `threshold=0.0`을 넘긴다는 **두 외부 불변식에
+> 전적으로 의존**한다 — 필터를 `>=`로 바꾸거나 다른 호출자가 `threshold>0`을 넘기면 즉시 갈린다.
+> **처방은 판정 로직 수정이 아니라 시그니처에서 `observation_count`를 제거**(또는 count 기반으로 통일)해
+> 이 암묵 의존을 없애는 쪽이다. 현행 동작 불변 = 회귀 위험 0.
+> 부수 관찰(조치 권하지 않음): `mapping_2d.py:465`의 `global_map_count`가 float64인데 용도는 정수 카운트,
+> `test/test_mapping_2d_accumulation.py:85`는 int32로 스텁한다.
+
 
 - **파일**: `stonefish_slam/utils/fusion.py::ema_fusion`
 - **발견일**: 2026-06-23 (P2 최종 whole-branch 검토에서 식별)
@@ -70,7 +89,7 @@
 - **발견일**: 2026-06-23 (P3.0 명명·구조 외부 표준 대조 중). 정확히 **17곳**(P4_FLAGS 초기 목록은 6모듈만 열거했으나 slam.py 4곳·dead_reckoning.py 2곳·cfar.py 2번째 등 누락분 있었음).
 - **증상**: `from <module> import *` 사용. PEP 8은 "Wildcard imports should be avoided", Google Style은 모듈 단위 import만 허용해 둘 다 위반.
 - **해소(P3 T4a/T4b)**: 정적 게이트(`test/static_import_gate.py`)로 17곳을 dead/live 분류 — 각 consumer가 wildcard로만 오는 의존 심볼을 세고, consumer 직접 바인딩은 차감. **dead 10곳 삭제**(conversions:20·sonar:6·cfar:5/6·dead_reckoning:23·types:11/12·feature_extraction:7/8/9), **live 7곳 명시화**(kalman:15·dead_reckoning:21·types:10·slam의 io/conversions/visualization/topics). 우리 소스 wildcard **0개** 달성. `test_wildcard_gate.py`가 명시 ImportFrom을 파싱해 골든 심볼 집합과 비교(동결). code-reviewer 독립검토로 dead 삭제 런타임 안전성·live 심볼 완전성 확인. (이는 **P3 시점 기록**이다. P4에서 `kalman.py` 모듈 제거(`3e2a2b4`)로 `kalman:15` live wildcard가 사라져 현재 live는 6모듈이며, `test_wildcard_gate.py` 골든 집합도 그 커밋에서 함께 갱신됨.)
-- **잔여 P4**: source 5모듈(conversions/topics/io/sonar/visualization)의 `__all__` 추가는 게이트 baseline 정합 위해 P4로 미룸(Open Q O7). C++ `.so` 상대 import(`__init__.py`)는 의도된 §2.2 예외라 불변(Open Q O8).
+- **잔여 P4**: source 5모듈(conversions/topics/io/sonar/visualization)의 `__all__` 추가는 게이트 baseline 정합 위해 P4로 미룸(Open Q O7). **[2026-09-01 재측정]** 실제로 `__all__`이 없는 `utils/` 파일은 5개가 아니라 **7개 전부**다 — 위 5개에 `fusion.py`·`profiler.py`가 추가된다(`utils/__init__.py`만 보유). C++ `.so` 상대 import(`__init__.py`)는 의도된 §2.2 예외라 불변(Open Q O8).
 
 ## ✅ dead_reckoning.py — curr_depth 깊이 무력화 — **P4b 해결(`683ea4a`, 2026-06-24)**
 
@@ -142,6 +161,14 @@ P3(기업표준 구조·명명 통일·재구조화·모듈화)에서 **동작 �
 ## localization.yaml — icp_config 하드코딩 절대경로 (P3 재감사에서 발견) — **P4 측정: dead fallback 확정, 제거 미실행**
 
 > **P4d 측정(O9)**: `localization.yaml:29`의 하드코딩 경로 `/workspace/colcon_ws/...`는 파일이 **존재하지 않고**, `launch.py:30,46`이 이미 패키지 상대 경로로 오버라이드하므로 **dead fallback**. 즉 런타임에 이 값은 실제로 안 쓰임 → 안전 제거 가능. 단 코드 동작에 영향 없는 cleanup이라 P4 핵심 수정에선 제외(미실행). 향후 cleanup pass 또는 sim 통합 단계에서 제거.
+>
+> **[2026-09-01 재측정 — 줄번호 정정 + 범위 한정]** 실제 위치는 `localization.yaml:29`가 아니라 **`:30`**이다.
+> 그리고 위험 범위는 아래 본문 서술보다 좁다: `slam.launch.py:57`이 `param_dict['icp_config']`에 올바른
+> package-share 경로를 넣고 이 dict가 파라미터 리스트 **마지막**(`:87`)에 오므로 **launch 경로에서는 항상
+> 올바른 값이 이긴다.** 잘못된 경로가 실제로 로드되는 것은 `ros2 run stonefish_slam slam_node`로 노드를
+> **직접** 띄울 때뿐이다. 아래 "이 오버라이드가 적용되면 로드가 실패한다"는 서술은 그 한 경우로 한정해 읽을 것.
+> 또한 `pcl.so`가 live라 C++ `loadFromYaml`이 실제로 호출된다(순수 파이썬 fallback의 `cpp/pcl.py:134-140`은
+> `print`만 하는 no-op stub이라 무해했을 것 — 그 no-op 자체가 별건의 HIGH 결함이다, finding/008 #1).
 
 - **파일**: `config/localization.yaml:29`(`icp_config: '/workspace/colcon_ws/src/stonefish_slam/config/icp.yaml'`).
 - **발견일**: 2026-06-24 (P3 재감사 config-launch 차원).
