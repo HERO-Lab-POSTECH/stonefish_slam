@@ -198,6 +198,21 @@ class SLAMNode(Node):
             'keyframes_total': 0
         }
 
+        # 계측 카운터 (I1~I6). 위치 추정 파이프라인이 실제로 어느 경로를 탔는지
+        # 세는 것이 목적이다 — "icp 0%" 같은 보고가 분모 없이 나오던 상태를 끝낸다.
+        # `[INSTR]` 태그로 키프레임마다 한 줄 요약을 낸다(grep 으로 뽑아 쓴다).
+        # 계측 전용이고 어떤 판정에도 쓰이지 않는다.
+        self.instr = {
+            'icp_attempted': 0,         # I2 — ICP 호출 횟수(분모)
+            'icp_converged': 0,         # I2 — message == "success"
+            'icp_factor_added': 0,      # I3 — factor graph 에 ICP factor 가 들어간 횟수
+            'odom_factor_fallback': 0,  # I3 — ICP 실패로 odometry factor 로 떨어진 횟수
+            'seed_fft': 0,              # I4 — FFT 가 실제로 시드를 준 횟수
+            'seed_dr_fallback': 0,      # I4 — DR fallback 이 시드로 쓰인 횟수
+            'reject_pos': 0,            # I6 — 위치 오차로 기각
+            'reject_rot': 0,            # I6 — 회전 오차로 기각
+        }
+
         # Mapping initialization (configured in init_node)
         self.mapper = None
         self.enable_2d_mapping = False
@@ -660,6 +675,32 @@ class SLAMNode(Node):
         if rot_error > self.fft_max_rot_error:
             info['reasons'].append('rot')
 
+        # I6 — 기각 사유를 나눠 센다. `use_dr_rotation: true` 에서는 회전 오차가
+        # 항등 0 이라 'rot' 이 영영 0 으로 나와야 한다(회전 게이트 사문화 가설).
+        # 그게 실측되면 17% 기각의 분모와 사유가 확정된다.
+        for reason in info['reasons']:
+            self.instr[f'reject_{reason}'] += 1
+
+        # I7~I10 — 판정에 쓰지 않고 기록만 하는 값들. FFT 가 이미 계산해 반환
+        # dict 에 실어 보내는데 아무도 읽지 않던 것들이라 소비만 추가한다.
+        #   I7  dr_ty  : 기각이 |ty| 큰 구간에 몰리면 ty 부호 오류, 균등하면 게이트가 빡빡한 것
+        #   I8  peak   : 품질 게이트 임계값을 정하려면 분포가 먼저 필요하다(P1-5)
+        #   I9  cov    : FFT 자체 불확실도가 DR 불일치를 예측하는지 상관 분석용
+        #   I10 rot_fft: `use_dr_rotation` 을 끌 수 있는지 판단할 유일한 근거
+        cov = fft_result.get('covariance')
+        cov_diag = np.diag(cov) if cov is not None else (np.nan,) * 3
+        self.get_logger().info(
+            f"[INSTR] gate pos_err={pos_error:.3f} rot_err_deg={np.degrees(rot_error):.2f} "
+            f"dr_ty={dr_ty:.3f} "
+            f"rot_peak={fft_result.get('rot_peak', float('nan')):.4f} "
+            f"trans_peak={fft_result.get('trans_peak', float('nan')):.4f} "
+            f"cov=({cov_diag[0]:.4f},{cov_diag[1]:.4f},{cov_diag[2]:.4f}) "
+            f"rot_fft={fft_result.get('rotation_fft', float('nan')):.2f} "
+            f"rot_used={fft_result['rotation']:.2f} "
+            f"dr_rot_override={fft_result.get('rotation_override_used', False)} "
+            f"reasons={'|'.join(info['reasons']) or 'none'}"
+        )
+
         return len(info['reasons']) == 0, info
 
     def slam_callback_integrated(self, sonar_msg, odom_msg: Odometry) -> None:
@@ -1107,6 +1148,7 @@ class SLAMNode(Node):
         # (previously the FFT transform replaced ICP entirely and skipped the
         # SSM validation below; refining + always validating proved more robust).
         fft_seeded = False
+        seed_is_dr = False
         if self.fft_enable \
                 and hasattr(keyframe, 'fft_success') and keyframe.fft_success \
                 and keyframe.fft_transform is not None:
@@ -1115,10 +1157,19 @@ class SLAMNode(Node):
                 # Replace every sampled initial guess with the FFT seed
                 ret2.initial_transforms = [keyframe.fft_transform for _ in ret2.initial_transforms]
             fft_seeded = True
+            # I4 — `fft_is_dr_fallback` 은 여태 write-only 였다. 여기서 읽는 이 한 줄이
+            # 관찰 가능성 자체를 만든다: 시드가 FFT 에서 왔는지 DR fallback 에서 왔는지
+            # 구분되지 않으면 아래 태그가 거짓을 말한다(둘 다 [FFT_SEED] 로 찍혔다).
+            seed_is_dr = bool(getattr(keyframe, 'fft_is_dr_fallback', False))
+            if seed_is_dr:
+                self.instr['seed_dr_fallback'] += 1
+            else:
+                self.instr['seed_fft'] += 1
 
         # Always compute ICP (both rotation and translation come from ICP,
         # seeded with FFT when available)
         with CodeTimer("SLAM - sequential scan matching - ICP"):
+            self.instr['icp_attempted'] += 1   # I2 — 비율 보고의 분모
             if self.localization.ssm_params.initialization and self.localization.ssm_params.cov_samples > 0:
                 message, odom, cov, sample_transforms = self.localization.compute_icp_with_cov(
                     ret2.source_points,
@@ -1146,9 +1197,28 @@ class SLAMNode(Node):
                     ret2.estimated_transform = odom
                     ret2.status.description = ""
 
+        if ret2.status:
+            self.instr['icp_converged'] += 1   # I2 — message == "success" 인 경우만 여기 온다
+
         if ret2.status and fft_seeded:
+            # I5 — 태그를 시드 출처로 분기한다. 종전에는 DR fallback 에도 [FFT_SEED]
+            # 가 붙어 로그가 거짓이었다.
             desc = ret2.status.description or ""
-            ret2.status.description = (desc + " [FFT_SEED]").strip()
+            tag = "[DR_SEED]" if seed_is_dr else "[FFT_SEED]"
+            ret2.status.description = (desc + " " + tag).strip()
+
+        # I11 — tilt 스케일 편향의 결정 계측. ICP 가 시드 대비 병진을 얼마나
+        # 늘리거나 줄였는지의 단일 스칼라다. 중앙값이 1 에서 유의하게 벗어나면
+        # 점군 척도가 어긋나 있다는 뜻이다. 방향까지 예단하지 않고 값만 남긴다 —
+        # 예측치는 LOC-3 교정에 따라 압축(<1)일 수도 팽창(>1)일 수도 있다.
+        if ret2.status:
+            init_norm = float(np.linalg.norm(ret2.initial_transform.translation()))
+            est_norm = float(np.linalg.norm(ret2.estimated_transform.translation()))
+            if init_norm > 1e-6:
+                self.get_logger().info(
+                    f"[INSTR] scale init={init_norm:.4f} est={est_norm:.4f} "
+                    f"ratio={est_norm / init_norm:.4f} seed={'dr' if seed_is_dr else 'fft'}"
+                )
 
         # ICP validation — verify transform is reasonable
         if ret2.status:
@@ -1173,6 +1243,7 @@ class SLAMNode(Node):
 
         # Add to graph if successful
         if ret2.status:
+            self.instr['icp_factor_added'] += 1   # I3 — factor graph 의 실제 구성비
             self.fg.add_icp_factor(
                 ret2.source_key,
                 ret2.target_key,
@@ -1188,11 +1259,34 @@ class SLAMNode(Node):
             ret2.inserted = True
         else:
             # Fall back to odometry
+            self.instr['odom_factor_fallback'] += 1   # I3
             self.get_logger().warn(
                 f"[SSM] Localization failed ({ret2.status.description}), using odometry instead. "
                 f"DR delta: tx={ret2.initial_transform.x():.2f}m, ty={ret2.initial_transform.y():.2f}m, rot={np.degrees(ret2.initial_transform.theta()):.1f}deg"
             )
             self.fg.add_odometry_factor(keyframe)
+
+        self._log_instrumentation()
+
+    def _log_instrumentation(self) -> None:
+        """계측 카운터 한 줄 요약 (I1~I6).
+
+        키프레임마다 나가므로 `grep '\\[INSTR\\] counters'` 로 시계열을 그대로 뽑을
+        수 있다. `ssm_disabled` 는 `Localization` 이 세므로 여기서 읽어 온다 — 이
+        값이 키프레임 총수와 같으면 "icp 0%" 의 원인이 알고리즘이 아니라
+        `ssm.enable: false` 라는 **설정**임이 확정된다(I1).
+        """
+        i = self.instr
+        attempted = i['icp_attempted']
+        rate = (i['icp_converged'] / attempted) if attempted else float('nan')
+        self.get_logger().info(
+            f"[INSTR] counters ssm_disabled={getattr(self.localization, 'ssm_disabled_count', -1)} "
+            f"icp_attempted={attempted} icp_converged={i['icp_converged']} "
+            f"icp_rate={rate:.3f} "
+            f"factor_icp={i['icp_factor_added']} factor_odom={i['odom_factor_fallback']} "
+            f"seed_fft={i['seed_fft']} seed_dr={i['seed_dr_fallback']} "
+            f"reject_pos={i['reject_pos']} reject_rot={i['reject_rot']}"
+        )
 
     def add_nonsequential_scan_matching(self) -> bool:
         """Perform non-sequential scan matching (loop closure detection).

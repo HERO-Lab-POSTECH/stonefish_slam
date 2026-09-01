@@ -74,6 +74,11 @@ class Localization:
         self.ssm_params.cov_samples = 0
         self.ssm_params.enable = True
 
+        # I1 계측 카운터. 아래 조기 반환은 경고 없이 일어나므로,
+        # 이 값이 키프레임 총수와 같으면 "icp 0%" 의 원인이
+        # 알고리즘이 아니라 **설정**임이 확정된다. slam.py 가 읽어 요약에 싣는다.
+        self.ssm_disabled_count = 0
+
         self.nssm_params = SMParams()
         self.nssm_params.initialization = True
         self.nssm_params.initialization_params = 100, 5, 0.01
@@ -375,6 +380,7 @@ class Localization:
 
         # Check if SSM is enabled
         if not self.ssm_params.enable:
+            self.ssm_disabled_count += 1   # I1
             ret.status = STATUS.NOT_ENOUGH_POINTS
             ret.status.description = f"SSM disabled"
             return ret
