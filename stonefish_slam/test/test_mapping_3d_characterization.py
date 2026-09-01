@@ -73,7 +73,6 @@ def _base_config():
         "update_method": "log_odds",
 
         # Profiling — disable CSV writing to /tmp to keep tests fast/clean
-        "enable_profiling": False,
         "frame_interval": 10,
 
         # Map size

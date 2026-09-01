@@ -177,7 +177,8 @@ def load_mapping_3d():
         return mod
 
     # mapping_3d가 import-time에 from-import하는 형제(순수)를 정확한 이름으로 먼저.
-    _load("stonefish_slam/utils/profiler.py", "stonefish_slam.utils.profiler")
+    # utils/profiler.py는 MappingProfiler를 걷어내면서 사라졌다 — mapping_3d가 더
+    # 이상 import하지 않으므로 여기서도 뺀다.
     _load("stonefish_slam/core/octree.py", "stonefish_slam.core.octree")
     m3d = _load("stonefish_slam/core/mapping_3d.py", "stonefish_slam.core.mapping_3d")
 
