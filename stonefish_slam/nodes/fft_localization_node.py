@@ -129,10 +129,16 @@ class FFTLocalizationNode(Node):
 
     def sonar_callback(self, sonar_msg):
         """Estimate the transform from the previous frame to this one and publish it."""
-        # Extract polar sonar image identically to slam.py:642-645.
-        polar_curr = np.frombuffer(sonar_msg.data, dtype=np.uint8).reshape(
-            sonar_msg.height, sonar_msg.width
-        )
+        # Extract polar sonar image identically to slam.py:716 — including its
+        # guard: a data buffer whose length disagrees with height*width makes
+        # reshape raise, and an unhandled raise here escapes into the executor.
+        try:
+            polar_curr = np.frombuffer(sonar_msg.data, dtype=np.uint8).reshape(
+                sonar_msg.height, sonar_msg.width
+            )
+        except ValueError as e:
+            self.get_logger().error(f'Failed to convert sonar image: {e}')
+            return
 
         # First frame: no previous to compare against; store and skip.
         if self.prev_polar_sonar is None:

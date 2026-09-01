@@ -3,7 +3,10 @@ Simple Python implementation of PCL functions for SLAM
 Replaces the C++ pybind11 module when libpointmatcher is not available
 """
 
+import logging
+
 import numpy as np
+import yaml
 from scipy.spatial import KDTree
 
 
@@ -133,11 +136,57 @@ class ICP:
 
     def loadFromYaml(self, config_file):
         """
-        Load ICP configuration from YAML file
-        For now, we use default parameters
+        Load ICP configuration from a libpointmatcher YAML file.
+
+        Only the two parameters this fallback actually implements are applied:
+        outlierFilters[MaxDistOutlierFilter].maxDist and
+        transformationCheckers[CounterTransformationChecker].maxIterationCount.
+        libpointmatcher's remaining machinery (matcher, error minimizer, the
+        differential checker, data point filters) has no counterpart here, so
+        those keys are reported by name instead of being dropped in silence.
+
+        TrimmedDistOutlierFilter.ratio is deliberately NOT applied — see the
+        outlier_ratio comment in __init__: a fixed trim below the true overlap
+        biases the Kabsch centroid on this path.
         """
-        # TODO: Parse YAML config if needed
-        print(f"[ICP] Using default configuration (YAML parsing not implemented)")
+        try:
+            with open(config_file) as f:
+                config = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError) as e:
+            logging.warning("[ICP] Failed to load %s (%s). Using default configuration.",
+                            config_file, e)
+            return
+
+        ignored = []
+        for section, contents in config.items():
+            # libpointmatcher sections are either a single-key mapping, a list
+            # of single-key mappings, or a bare component name.
+            if isinstance(contents, dict):
+                components = list(contents.items())
+            elif isinstance(contents, list):
+                components = [item for entry in contents if isinstance(entry, dict)
+                              for item in entry.items()]
+            elif isinstance(contents, str):
+                components = [(contents, {})]
+            else:
+                continue
+
+            for name, params in components:
+                params = params or {}
+                if name == 'MaxDistOutlierFilter' and 'maxDist' in params:
+                    self.max_correspondence_distance = float(params['maxDist'])
+                elif name == 'CounterTransformationChecker' and 'maxIterationCount' in params:
+                    self.max_iterations = int(params['maxIterationCount'])
+                else:
+                    ignored.append(f"{section}.{name}")
+
+        logging.info("[ICP] Loaded %s: max_correspondence_distance=%.3f, max_iterations=%d",
+                     config_file, self.max_correspondence_distance, self.max_iterations)
+        if ignored:
+            logging.warning(
+                "[ICP] Pure-Python fallback ignores these libpointmatcher settings: %s. "
+                "Tuning them has no effect unless the C++ pcl extension is built.",
+                ", ".join(ignored))
 
     def compute(self, source_points, target_points, initial_guess):
         """

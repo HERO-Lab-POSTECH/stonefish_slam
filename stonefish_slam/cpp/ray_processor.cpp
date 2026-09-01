@@ -176,7 +176,14 @@ void RayProcessor::process_sonar_image(
             while (i < all_updates.size() && all_updates[i].key == current_key) {
                 double intensity = all_updates[i].intensity_avg;
 
-                if (intensity >= config_.intensity_threshold) {
+                // Strict > matches the hit test at generation time (is_hit
+                // below) and every other intensity gate in the pipeline
+                // (mapping_2d.py:573, mapping_3d.py:467/679,
+                // octree_mapping.cpp:596). At the equality point the merged
+                // log-odds is unchanged either way — final_log_odds is the sum
+                // of both buckets — so this only aligns has_occupied, and with
+                // it final_intensity.
+                if (intensity > config_.intensity_threshold) {
                     // Occupied update (high intensity)
                     occupied_sum += all_updates[i].log_odds;
                     max_occupied_intensity = std::max(max_occupied_intensity, intensity);
@@ -685,7 +692,12 @@ PYBIND11_MODULE(ray_processor, m) {
 
     // RayProcessor class
     py::class_<RayProcessor>(m, "RayProcessor")
+        // keep_alive<1, 2>: RayProcessor holds the OctreeMapping as a
+        // non-owning raw pointer, so without this the Python-side octree can be
+        // garbage collected while the processor still points at it and
+        // process_sonar_image becomes a use-after-free.
         .def(py::init<OctreeMapping*, const RayProcessorConfig&>(),
+             py::keep_alive<1, 2>(),
              py::arg("octree"),
              py::arg("config"),
              "Initialize ray processor with octree and configuration")

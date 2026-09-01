@@ -1,10 +1,17 @@
-"""Tests for FactorGraph robust noise model wiring (T-C2).
+"""Tests for FactorGraph.
 
-Tests verify:
+Robust noise model wiring (T-C2):
 1. create_robust_full_noise_model uses c=3.0 (not 1.0)
 2. add_icp_factor accepts robust=True flag and applies robust model
 3. add_loop_closure calls add_icp_factor with robust=True
+
+Failure handling (P0-3, P1-3, P1-14):
+4. a failed ISAM2 update neither escapes nor poisons the pending factor queue
+5. verify_pcm tolerates a candidate with no covariance
+6. the NSSM queue ages out without a new loop closure
 """
+from types import SimpleNamespace
+
 import numpy as np
 import gtsam
 
@@ -156,6 +163,226 @@ def test_loop_closure_path_uses_robust(load_factor_graph, monkeypatch):
     assert "robust" in captured, "add_icp_factor was never called from add_loop_closure"
     assert captured["robust"] is True, (
         f"add_loop_closure must call add_icp_factor(robust=True), got robust={captured['robust']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 4 (P0-3): ISAM2 failure must not kill the node, and must not poison the
+# pending factor queue.
+# ---------------------------------------------------------------------------
+
+def _keyframe(fg_mod, sec, x):
+    """Minimal real Keyframe at (x, 0, 0). time only needs sec/nanosec."""
+    return fg_mod.Keyframe(
+        status=True,
+        time=SimpleNamespace(sec=sec, nanosec=0),
+        dr_pose3=gtsam.Pose3(gtsam.Rot3(), np.array([float(x), 0.0, 0.0])),
+    )
+
+
+class _FailOnceISAM:
+    """Delegates to the real ISAM2 but raises on the first update() call.
+
+    Mirrors what GTSAM does on a degenerate linearization: the pybind layer
+    surfaces IndeterminantLinearSystemException as RuntimeError.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.raised = False
+
+    def update(self, graph, values):
+        if not self.raised:
+            self.raised = True
+            raise RuntimeError("Indeterminant linear system detected (injected)")
+        return self._inner.update(graph, values)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_isam_failure_is_survivable_and_leaves_no_poisoned_queue(load_factor_graph):
+    """P0-3: a failed ISAM2 update must clear the pending graph/values.
+
+    A bare try/except would be worse than the crash: the offending factors stay
+    queued and every later keyframe re-pushes them, so ISAM2 fails for the rest
+    of the node's life. This pins both halves — no exception escapes, AND the
+    next update actually succeeds.
+    """
+    fg = _make_fg(load_factor_graph)
+
+    # Production order (slam.py:841-846): factors first, then update_graph(frame)
+    # appends the keyframe.
+    kf0 = _keyframe(load_factor_graph, 0, 0.0)
+    fg.add_prior_factor(kf0)
+
+    fg.isam = _FailOnceISAM(fg.isam)
+
+    # Must not raise.
+    fg.update_graph(kf0)
+
+    assert fg.isam.raised, "the injected failure never fired"
+    assert fg.graph.size() == 0, "pending factors survived the failed update"
+    assert fg.values.size() == 0, "pending values survived the failed update"
+
+    # The next tick must work. Re-seed the prior the failed update dropped.
+    fg.add_prior_factor(kf0)
+    fg.update_graph()
+
+    assert fg.keyframes[-1].cov is not None, "recovered update left no covariance"
+    assert fg.graph.size() == 0 and fg.values.size() == 0
+
+
+def test_isam_recovers_from_a_real_indeterminate_system(load_factor_graph):
+    """The same guard, driven by GTSAM itself rather than an injected raise.
+
+    _FailOnceISAM raises BEFORE the real update runs, so it cannot say whether
+    ISAM2 is usable afterwards — only that our own buffers were cleared. Here
+    the degenerate system is real: a BetweenFactor with no prior anywhere leaves
+    the linear system indeterminate. Measured 2026-09-01: ISAM2 does recover,
+    but the factors submitted in the failed update do NOT take effect (X(1)
+    stays at its initial value once a prior is added), so dropping the pending
+    buffer costs one constraint. That is the accepted price of not poisoning
+    the queue.
+    """
+    fg = _make_fg(load_factor_graph)
+    X = load_factor_graph.X  # factor_graph re-exports it from utils.conversions
+
+    kf0 = _keyframe(load_factor_graph, 0, 0.0)
+    kf1 = _keyframe(load_factor_graph, 1, 1.0)
+    fg.keyframes.append(kf0)
+
+    diag = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.1, 0.1, 0.01]))
+    fg.graph.add(gtsam.BetweenFactorPose2(X(0), X(1), gtsam.Pose2(1.0, 0.0, 0.0), diag))
+    fg.values.insert(X(0), gtsam.Pose2())
+    fg.values.insert(X(1), gtsam.Pose2())
+
+    fg.update_graph(kf1)  # must not raise
+
+    assert fg.graph.size() == 0 and fg.values.size() == 0
+
+    # Next tick with a prior must succeed. Add the factor only — the VALUES from
+    # the failed update do survive inside ISAM2, so re-inserting X(0) would
+    # raise "key already exists". Production never hits that: update_graph
+    # appends the keyframe before the try, so the next add_odometry_factor
+    # inserts a fresh key.
+    fg.graph.add(gtsam.PriorFactorPose2(X(0), gtsam.Pose2(), diag))
+    fg.update_graph()
+
+    assert fg.keyframes[-1].cov is not None
+
+
+def test_failed_update_leaves_the_keyframe_with_a_covariance(load_factor_graph):
+    """The early return must not leave `keyframes[-1].cov` as None.
+
+    verify_pcm and add_icp_factor both guard against None, so this is silent
+    degradation rather than a crash — every loop closure the frame takes part in
+    falls back to the fixed noise model without saying so.
+    """
+    fg = _make_fg(load_factor_graph)
+
+    kf0 = _keyframe(load_factor_graph, 0, 0.0)
+    fg.add_prior_factor(kf0)
+    fg.isam = _FailOnceISAM(fg.isam)
+    fg.update_graph(kf0)
+
+    assert fg.keyframes[-1].cov is not None
+
+
+def test_a_failed_update_still_registers_its_values_in_isam(load_factor_graph):
+    """Pins the GTSAM semantics the P0-3 design depends on.
+
+    A review of this branch claimed the guard causes an unrecoverable cascade:
+    "X(k) is never added to ISAM2, so the next tick's BetweenFactor(X(k),
+    X(k+1)) raises 'key does not exist'". Measured 2026-09-01, that is not what
+    GTSAM does — `update()` pushes the new factors and inserts theta_ BEFORE the
+    elimination that throws, so both survive the failure (factors 1 -> 2,
+    values 1 -> 3). Dropping our own pending buffer therefore cannot orphan a
+    variable. Pinned here so the claim is not re-litigated from reasoning.
+    """
+    fg = _make_fg(load_factor_graph)
+    X = load_factor_graph.X
+    diag = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.1, 0.1, 0.01]))
+
+    kf0 = _keyframe(load_factor_graph, 0, 0.0)
+    fg.add_prior_factor(kf0)
+    fg.update_graph(kf0)
+
+    # A component disconnected from X(0) — genuinely indeterminate.
+    kf1 = _keyframe(load_factor_graph, 1, 1.0)
+    fg.graph.add(gtsam.BetweenFactorPose2(X(1), X(2), gtsam.Pose2(1.0, 0.0, 0.0), diag))
+    fg.values.insert(X(1), gtsam.Pose2())
+    fg.values.insert(X(2), gtsam.Pose2())
+    fg.keyframes.append(kf1)
+    fg.update_graph()  # must not raise
+
+    estimate = fg.isam.calculateEstimate()
+    assert estimate.exists(X(1)) and estimate.exists(X(2)), (
+        "the failed update's values were not retained — the cascade claim would hold"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 5 (P1-3): verify_pcm must not crash on a candidate without covariance
+# ---------------------------------------------------------------------------
+
+def _candidate(source_key, target_key, cov):
+    """A mutually consistent PCM candidate: the transform agrees with the poses,
+    so md == 0 and the whole set forms one clique when cov is present."""
+    source_pose = gtsam.Pose2(float(source_key), 0.0, 0.0)
+    target_pose = gtsam.Pose2(float(target_key), 0.0, 0.0)
+    return SimpleNamespace(
+        source_key=source_key,
+        target_key=target_key,
+        source_pose=source_pose,
+        target_pose=target_pose,
+        estimated_transform=target_pose.between(source_pose),
+        cov=cov,
+        inserted=False,
+    )
+
+
+def test_verify_pcm_skips_candidates_without_covariance(load_factor_graph):
+    """P1-3: cov is None whenever nssm.cov_samples == 0, and np.linalg.solve
+    raises LinAlgError on it. Claim no consistency instead of crashing."""
+    fg = _make_fg(load_factor_graph)
+    queue = [_candidate(i, 0, None) for i in range(3)]
+
+    assert fg.verify_pcm(queue, 3) == []
+
+
+def test_verify_pcm_still_matches_when_covariance_is_present(load_factor_graph):
+    """The None guard must not swallow real candidates."""
+    fg = _make_fg(load_factor_graph)
+    queue = [_candidate(i, 0, _identity_cov()) for i in range(3)]
+
+    assert fg.verify_pcm(queue, 3) != []
+
+
+# ---------------------------------------------------------------------------
+# Test 6 (P1-14): the NSSM queue must age out without a new loop closure
+# ---------------------------------------------------------------------------
+
+def test_update_graph_ages_out_stale_loop_closure_candidates(load_factor_graph):
+    """P1-14: trimming used to happen only when a NEW candidate arrived, so a
+    vehicle leaving a loopy area kept the queue non-empty forever — pinning
+    update_graph's pose refresh to the O(N) full-history path."""
+    fg = _make_fg(load_factor_graph)
+
+    kf0 = _keyframe(load_factor_graph, 0, 0.0)
+    fg.add_prior_factor(kf0)
+    fg.update_graph(kf0)
+
+    # A candidate from long ago, and no new loop closure will ever arrive.
+    fg.nssm_queue = [_candidate(0, 0, _identity_cov())]
+
+    for i in range(1, fg.pcm_queue_size + 3):
+        kf = _keyframe(load_factor_graph, i, float(i))
+        fg.add_odometry_factor(kf)
+        fg.update_graph(kf)
+
+    assert fg.nssm_queue == [], (
+        "stale candidate never aged out; the pose refresh stays on the O(N) path"
     )
 
 

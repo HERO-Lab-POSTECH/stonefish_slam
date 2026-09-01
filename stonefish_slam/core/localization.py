@@ -216,7 +216,9 @@ class Localization:
             fcov = MinCovDet(store_precision=False, support_fraction=0.8).fit(
                 sample_transforms
             )
-        except ValueError:
+        except (ValueError, np.linalg.LinAlgError):
+            # LinAlgError is NOT a ValueError subclass — a singular scatter
+            # matrix propagated straight out of the ROS2 callback.
             return "Failed to calculate covariance", None, None, None
 
         # Extract mean and covariance

@@ -350,12 +350,18 @@ void OctreeMapping::insert_point_cloud_with_intensity_and_logodds(
 
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_prob = node ? node->getOccupancy() : 0.5;
+                double current_log_odds = node ? node->getLogOdds() : 0.0;
 
                 double weight = intensity_to_weight(intensity);
                 double new_prob = (obs_count * current_prob + weight) / (obs_count + 1);
 
                 double new_log_odds = std::log(new_prob / (1.0 - new_prob + 1e-10));
-                tree_->updateNode(key, static_cast<float>(new_log_odds), false);
+                // updateNode(key, float, bool) is OctoMap's ADDITIVE API: it adds
+                // the value to the node's current log-odds. Passing an absolute
+                // log-odds accumulates instead of setting, so repeated observations
+                // drift to the clamping bounds rather than holding the target
+                // probability. Convert to a delta, exactly as the IWLO branch does.
+                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
 
             } else if (update_method_ == UpdateMethod::IWLO) {
                 // IWLO: Apply alpha decay to ray_processor's log-odds
@@ -412,12 +418,18 @@ void OctreeMapping::insert_point_cloud_with_intensity_and_logodds(
 
                 octomap::OcTreeNode* node = tree_->search(key);
                 double current_prob = node ? node->getOccupancy() : 0.5;
+                double current_log_odds = node ? node->getLogOdds() : 0.0;
 
                 double weight = intensity_to_weight(intensity);
                 double new_prob = (obs_count * current_prob + weight) / (obs_count + 1);
 
                 double new_log_odds = std::log(new_prob / (1.0 - new_prob + 1e-10));
-                tree_->updateNode(key, static_cast<float>(new_log_odds), false);
+                // updateNode(key, float, bool) is OctoMap's ADDITIVE API: it adds
+                // the value to the node's current log-odds. Passing an absolute
+                // log-odds accumulates instead of setting, so repeated observations
+                // drift to the clamping bounds rather than holding the target
+                // probability. Convert to a delta, exactly as the IWLO branch does.
+                tree_->updateNode(key, static_cast<float>(new_log_odds - current_log_odds), false);
 
             } else if (update_method_ == UpdateMethod::IWLO) {
                 // IWLO: Apply alpha decay to ray_processor's log-odds
@@ -532,6 +544,15 @@ void OctreeMapping::set_clamping_thresholds(double min, double max) {
 }
 
 void OctreeMapping::set_adaptive_params(bool enable, double threshold, double max_ratio) {
+    // threshold is compared against occupancy probabilities AND used as a
+    // divisor in six places; mapping_3d.py forwards the YAML value unclamped,
+    // so 0.0 would write NaN into the octree permanently.
+    if (threshold <= 0.0 || threshold > 1.0) {
+        throw std::invalid_argument("Invalid adaptive threshold (must be in (0, 1])");
+    }
+    if (max_ratio < 0.0) {
+        throw std::invalid_argument("Invalid adaptive max_ratio (must be >= 0)");
+    }
     adaptive_update_ = enable;
     adaptive_threshold_ = threshold;
     adaptive_max_ratio_ = max_ratio;

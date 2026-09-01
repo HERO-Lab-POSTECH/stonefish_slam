@@ -9,6 +9,8 @@ Extracted from slam_legacy.py during refactoring (2025-11-30).
 
 from __future__ import annotations
 
+import logging
+
 import gtsam
 import numpy as np
 from typing import List
@@ -174,6 +176,29 @@ class FactorGraph:
         )
         self.graph.add(factor)
 
+    def _trim_nssm_queue(self, current_key: int) -> None:
+        """Drop loop-closure candidates older than the PCM window.
+
+        Args:
+            current_key: Keyframe index the window is measured back from
+        """
+        while (
+            self.nssm_queue
+            and current_key - self.nssm_queue[0].source_key > self.pcm_queue_size
+        ):
+            self.nssm_queue.pop(0)
+
+    def _default_covariance(self) -> np.ndarray:
+        """Covariance to stand in for a marginal GTSAM could not compute.
+
+        Returns:
+            np.ndarray: 3x3 covariance from the odometry noise model, or a
+            conservative identity when noise models have not been set yet.
+        """
+        if self.odom_model is not None:
+            return np.asarray(self.odom_model.covariance())
+        return np.eye(3)
+
     def update_graph(self, keyframe: Keyframe = None) -> None:
         """Update ISAM2 with new factors and optimize.
 
@@ -184,10 +209,37 @@ class FactorGraph:
         if keyframe:
             self.keyframes.append(keyframe)
 
-        # Push factors to ISAM2
-        self.isam.update(self.graph, self.values)
-        self.graph.resize(0)
-        self.values.clear()
+        # Push factors to ISAM2.
+        #
+        # A degenerate linearization makes GTSAM raise (IndeterminantLinear-
+        # SystemException surfaces as RuntimeError through the pybind layer),
+        # which would otherwise kill the node mid-mission. Catching it is only
+        # half the fix: the pending graph/values MUST still be cleared, or the
+        # offending factors stay queued and every later keyframe re-pushes them,
+        # leaving ISAM2 permanently failing for the rest of the node's life.
+        # Hence the finally — the clear happens on both paths.
+        try:
+            self.isam.update(self.graph, self.values)
+        except RuntimeError as e:
+            logging.error("[FactorGraph] ISAM2 update failed, skipping this tick "
+                          "(pending factors dropped): %s", e)
+            # The keyframe was appended above and keeps its dead-reckoning pose.
+            # Give it a covariance too — verify_pcm and add_icp_factor both have
+            # None guards, but leaving None here would silently degrade every
+            # loop closure the frame takes part in.
+            if self.keyframes and self.keyframes[-1].cov is None:
+                self.keyframes[-1].cov = self._default_covariance()
+            return
+        finally:
+            self.graph.resize(0)
+            self.values.clear()
+
+        # Drop loop-closure candidates that have aged out of the PCM window.
+        # Trimming used to happen only when a NEW candidate arrived, so once the
+        # vehicle left a loopy area the queue never emptied and the pose refresh
+        # below stayed pinned to the O(N) full-history path for the rest of the
+        # mission — exactly the cost the window was introduced to avoid.
+        self._trim_nssm_queue(self.current_key)
 
         # Update keyframe poses — only the most recent window each tick, unless
         # a pending loop closure (nssm_queue) may have moved older poses.
@@ -203,8 +255,20 @@ class FactorGraph:
             pose = values.atPose2(X(x))
             self.keyframes[x].update(pose)
 
-        # Update latest covariance
-        cov = self.isam.marginalCovariance(X(n - 1))
+        # Update latest covariance. A marginal can be indeterminate even when
+        # the update above succeeded; leaving cov as None then crashes
+        # verify_pcm's np.linalg.solve later, so substitute the odometry noise
+        # model's own covariance rather than propagating a None.
+        try:
+            cov = self.isam.marginalCovariance(X(n - 1))
+        except (RuntimeError, IndexError) as e:
+            # IndexError is not redundant: after a failed update the variable is
+            # in theta_ but may never have been eliminated, and GTSAM then
+            # raises "Requested the BayesTree clique for a key that is not in
+            # the BayesTree" rather than the indeterminate-system RuntimeError.
+            cov = self._default_covariance()
+            logging.warning("[FactorGraph] marginalCovariance(X(%d)) failed, using the "
+                            "odometry noise model instead: %s", n - 1, e)
         self.keyframes[-1].update(pose, cov)
 
         # Update poses in pending loop closures for PCM
@@ -221,11 +285,7 @@ class FactorGraph:
             icp_result: ICP result containing loop closure
         """
         # Update queue (remove old entries)
-        while (
-            self.nssm_queue
-            and icp_result.source_key - self.nssm_queue[0].source_key > self.pcm_queue_size
-        ):
-            self.nssm_queue.pop(0)
+        self._trim_nssm_queue(icp_result.source_key)
 
         # Add new candidate
         self.nssm_queue.append(icp_result)
@@ -271,6 +331,14 @@ class FactorGraph:
         # Build consistency graph
         G = defaultdict(list)
         for (a, ret_il), (b, ret_jk) in combinations(zip(range(len(queue)), queue), 2):
+            # Same guard add_icp_factor already has: cov is None whenever the
+            # ICP path was configured to skip covariance sampling
+            # (nssm.cov_samples == 0). Without an uncertainty there is no
+            # Mahalanobis distance to compare, so claim no consistency for this
+            # pair rather than letting np.linalg.solve raise LinAlgError.
+            if ret_jk.cov is None:
+                continue
+
             pi = ret_il.target_pose
             pj = ret_jk.target_pose
             pil = ret_il.estimated_transform

@@ -73,6 +73,37 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **WEIGHTED_AVERAGE 3D 갱신법이 목표 확률에서 발산** (`fix/loc-critical`, 런타임 수치
+  변경): `cpp/octree_mapping.cpp`가 절대 log-odds를 OctoMap의 **가산** API
+  `updateNode(key, float, bool)`에 넘겨, 같은 관측을 반복하면 확률이 유지되지 않고
+  clamp 상·하한으로 밀려났다(실측: 강도 255는 0.8176→0.97, 강도 40은 0.1928→0.03).
+  인접 IWLO 분기와 같이 delta로 변환. `config/mapping/method_weighted_avg.yaml`이 이
+  경로를 직접 선택하므로 사용자 도달 가능
+- **순수 Python ICP fallback이 `config/icp.yaml`을 무시** (`cpp/pcl.py`): `loadFromYaml`이
+  print 한 줄짜리 no-op이라 libpointmatcher 없는 환경에서 오퍼레이터 튜닝이 조용히
+  버려졌다. 이 fallback이 실제 구현하는 두 값(`MaxDistOutlierFilter.maxDist`,
+  `CounterTransformationChecker.maxIterationCount`)만 반영하고 나머지 키는 이름을 찍어
+  경고한다. `TrimmedDistOutlierFilter.ratio`는 **의도적으로 미반영** — 옮기면 P4a에서
+  고친 centroid 편향 버그가 되살아난다
+- **ISAM2 예외가 SLAM 노드를 미션 중간에 종료**: `isam.update()`·`marginalCovariance()`가
+  무가드였다. 가드하면서 대기 중인 `graph`/`values`를 `finally`로 반드시 비운다 —
+  안 비우면 오염된 factor가 큐에 남아 매 키프레임 재push되고 ISAM2가 노드 수명 내내
+  영구 실패한다. `marginalCovariance` 실패 시 odometry noise model의 공분산을 대입해
+  `verify_pcm`의 2차 크래시를 막는다(`RuntimeError`·`IndexError` 양쪽 포착)
+- **NSSM 큐가 루프 없는 구역에서 영구 고착**: `nssm_queue`가 새 성공적 loop closure로만
+  trim돼, 차량이 루프 없는 구역으로 나가면 큐가 비지 않아 `update_graph`의 pose 갱신이
+  남은 미션 내내 O(N) 전체 이력 경로로 되돌아갔다. `update_graph`에서도 같은 기준으로
+  aging
+- **잠복 크래시·계약 결함 6건**: `verify_pcm`이 `cov=None` 후보에서 LinAlgError
+  (`nssm.cov_samples: 0` 조합) · `MinCovDet.fit`의 `LinAlgError`가 `except ValueError`를
+  빠져나가 ROS2 콜백 밖으로 전파 · `fft_localization_node`의 무가드
+  `np.frombuffer().reshape()` · `set_adaptive_params`만 입력 검증 부재
+  (`adaptive_threshold`는 6곳 나눗셈 분모, `0.0`이면 NaN이 옥트리에 영구 기록) ·
+  `RayProcessor` 바인딩의 `py::keep_alive<1,2>()` 누락(non-owning raw pointer의
+  use-after-free) · `slam.py:1254`가 `ret2` 대신 `ret`에 대입(형제 정답 `:1158`)
+- `ray_processor.cpp`의 intensity 임계 비교를 strict `>`로 통일 — 생성 시점(`:314`)과
+  merge 시점(`:179`)이 갈려 있었다. `final_log_odds = free_sum + occupied_sum`이라 합은
+  동일하므로 동작 보존적 일관성 정리이고, 나머지 전 경로가 이미 strict `>`
 - `stonefish_slam/__init__.py`의 `__all__`에서 누락된 `pcl` 모듈 추가 —
   `cpp/__init__.py`(cfar·dda_traversal·octree_mapping·ray_processor·pcl 5종 모두 import+export)와
   정합
