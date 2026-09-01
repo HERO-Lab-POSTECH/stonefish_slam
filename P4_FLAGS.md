@@ -224,7 +224,14 @@ P3(기업표준 구조·명명 통일·재구조화·모듈화)에서 **동작 �
 
 ## Phase 3 `chore/dead-code-cleanup` 의 의도적 미포함 (2026-09-01)
 
-- **`profiling_enabled` 가 게이트하는 `perf_counter` 계측 체인** — P1-8 이 두 통계
+- **✅ ~~`profiling_enabled` 가 게이트하는 `perf_counter` 계측 체인~~ — `feat/loc-instrumentation` 에서 판단 완료**: `MappingProfiler` 는 걷어냈고(빈 CSV 부작용 제거, 사용자 결정), **`perf_counter` 체인은 남긴다**. 이유는
+  이연 당시와 같다 — `t_ray_total`·`t_octree_total` 이 헬퍼 3개의 반환
+  시그니처에 박혀 있어 떼어내는 것이 시그니처 수술이고 그건 §4.4(god-method
+  분해)의 범위다. 남기는 이유는 이제 `mapping_3d.py` 주석에도 있다.
+  소비자를 잃은 `enable_profiling` ROS 파라미터도 함께 제거했다.
+  아래는 이연 당시 기록(보존).
+
+- **(이력) `profiling_enabled` 가 게이트하는 `perf_counter` 계측 체인** — P1-8 이 두 통계
   딕셔너리(`performance_stats`·`profiling_data`)를 지우면서 이 계측의 **소비자가
   사라졌다**. 그런데 `t_ray_total`·`t_octree_total` 은 `_process_bearing_rays` 등
   헬퍼 3개의 **반환 시그니처에 박혀** 있어 제거가 시그니처 수술이 되고, 그건 계획
@@ -251,3 +258,33 @@ P3(기업표준 구조·명명 통일·재구조화·모듈화)에서 **동작 �
   있었으나 이 트리에서 **살아 있음이 확인돼** 삭제하지 않았다. 전자는 PR #18 이
   추가한 `test_cpp_extensions.py` 가 3곳에서 쓰고, 후자는 `mapping_3d.py:235` 가
   설정한다. 계획의 "호출자 0" 은 #18·#19 머지 이전 기준이었다.
+
+## Phase 3 `feat/loc-instrumentation` 의 실기 sign-off 대상
+
+계측은 **값을 세기만 하고 판정을 바꾸지 않는다.** 따라서 정적 게이트로 확인할 수
+있는 것은 배선의 존재뿐이고(테스트 5개가 AST 로 고정), 계측이 답하려던 질문 자체는
+전부 GPU 머신 런타임에서 판정된다.
+
+- **[I1] `ssm_disabled_count` 가 키프레임 총수와 같은가** — 같으면 "icp 0%" 의 원인이
+  알고리즘이 아니라 `ssm.enable: false` 라는 설정임이 확정된다. **다른 모든 계측의
+  전제**이므로 이것부터 1회 실행으로 확인한다.
+- **[I2·I3] `icp_rate` 와 factor 구성비** — `ssm.enable:=true` 로 켠 뒤 분모 있는
+  비율을 처음으로 얻는다.
+- **[I6] `reject_rot` 이 0 인가** — `use_dr_rotation: true` 에서 회전 오차는 항등 0
+  이므로 0 이어야 한다. 0 이 아니면 회전 게이트 사문화 가설이 틀린 것이다.
+- **[I7] 기각 사례가 `|dr_ty|` 큰 구간에 몰리는가** — 몰리면 ty 부호 오류, 균등하면
+  부호는 정상이고 게이트가 단순히 빡빡한 것이다.
+- **[I8·I9] `rot_peak`·`trans_peak`·공분산의 분포** — P1-5 품질 게이트의 임계값은
+  이 분포 없이는 정할 수 없다. 공분산이 DR 불일치를 예측하면 게이트를 공분산 기반으로
+  설계할 수 있다(U2).
+- **[I10] FFT 회전이 쓸 만한가** — `use_dr_rotation` 을 끌 수 있는지 판단할 유일한
+  근거다. 끄기 전에 `max_rotation_error` 5° 를 먼저 재검토해야 한다(P1-6 참조 —
+  주석만 고쳤고 값은 owner 결정으로 남겼다).
+- **[I11] 병진 스케일 비율의 중앙값** — 1 에서 유의하게 벗어나면 점군 척도가 어긋나
+  있다는 뜻이다. **방향은 예단하지 않는다** — LOC-3 교정에 따라 압축일 수도 팽창일
+  수도 있어 값만 남겼다. 이 판정이 `feature_extraction.py` 투영 수정의 근거가 된다.
+
+### 계측이 답하지 않는 것
+`[INSTR]` 로그는 **경로와 분포**를 준다. 궤적 정확도 자체는 I13(`traj_2d_error_
+accumulator` 의 기존 `mean_err`)이 수정 전후 비교로 답한다 — 신규 코드가 없으므로
+이 브랜치는 그 지표를 건드리지 않는다.
