@@ -255,7 +255,11 @@ class FactorGraph:
         # model's own covariance rather than propagating a None.
         try:
             cov = self.isam.marginalCovariance(X(n - 1))
-        except RuntimeError as e:
+        except (RuntimeError, IndexError) as e:
+            # IndexError is not redundant: after a failed update the variable is
+            # in theta_ but may never have been eliminated, and GTSAM then
+            # raises "Requested the BayesTree clique for a key that is not in
+            # the BayesTree" rather than the indeterminate-system RuntimeError.
             cov = self._default_covariance()
             logging.warning("[FactorGraph] marginalCovariance(X(%d)) failed, using the "
                             "odometry noise model instead: %s", n - 1, e)

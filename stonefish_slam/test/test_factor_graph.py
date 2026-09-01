@@ -1,9 +1,14 @@
-"""Tests for FactorGraph robust noise model wiring (T-C2).
+"""Tests for FactorGraph.
 
-Tests verify:
+Robust noise model wiring (T-C2):
 1. create_robust_full_noise_model uses c=3.0 (not 1.0)
 2. add_icp_factor accepts robust=True flag and applies robust model
 3. add_loop_closure calls add_icp_factor with robust=True
+
+Failure handling (P0-3, P1-3, P1-14):
+4. a failed ISAM2 update neither escapes nor poisons the pending factor queue
+5. verify_pcm tolerates a candidate with no covariance
+6. the NSSM queue ages out without a new loop closure
 """
 from types import SimpleNamespace
 
@@ -226,6 +231,45 @@ def test_isam_failure_is_survivable_and_leaves_no_poisoned_queue(load_factor_gra
 
     assert fg.keyframes[-1].cov is not None, "recovered update left no covariance"
     assert fg.graph.size() == 0 and fg.values.size() == 0
+
+
+def test_isam_recovers_from_a_real_indeterminate_system(load_factor_graph):
+    """The same guard, driven by GTSAM itself rather than an injected raise.
+
+    _FailOnceISAM raises BEFORE the real update runs, so it cannot say whether
+    ISAM2 is usable afterwards — only that our own buffers were cleared. Here
+    the degenerate system is real: a BetweenFactor with no prior anywhere leaves
+    the linear system indeterminate. Measured 2026-09-01: ISAM2 does recover,
+    but the factors submitted in the failed update do NOT take effect (X(1)
+    stays at its initial value once a prior is added), so dropping the pending
+    buffer costs one constraint. That is the accepted price of not poisoning
+    the queue.
+    """
+    fg = _make_fg(load_factor_graph)
+    X = load_factor_graph.X  # factor_graph re-exports it from utils.conversions
+
+    kf0 = _keyframe(load_factor_graph, 0, 0.0)
+    kf1 = _keyframe(load_factor_graph, 1, 1.0)
+    fg.keyframes.append(kf0)
+
+    diag = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.1, 0.1, 0.01]))
+    fg.graph.add(gtsam.BetweenFactorPose2(X(0), X(1), gtsam.Pose2(1.0, 0.0, 0.0), diag))
+    fg.values.insert(X(0), gtsam.Pose2())
+    fg.values.insert(X(1), gtsam.Pose2())
+
+    fg.update_graph(kf1)  # must not raise
+
+    assert fg.graph.size() == 0 and fg.values.size() == 0
+
+    # Next tick with a prior must succeed. Add the factor only — the VALUES from
+    # the failed update do survive inside ISAM2, so re-inserting X(0) would
+    # raise "key already exists". Production never hits that: update_graph
+    # appends the keyframe before the try, so the next add_odometry_factor
+    # inserts a fresh key.
+    fg.graph.add(gtsam.PriorFactorPose2(X(0), gtsam.Pose2(), diag))
+    fg.update_graph()
+
+    assert fg.keyframes[-1].cov is not None
 
 
 # ---------------------------------------------------------------------------
