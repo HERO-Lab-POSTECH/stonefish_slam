@@ -272,6 +272,56 @@ def test_isam_recovers_from_a_real_indeterminate_system(load_factor_graph):
     assert fg.keyframes[-1].cov is not None
 
 
+def test_failed_update_leaves_the_keyframe_with_a_covariance(load_factor_graph):
+    """The early return must not leave `keyframes[-1].cov` as None.
+
+    verify_pcm and add_icp_factor both guard against None, so this is silent
+    degradation rather than a crash — every loop closure the frame takes part in
+    falls back to the fixed noise model without saying so.
+    """
+    fg = _make_fg(load_factor_graph)
+
+    kf0 = _keyframe(load_factor_graph, 0, 0.0)
+    fg.add_prior_factor(kf0)
+    fg.isam = _FailOnceISAM(fg.isam)
+    fg.update_graph(kf0)
+
+    assert fg.keyframes[-1].cov is not None
+
+
+def test_a_failed_update_still_registers_its_values_in_isam(load_factor_graph):
+    """Pins the GTSAM semantics the P0-3 design depends on.
+
+    A review of this branch claimed the guard causes an unrecoverable cascade:
+    "X(k) is never added to ISAM2, so the next tick's BetweenFactor(X(k),
+    X(k+1)) raises 'key does not exist'". Measured 2026-09-01, that is not what
+    GTSAM does — `update()` pushes the new factors and inserts theta_ BEFORE the
+    elimination that throws, so both survive the failure (factors 1 -> 2,
+    values 1 -> 3). Dropping our own pending buffer therefore cannot orphan a
+    variable. Pinned here so the claim is not re-litigated from reasoning.
+    """
+    fg = _make_fg(load_factor_graph)
+    X = load_factor_graph.X
+    diag = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.1, 0.1, 0.01]))
+
+    kf0 = _keyframe(load_factor_graph, 0, 0.0)
+    fg.add_prior_factor(kf0)
+    fg.update_graph(kf0)
+
+    # A component disconnected from X(0) — genuinely indeterminate.
+    kf1 = _keyframe(load_factor_graph, 1, 1.0)
+    fg.graph.add(gtsam.BetweenFactorPose2(X(1), X(2), gtsam.Pose2(1.0, 0.0, 0.0), diag))
+    fg.values.insert(X(1), gtsam.Pose2())
+    fg.values.insert(X(2), gtsam.Pose2())
+    fg.keyframes.append(kf1)
+    fg.update_graph()  # must not raise
+
+    estimate = fg.isam.calculateEstimate()
+    assert estimate.exists(X(1)) and estimate.exists(X(2)), (
+        "the failed update's values were not retained — the cascade claim would hold"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test 5 (P1-3): verify_pcm must not crash on a candidate without covariance
 # ---------------------------------------------------------------------------

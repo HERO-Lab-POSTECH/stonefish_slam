@@ -223,6 +223,12 @@ class FactorGraph:
         except RuntimeError as e:
             logging.error("[FactorGraph] ISAM2 update failed, skipping this tick "
                           "(pending factors dropped): %s", e)
+            # The keyframe was appended above and keeps its dead-reckoning pose.
+            # Give it a covariance too — verify_pcm and add_icp_factor both have
+            # None guards, but leaving None here would silently degrade every
+            # loop closure the frame takes part in.
+            if self.keyframes and self.keyframes[-1].cov is None:
+                self.keyframes[-1].cov = self._default_covariance()
             return
         finally:
             self.graph.resize(0)

@@ -34,6 +34,30 @@
   - ~~`pcl.py` ICP.compute의 `T_delta = np.eye(3, dtype=np.float32)` 다운캐스트가 근본 수정 후보~~ → **반박**: float32/float64 동일 결과. 실제 원인은 `outlier_ratio=0.8`의 비대칭 trim(위 해결 노트).
   - `outlier_ratio=0.8`이 7점 점군에서 2점을 버리는데, 순수 shift라 → centroid 추정 불안정. **이것이 진짜 근본원인이었음**(0.8→1.0으로 해결).
 
+## `fix/loc-critical`의 GPU 머신 sign-off 대상 (2026-09-01)
+
+> 이 브랜치의 수정은 전부 정적 테스트로 고정했으나, 아래 4건은 **닫힌루프 실기에서만
+> 관측 가능한 효과**를 갖는다. 결함 SSOT는
+> `.hq/community/posts/finding/008-2026-09-01-code-health-audit.md`이고 여기는 sign-off
+> 항목만 등재한다(중복 기재 금지).
+
+- **P0-4 WEIGHTED_AVERAGE delta 변환** — 3D 맵 확률값이 바뀐다. 단위 테스트는 수학만
+  고정하고 맵 품질은 못 본다. 확인: `config/mapping/method_weighted_avg.yaml`로
+  `slam.launch.py`를 돌려 OctoMap이 clamp 상·하한(0.97/0.03)에 몰리지 않고 강도에
+  비례해 분포하는지. ⚠️ shipped 기본값은 IWLO라 이 경로는 명시 선택 시에만 탄다.
+- **P0-3 ISAM2 실패 후 저하 경로** — 실데이터에서 이 예외가 실제로 나는지 자체가
+  미측정이다. 확인: 실해역 bag 재생 중
+  `[FactorGraph] ISAM2 update failed` / `marginalCovariance(...) failed` 로그가 뜨는지,
+  뜬다면 그 이후 궤적이 이어지는지. 잃는 것은 그 틱의 제약 하나다(실측 근거는
+  `test_isam_recovers_from_a_real_indeterminate_system` 주석).
+- **P1-14 NSSM 큐 aging** — `update_graph`의 pose 갱신이 O(N) 전체 경로로 되돌아가는
+  빈도가 줄어든다. 확인: 장기 주행에서 키프레임당 `update_graph` 소요가 N에 비례해
+  증가하지 않는지(계측은 다음 브랜치 `feat/loc-instrumentation` I1~I3).
+- **P0-1 순수 Python ICP fallback** — 프로덕션 이미지는 `.so`를 포함하므로 이 경로를
+  타지 않는다. `.so` 없는 환경에서만 동작이 바뀌며, 그 환경이 실기에 쓰이면
+  `max_correspondence_distance`·`max_iterations`가 이제 `icp.yaml`을 따른다는 점을
+  확인한다.
+
 ## fusion.ema_fusion — observation_count 인자 미사용 — **2026-09-01 판정: 실버그 아님, 순수 정리 건**
 
 > **적대 검증 결과(SLAM-M2, PARTIAL)**: "실버그로 승격"은 성립하지 않는다. 두 판정이 갈리려면

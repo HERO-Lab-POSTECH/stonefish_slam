@@ -81,6 +81,10 @@ def test_loadfromyaml_parses_the_shipped_config(load_module):
     # Structure compatibility against the REAL config/icp.yaml — the nested
     # libpointmatcher layout (list-of-single-key-mappings, bare component name
     # for errorMinimizer) must resolve to its stated values.
+    #
+    # NOT a discriminating test: shipped icp.yaml repeats the defaults, so this
+    # also passes on a no-op loadFromYaml. The discriminator is the tmp_path
+    # test above; this one pins that the nested layout does not raise.
     m = _pcl(load_module)
     icp = m.ICP()
     icp.loadFromYaml(str(CONFIG_ICP_YAML))
@@ -94,6 +98,10 @@ def test_loadfromyaml_keeps_outlier_ratio_at_one(load_module):
     # TrimmedDistOutlierFilter.ratio: 0.8 is present in config/icp.yaml and must
     # NOT be mapped — a fixed trim below the true overlap biases the Kabsch
     # centroid on this path (the bug P4a fixed; see ICP.__init__).
+    #
+    # A regression pin, not a discriminator: it also holds on a no-op
+    # loadFromYaml. Its job is to fail if someone later "completes" the mapping
+    # by wiring ratio through.
     m = _pcl(load_module)
     icp = m.ICP()
     icp.loadFromYaml(str(CONFIG_ICP_YAML))
