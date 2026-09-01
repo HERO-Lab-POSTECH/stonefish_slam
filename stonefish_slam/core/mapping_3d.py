@@ -238,6 +238,12 @@ class SonarMapping3D:
                 ray_config.use_range_weighting = config['use_range_weighting']
                 ray_config.lambda_decay = config['lambda_decay']
                 ray_config.enable_gaussian_weighting = config['enable_gaussian_weighting']
+                # Forwarding this is not optional: the C++ struct carries its own
+                # default, so without the line the operator's knob had no effect
+                # on the production path (dda_config below did forward it).
+                # Read from config rather than self.* — self.gaussian_sigma_factor
+                # is not assigned until later in __init__.
+                ray_config.gaussian_sigma_factor = config.get('gaussian_sigma_factor', 2.5)
                 ray_config.voxel_resolution = self.voxel_resolution
                 ray_config.bearing_step = config['bearing_step']
                 ray_config.intensity_threshold = self.intensity_threshold

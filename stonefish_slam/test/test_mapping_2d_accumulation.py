@@ -143,3 +143,31 @@ def test_second_observation_blends_with_ema_alpha(make_mapper):
     expected = 0.3 * _normalized(178.0) + 0.7 * 255.0
     assert m.global_map_accum.max() == pytest.approx(expected, abs=0.1), \
         f'EMA 재관측 값은 {expected:.2f} (alpha=0.3·threshold=0.0 배선)'
+
+
+def test_farthest_mapped_point_reaches_range_max(make_mapper):
+    """P1-1: local_x_raw에 range_min 항이 빠져 전 맵 점이 차량 쪽으로 밀렸다.
+
+    polar_to_cartesian_image는 행을 x = range_max - range_resolution*YY로 만들고
+    range_resolution = (range_max - range_min)/rows다. 따라서 최상단 행은
+    range_max에 있어야 하는데, range_min 항이 없으면 최원거리가
+    rows*range_resolution = range_max - range_min에서 멈춘다.
+
+    tilt=0, pose=원점이므로 global_x가 곧 slant range다.
+    실측(range_max=15.0, range_min=0.5, rows=100 -> res=0.145):
+        수정 후 99.5*0.145 + 0.5 = 14.9275  (map_row 649)
+        수정 전 99.5*0.145       = 14.4275  (map_row 644)
+    """
+    m = make_mapper()
+    assert m._accumulate_keyframe_into_map(
+        _Pose(), _uniform_polar(255), sample_step=1) is True
+
+    rows = np.nonzero(m.global_map_count.sum(axis=1))[0]
+    farthest_x = rows.max() * m.map_resolution + m.min_x
+
+    range_resolution = (m.sonar_range - m.range_min) / 100
+    expected = m.sonar_range - 0.5 * range_resolution
+
+    # 맵 격자 한 칸(0.1 m) 오차 허용 — map_row가 int로 잘린다.
+    assert farthest_x == pytest.approx(expected, abs=m.map_resolution), \
+        f'최원거리가 {farthest_x:.3f} m, range_max 부근({expected:.3f} m)이어야 한다'

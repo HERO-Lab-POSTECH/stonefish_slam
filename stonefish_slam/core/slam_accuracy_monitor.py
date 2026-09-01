@@ -235,7 +235,7 @@ class TrajPathGtAteMonitor(Node):
         self.est_buf.append(est_xy)
         self.gt_buf.append(gt_xy)
 
-        ate_rmse, drift_total, acc_total = self._compute_ate_and_accuracy()
+        ate_rmse, drift_window, acc_window = self._compute_ate_and_accuracy()
 
         # ---- (C) Path metric ----
         mean_err_path, acc_path = self._compute_path_metric(traj_frame, msg, pts_xyz)
@@ -245,7 +245,8 @@ class TrajPathGtAteMonitor(Node):
                 f"err_gt={err_gt:.3f}m | "
                 f"Acc_gt@{self.r_gt:.3f}m={acc_gt:.2f}% | "
                 f"Acc_gt@{self.r_gt_024:.3f}m={acc_gt_024:.2f}% | "
-                f"ATE_RMSE={ate_rmse:.3f}m | drift_total={drift_total:.3f}% | acc_total={acc_total:.3f}% | "
+                f"ATE_RMSE={ate_rmse:.3f}m | drift_window={drift_window:.3f}% | "
+                f"acc_window={acc_window:.3f}% | dist_total={self.total_distance:.1f}m | "
                 f"mean_err_path={mean_err_path:.3f}m | Acc_path@{self.r_path:.3f}m={acc_path:.2f}%"
             )
 
@@ -304,10 +305,25 @@ class TrajPathGtAteMonitor(Node):
         errs = np.linalg.norm(aligned - dst, axis=1)
         rmse = float(np.sqrt(np.mean(errs * errs)))
 
-        denom = max(self.total_distance, self.distance_epsilon)
-        drift_total = 100.0 * (rmse / denom)
-        acc_total = clamp(100.0 - drift_total, 0.0, 100.0)
-        return rmse, float(drift_total), float(acc_total)
+        # Numerator and denominator must span the SAME samples. rmse comes from
+        # est_buf/gt_buf, which are rolling deques (maxlen = ate_window_size) and
+        # are re-aligned every call; dividing that by the never-reset
+        # total_distance made the ratio shrink for the rest of the mission no
+        # matter how badly the estimate drifted — drift -> 0%, accuracy -> 100%,
+        # the opposite of what a sea-trial evaluation needs. Use the GT path
+        # length over the window instead. With ate_window_size == 0 the deques
+        # are unbounded and this equals the whole-run distance.
+        gt_path_length = float(np.linalg.norm(np.diff(dst, axis=0), axis=1).sum())
+        if gt_path_length <= self.distance_epsilon:
+            # Drift-per-distance is undefined when the window covers no motion
+            # (station keeping). The old cumulative denominator hid this because
+            # it never shrank; clamping instead would report a confident 0%
+            # accuracy for a vehicle that is simply holding position.
+            return rmse, float("nan"), float("nan")
+
+        drift_window = 100.0 * (rmse / gt_path_length)
+        acc_window = clamp(100.0 - drift_window, 0.0, 100.0)
+        return rmse, float(drift_window), float(acc_window)
 
     def _compute_path_metric(self, traj_frame: str, msg: PointCloud2, pts_xyz: np.ndarray) -> Tuple[float, float]:
         if self.path_xy is None or self.path_xy.shape[0] < 1:

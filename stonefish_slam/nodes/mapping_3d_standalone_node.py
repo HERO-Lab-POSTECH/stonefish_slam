@@ -36,14 +36,14 @@ class Mapping3DStandaloneNode(Node):
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
 
         # Sonar hardware parameters (defaults match sonar.yaml)
-        self.declare_parameter('sonar.range_max', 15.0)
+        self.declare_parameter('sonar.range_max', 40.0)
         self.declare_parameter('sonar.range_min', 0.5)
         self.declare_parameter('sonar.horizontal_fov', 130.0)
         self.declare_parameter('sonar.vertical_fov', 20.0)
         self.declare_parameter('sonar.num_beams', 512)
         self.declare_parameter('sonar.num_bins', 500)
         self.declare_parameter('sonar.sonar_position', [0.0, 0.0, 0.0])
-        self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
+        self.declare_parameter('sonar.sonar_tilt_deg', 30.0)
 
         # 3D Mapping parameters (from slam.yaml mapping_3d section)
         self.declare_parameter('mapping_3d.map_3d_voxel_size', 0.2)

@@ -107,7 +107,11 @@ class FeatureExtractionNode(Node):
             points_xyz[:, 0:2] = points
 
         header = Header()
-        header.stamp = self.get_clock().now().to_msg()
+        # Stamp with the sonar frame's own time, not wall clock: frame_id is
+        # already taken from sonar_msg, and a header whose two halves come from
+        # different sources cannot be time-synchronised by any consumer. The
+        # sibling node (fft_localization_node.py:161) does this correctly.
+        header.stamp = sonar_msg.header.stamp
         header.frame_id = sonar_msg.header.frame_id
 
         cloud_msg = pc2.create_cloud_xyz32(header, points_xyz)
