@@ -1,8 +1,12 @@
 """Sensor fusion utilities for map integration."""
 import numpy as np
 
+__all__ = [
+    'ema_fusion',
+]
 
-def ema_fusion(old_map, new_data, observation_count, alpha=0.3, threshold=0.0):
+
+def ema_fusion(old_map, new_data, alpha=0.3, threshold=0.0):
     """
     Exponential Moving Average (EMA) fusion for sensor data integration.
 
@@ -13,7 +17,6 @@ def ema_fusion(old_map, new_data, observation_count, alpha=0.3, threshold=0.0):
     Args:
         old_map: Previous map intensities (1D flat array)
         new_data: New sensor intensities (1D array, same length as old_map)
-        observation_count: Count array (1D, same length) tracking observations
         alpha: Fusion weight in [0, 1] range
                - 0.1: Strong noise reduction (slow update, ~10 frames effective)
                - 0.3: Balanced (default, ~3-4 frames effective)
@@ -26,9 +29,8 @@ def ema_fusion(old_map, new_data, observation_count, alpha=0.3, threshold=0.0):
     Examples:
         >>> old = np.array([0.0, 0.5, 1.0])
         >>> new = np.array([0.8, 0.6, 0.9])
-        >>> count = np.array([0, 1, 3])
-        >>> result = ema_fusion(old, new, count, alpha=0.3)
-        >>> # First observation (count=0): result[0] = 0.8 (new value)
+        >>> result = ema_fusion(old, new, alpha=0.3)
+        >>> # First observation (old <= threshold): result[0] = 0.8 (new value)
         >>> # Existing observation: result[1] = 0.3*0.6 + 0.7*0.5 = 0.53
     """
     # Identify first observations (no previous data above threshold)

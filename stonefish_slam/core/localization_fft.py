@@ -957,7 +957,7 @@ class FFTLocalizer:
         # NOTE: Tilt correction already applied in polar_to_cartesian projection
         # Cartesian image already in horizontal plane, no additional tilt correction needed
         tx = -row_offset * self.cart_range_resolution  # Forward (meters)
-        ty = col_offset * self.cart_range_resolution   # Left (meters)
+        ty = col_offset * self.cart_range_resolution   # Starboard (+y, NED body) (meters)
 
         if self.verbose:
             print(f"[Translation Debug]")

@@ -9,6 +9,11 @@ import timeit
 from functools import wraps
 from threading import Event
 
+__all__ = [
+    'add_lock',
+    'CodeTimer',
+]
+
 
 # Offline mode flag (for bag file replay)
 offline = False
@@ -45,7 +50,7 @@ def add_lock(callback):
 class CodeTimer(object):
     """Timer class used with `with` statement
 
-    - Disable output by setting CodeTimer.silent = False
+    - Disable output by setting CodeTimer.silent = True
     - Change log_func to print/tqdm.write/rospy.loginfo/etc
 
     with CodeTimer("Some function"):

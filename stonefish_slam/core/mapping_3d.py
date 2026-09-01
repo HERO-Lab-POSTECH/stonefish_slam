@@ -8,6 +8,11 @@ using log-odds Bayesian updates to create a probabilistic 3D map.
 Ported from krit_slam feature_extraction_3d.py with modifications for ROS2 Humble
 and integration with stonefish_slam SLAM system.
 
+Two ray-processing paths exist. The C++ RayProcessor is the production one and
+updates the octree directly; the Python path below it is the fallback used when
+the extension is not built (see CPP_RAY_PROCESSOR_AVAILABLE). Three update
+methods are selectable by config: log_odds, weighted_avg, iwlo.
+
 References:
 - Sonar 3D reconstruction: octree-based probabilistic mapping
 - Log-odds Bayesian update for occupancy grid mapping

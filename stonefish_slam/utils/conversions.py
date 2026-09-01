@@ -8,6 +8,18 @@ from geometry_msgs.msg import Pose
 from std_msgs.msg import Header
 import struct
 
+__all__ = [
+    'X',
+    'pose322',
+    'n2g',
+    'g2n',
+    'r2g',
+    'g2r',
+    'r2n',
+    'build_rgb_cloud',
+    'n2r',
+]
+
 if TYPE_CHECKING:
     try:
         from sonar_oculus.msg import OculusPing
@@ -131,8 +143,8 @@ def g2n(gtsam_obj:gtsam) -> np.array:
         )
 
 
-def r2g(ros_msg) -> gtsam.Pose3:
-    """convert a ros message to a 3D pose in gtsam
+def r2g(ros_msg):
+    """convert a ros message to a 3D pose (or rotation) in gtsam
 
     Args:
         ros_msg (geometry_msgs.msg ): the input geometry message
@@ -141,7 +153,8 @@ def r2g(ros_msg) -> gtsam.Pose3:
         NotImplementedError: if unknown type raise exception
 
     Returns:
-        gtsam.Pose3: the input data packaged as a gtsam 3D pose
+        gtsam.Pose3 for Pose/PoseStamped, gtsam.Rot3 for Quaternion -- the return
+        type follows the input, which is why this function carries no annotation.
     """
 
     # ROS2: Use type() instead of _type attribute

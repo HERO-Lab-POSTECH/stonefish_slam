@@ -652,7 +652,6 @@ class SonarMapping2D:
             new_intensities = ema_fusion(
                 old_map=old_intensities,
                 new_data=intensities_valid,
-                observation_count=count_flat[linear_indices],
                 alpha=0.3,
                 threshold=0.0
             )

@@ -1,5 +1,9 @@
 import numpy as np
 
+__all__ = [
+    'OculusProperty',
+]
+
 
 class OculusProperty(object):
     def __init__(self, tilt_angle_deg: float = 0.0):
