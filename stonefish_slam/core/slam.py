@@ -679,8 +679,12 @@ class SLAMNode(Node):
         # I6 — 기각 사유를 나눠 센다. `use_dr_rotation: true` 에서는 회전 오차가
         # 항등 0 이라 'rot' 이 영영 0 으로 나와야 한다(회전 게이트 사문화 가설).
         # 그게 실측되면 17% 기각의 분모와 사유가 확정된다.
-        for reason in info['reasons']:
-            self.instr[f'reject_{reason}'] += 1
+        # 키를 f-string 으로 만들지 않는 이유는 두 가지다 — 선언에 없는 사유가
+        # 추가되면 KeyError 로 죽고, 정적 검증(테스트)이 닿지 않는다.
+        if 'pos' in info['reasons']:
+            self.instr['reject_pos'] += 1
+        if 'rot' in info['reasons']:
+            self.instr['reject_rot'] += 1
 
         # I7~I10 — 판정에 쓰지 않고 기록만 하는 값들. FFT 가 이미 계산해 반환
         # dict 에 실어 보내는데 아무도 읽지 않던 것들이라 소비만 추가한다.
@@ -1222,9 +1226,18 @@ class SLAMNode(Node):
             init_norm = float(np.linalg.norm(ret2.initial_transform.translation()))
             est_norm = float(np.linalg.norm(ret2.estimated_transform.translation()))
             if init_norm > 1e-6:
+                # 시드 출처는 세 가지다. `fft_seeded` 가드 없이 seed_is_dr 만 보면
+                # FFT 를 아예 안 쓴 경우(`fft_localization.enable: false`, FFT 실패)
+                # 까지 'fft' 로 찍혀 I5 에서 고친 것과 같은 종류의 거짓이 된다.
+                if not fft_seeded:
+                    seed_src = 'none'      # 순수 DR — FFT 가 시드를 주지 않았다
+                elif seed_is_dr:
+                    seed_src = 'dr'        # FFT 가 DR fallback 을 시드로 넘겼다
+                else:
+                    seed_src = 'fft'
                 self.get_logger().info(
                     f"[INSTR] scale init={init_norm:.4f} est={est_norm:.4f} "
-                    f"ratio={est_norm / init_norm:.4f} seed={'dr' if seed_is_dr else 'fft'}"
+                    f"ratio={est_norm / init_norm:.4f} seed={seed_src}"
                 )
 
         # ICP validation — verify transform is reasonable

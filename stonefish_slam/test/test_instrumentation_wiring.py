@@ -43,8 +43,9 @@ def test_every_declared_counter_is_incremented_somewhere():
     """선언한 카운터 키와 실제로 갱신되는 키가 일치해야 한다.
 
     오타 하나면 카운터가 조용히 0 으로 남고, 그러면 "분모 없는 비율 보고" 라는
-    계측의 존재 이유 자체가 무너진다. `f'reject_{reason}'` 처럼 동적으로 만드는
-    키는 AST 로 볼 수 없으므로 예외로 둔다.
+    계측의 존재 이유 자체가 무너진다. 그래서 갱신은 전부 상수 키로 쓴다 —
+    `self.instr[f'reject_{reason}']` 같은 동적 키는 AST 로 볼 수 없어 이 검사를
+    통째로 우회하고, 선언에 없는 사유가 추가되면 KeyError 로 죽는다(적대 검증 NIT).
     """
     tree = _tree("slam.py")
 
@@ -58,9 +59,8 @@ def test_every_declared_counter_is_incremented_somewhere():
             break
     assert declared is not None, "self.instr 선언을 찾지 못했다"
 
-    dynamic = {"reject_pos", "reject_rot"}   # f'reject_{reason}' 로 만들어진다
     touched = _self_attr_keys(tree, "instr")
-    missing = declared - touched - dynamic
+    missing = declared - touched
     assert not missing, f"선언만 되고 아무도 갱신하지 않는 카운터: {sorted(missing)}"
 
     unknown = touched - declared
@@ -140,24 +140,41 @@ def test_every_exit_path_of_ssm_logs_the_summary():
     )
     assert func is not None, "add_sequential_scan_matching 을 찾지 못했다"
 
-    def _logs_before(stop_lineno):
-        """stop_lineno 이전에 _log_instrumentation() 호출이 있는가."""
-        return any(
-            isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-            and n.func.attr == "_log_instrumentation" and n.lineno < stop_lineno
-            for n in ast.walk(func)
-        )
+    def _is_log_call(stmt):
+        return (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+                and isinstance(stmt.value.func, ast.Attribute)
+                and stmt.value.func.attr == "_log_instrumentation")
+
+    def _check(body, guarded):
+        """블록을 훑으며 각 return 이 **같은 블록 안에서** 요약 뒤에 오는지 본다.
+
+        라인 번호만 비교하면 앞선 블록의 호출 하나가 뒤따르는 모든 조기 return 을
+        가려 준다 — 두 번째 조기 return 에서 호출을 빼도 통과한다(적대 검증 NIT).
+        그래서 실제 블록 구조를 따라간다: `guarded` 는 이 블록에 들어오기까지
+        요약이 이미 불렸는지이고, 블록 안에서 호출을 만나면 그 이후로 참이 된다.
+        """
+        seen = guarded
+        for stmt in body:
+            if _is_log_call(stmt):
+                seen = True
+            elif isinstance(stmt, ast.Return):
+                assert seen, (
+                    f"slam.py:{stmt.lineno} 의 return 앞에 _log_instrumentation() 이 "
+                    "없다 — 이 경로로 빠지는 구성에서는 계측이 통째로 침묵한다"
+                )
+            for attr in ("body", "orelse", "finalbody"):
+                nested = getattr(stmt, attr, None)
+                if nested:
+                    # 분기 안에서 불린 호출은 그 분기에서만 유효하므로 seen 을
+                    # 물려주되 되돌려 받지는 않는다.
+                    _check(nested, seen)
+        return seen
 
     returns = [n for n in ast.walk(func) if isinstance(n, ast.Return)]
     assert returns, "조기 return 이 하나도 없다 — 테스트 전제가 깨졌다"
-    for r in returns:
-        assert _logs_before(r.lineno), (
-            f"slam.py:{r.lineno} 의 return 앞에 _log_instrumentation() 이 없다 — "
-            "이 경로로 빠지는 구성에서는 계측이 통째로 침묵한다"
-        )
 
-    # 함수 끝(암묵 return)도 요약을 내야 한다
-    assert _logs_before(func.end_lineno + 1), "정상 종료 경로에 요약 호출이 없다"
+    tail_seen = _check(func.body, False)
+    assert tail_seen, "정상 종료 경로(함수 끝)에 요약 호출이 없다"
 
 
 def test_fft_return_dict_carries_the_values_instrumentation_consumes():
