@@ -1,0 +1,132 @@
+"""The drift metric's numerator and denominator must span the same samples.
+
+est_buf/gt_buf are rolling deques (maxlen = ate_window_size, default 500) and
+are re-aligned with umeyama_se2 on every call, so the RMSE they produce is a
+WINDOWED quantity. It used to be divided by self.total_distance, which
+accumulates for the whole mission and is never reset. The longer the vehicle
+runs, the smaller that ratio gets — regardless of how badly the estimate
+drifts — so the node built for sea-trial evaluation reported drift trending to
+0% and accuracy trending to 100% exactly when it should have reported the
+opposite.
+"""
+import sys
+import types
+from collections import deque
+
+import numpy as np
+import pytest
+
+REL = "stonefish_slam/core/slam_accuracy_monitor.py"
+
+# slam_accuracy_monitor imports rclpy/tf2_ros/ROS msgs at module top; the metric
+# under test uses none of them.
+_ROS_STUBS = {
+    "rclpy": {},
+    "rclpy.node": {"Node": object},
+    "rclpy.qos": {"QoSProfile": object, "HistoryPolicy": object,
+                  "ReliabilityPolicy": object},
+    "rclpy.duration": {"Duration": object},
+    "sensor_msgs": {},
+    "sensor_msgs.msg": {"PointCloud2": object},
+    "sensor_msgs_py": {},
+    "sensor_msgs_py.point_cloud2": {},
+    "nav_msgs": {},
+    "nav_msgs.msg": {"Path": object},
+    "tf2_ros": {},
+}
+
+
+@pytest.fixture
+def monitor_module(load_module):
+    preexisting = set(sys.modules)
+    for name, attrs in _ROS_STUBS.items():
+        if name not in sys.modules:
+            mod = types.ModuleType(name)
+            for k, v in attrs.items():
+                setattr(mod, k, v)
+            sys.modules[name] = mod
+    sys.modules["rclpy"].node = sys.modules["rclpy.node"]
+    sys.modules["rclpy"].qos = sys.modules["rclpy.qos"]
+    sys.modules["rclpy"].duration = sys.modules["rclpy.duration"]
+    sys.modules["sensor_msgs_py"].point_cloud2 = sys.modules["sensor_msgs_py.point_cloud2"]
+    try:
+        yield load_module(REL, "slam_accuracy_monitor_under_test")
+    finally:
+        for name in set(sys.modules) - preexisting:
+            del sys.modules[name]
+
+
+def _monitor(module, est, gt, total_distance):
+    """(rmse, drift, acc) from an instance carrying only what the metric reads."""
+    m = module.TrajPathGtAteMonitor.__new__(module.TrajPathGtAteMonitor)
+    m.est_buf = deque(est)
+    m.gt_buf = deque(gt)
+    m.ate_min_samples = 20
+    m.ate_use_se2_align = True
+    m.distance_epsilon = 1e-6
+    m.total_distance = total_distance
+    return m._compute_ate_and_accuracy()
+
+
+def _straight_leg(n, step=1.0):
+    """n GT points along +x, one metre apart."""
+    return [(i * step, 0.0) for i in range(n)]
+
+
+def _with_drift(gt, amplitude):
+    """Estimate that bends away from GT, growing quadratically along the path.
+
+    A CONSTANT lateral offset is useless here: umeyama_se2 is a rigid transform
+    and absorbs it exactly, leaving rmse == 0. Real drift accumulates, so the
+    error must be a bend the alignment cannot remove.
+    """
+    n = max(len(gt) - 1, 1)
+    return [(x, y + amplitude * (i / n) ** 2) for i, (x, y) in enumerate(gt)]
+
+
+def test_drift_does_not_shrink_as_the_mission_gets_longer(monitor_module):
+    """Same window, same error — a longer past must not improve the score.
+
+    This is the defect: total_distance grows without bound while the window does
+    not, so the reported drift fell purely with elapsed distance.
+    """
+    gt = _straight_leg(50)
+    est = _with_drift(gt, 2.0)
+
+    _, drift_early, acc_early = _monitor(monitor_module, est, gt, total_distance=49.0)
+    _, drift_late, acc_late = _monitor(monitor_module, est, gt, total_distance=5000.0)
+
+    assert drift_early == pytest.approx(drift_late), (
+        f"drift changed with mission length alone: {drift_early:.3f}% vs "
+        f"{drift_late:.3f}% — the denominator is not the window"
+    )
+    assert acc_early == pytest.approx(acc_late)
+
+
+def test_drift_is_rmse_over_the_window_path_length(monitor_module):
+    """Pin the definition: 100 * RMSE / (GT path length within the window)."""
+    gt = _straight_leg(50)          # 49 m of GT path inside the window
+    est = _with_drift(gt, 2.0)
+
+    rmse, drift, acc = _monitor(monitor_module, est, gt, total_distance=5000.0)
+
+    # Assert against the measured rmse rather than assuming what survives the
+    # SE(2) alignment.
+    assert drift == pytest.approx(100.0 * rmse / 49.0, rel=1e-6)
+    assert acc == pytest.approx(max(0.0, 100.0 - drift))
+
+
+def test_larger_error_reports_larger_drift(monitor_module):
+    """Sanity: the metric must still respond to the thing it measures."""
+    gt = _straight_leg(50)
+
+    _, small, _ = _monitor(monitor_module, _with_drift(gt, 0.5), gt, 100.0)
+    _, large, _ = _monitor(monitor_module, _with_drift(gt, 5.0), gt, 100.0)
+
+    assert large > small
+
+
+def test_too_few_samples_stays_nan(monitor_module):
+    gt = _straight_leg(5)
+    rmse, drift, acc = _monitor(monitor_module, _with_drift(gt, 1.0), gt, 10.0)
+    assert np.isnan(rmse) and np.isnan(drift) and np.isnan(acc)
