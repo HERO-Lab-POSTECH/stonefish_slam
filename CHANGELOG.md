@@ -9,9 +9,12 @@ All notable changes to this project will be documented in this file.
 - **위치 추정 파이프라인 계측 I1~I11** (`feat/loc-instrumentation`): "icp 0%" 도
   "DR seed 17%" 도 **분모가 없는 보고**였다 — 어느 경로를 몇 번 탔는지 세는 곳이
   하나도 없었다. 판정은 그대로 두고 세기만 한다. `Localization.ssm_disabled_count`
-  (I1, 이 값이 키프레임 총수와 같으면 원인이 알고리즘이 아니라 `ssm.enable: false`
-  라는 **설정**임이 확정된다), `icp_attempted`/`icp_converged`(I2, 비율의 분모),
-  `icp_factor_added`/`odom_factor_fallback`(I3, factor graph 실제 구성비),
+  (I1, 이 값이 **키프레임 총수 -1** 과 같으면 원인이 알고리즘이 아니라
+  `ssm.enable: false` 라는 **설정**임이 확정된다 — 첫 키프레임은 prior 만 넣고 SSM 을
+  부르지 않으므로 분모가 하나 작다), `icp_attempted`/`icp_converged`(I2, 비율의 분모),
+  `icp_factor_added`/`odom_factor_fallback`/`ssm_init_failed`(I3, factor graph 실제
+  구성비 — **odometry factor 수는 뒤 둘의 합**이다. 초기화 실패는 `ssm_init_failed`,
+  ICP 를 돌리고 실패한 것만 `odom_factor_fallback` 으로 갈린다),
   seed 출처 분해(I4·I5) · 기각 사유 분리(I6) · `dr_ty` 동시 기록(I7) ·
   FFT `rot_peak`/`trans_peak`/`covariance`/`rotation_fft` 소비(I8·I9·I10) ·
   병진 스케일 비율(I11). 로그 태그는 `[INSTR]`.
@@ -21,7 +24,7 @@ All notable changes to this project will be documented in this file.
   실어 보내던 것이라 `localization_fft.py` 는 주석 외에 한 줄도 안 바뀐다.
   I12(tilt A/B 이중 점군)는 오프라인 bag 전용이라 제외했고 I11 이 같은 질문에 더
   싸게 답한다. I13 은 기존 `mean_err` 재사용이라 코드 0줄
-- 계측 배선 회귀 테스트 5개 — `slam.py` 는 import-time 에 rclpy·gtsam·cv_bridge 를
+- 계측 배선 회귀 테스트 7개 — `slam.py` 는 import-time 에 rclpy·gtsam·cv_bridge 를
   끌어와 path-load 가 닿지 않으므로 AST 로 배선의 **존재**를 고정한다. 막으려는 것은
   값의 오류가 아니라 그 이전 단계, 즉 계측이 조용히 끊겨 로그가 영영 안 나오는
   상황이다. 특히 `fft_is_dr_fallback` 이 다시 write-only 가 되는 회귀를 못 박는다

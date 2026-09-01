@@ -150,11 +150,11 @@ def load_localization():
 def load_mapping_3d():
     """mapping_3d.py를 clean env(cv_bridge 부재)에서 로드.
 
-    mapping_3d.py 자체는 cv_bridge를 안 쓰지만(numpy·scipy·profiler·octree만),
-    `from stonefish_slam.utils.profiler import ...`가 패키지 `utils/__init__`을
-    실행시키고 그게 sonar→conversions→cv_bridge를 끌어와 import-time에 크래시한다.
+    mapping_3d.py 자체는 cv_bridge를 안 쓰지만(numpy·scipy·octree만), 형제를
+    `from stonefish_slam.utils...` 형태로 끌어오면 패키지 `utils/__init__`이 실행되고
+    그게 sonar→conversions→cv_bridge를 끌어와 import-time에 크래시한다.
     그래서 패키지 __init__을 빈 네임스페이스로 우회하고, mapping_3d가 실제로 쓰는
-    형제(profiler·octree, 둘 다 순수)만 직접 로드하면 clean env에서도 도달한다.
+    형제(octree, 순수)만 직접 로드하면 clean env에서도 도달한다.
     C++ 확장(ray_processor:25)은 try/except 가드라 clean env에서 자연히 fallback.
 
     [[stonefish-p4-test-load-constraint]] — load_factor_graph와 동일 패턴.

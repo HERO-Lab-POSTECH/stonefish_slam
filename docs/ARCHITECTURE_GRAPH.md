@@ -131,8 +131,9 @@ pybind11 확장 5개(`cfar`·`dda_traversal`·`octree_mapping`·`ray_processor`�
 읽고 정리 후보로 지목했다. **graphify에는 cohesion 지표가 없으므로 그 판정은 재확인
 불가다.** 대신 측정 가능한 것으로 바꾸면 그림이 다르게 보인다:
 
-- `utils/` 코드 노드 37개(8파일: `conversions` 10 · `profiler` 7 · `sonar` 6 · `io` 6 ·
-  `visualization` 4 · `fusion` 2 · `topics` 1).
+- `utils/` 코드 노드 30개(7파일: `conversions` 10 · `sonar` 6 · `io` 6 ·
+  `visualization` 4 · `fusion` 2 · `topics` 1). 측정 당시에는 `profiler` 7 개를 더한
+  37 개였으나 `feat/loc-instrumentation` 이 `profiler.py` 를 통째로 걷어냈다.
 - **`core/` → `utils/` 엣지가 81개**(§3). 노드당 2.2개꼴로 들어온다.
 - `n2g()`(`utils/conversions.py`)는 **in 16**으로 이 repo에서 가장 많이 의존되는 유틸
   함수다(§4).

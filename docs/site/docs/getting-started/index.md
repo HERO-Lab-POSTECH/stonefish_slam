@@ -64,7 +64,7 @@ flowchart TD
 | `core/` | ROS에 독립적인 알고리즘 본체 | `slam.py`(통합), `factor_graph.py`(GTSAM), `localization.py`(ICP), `mapping_2d.py`·`mapping_3d.py`, `feature_extraction.py`(CFAR), `dead_reckoning.py` |
 | `nodes/` | ROS 2 진입점. `core/`를 감싸는 얇은 wrapper | `slam_node.py`, `dead_reckoning_node.py`, `mapping_2d/3d_standalone_node.py` 등 |
 | `cpp/` | pybind11 C++ 확장 5개(`.so`) | `cfar.cpp`, `dda_traversal.cpp`, `octree_mapping.cpp`, `ray_processor.cpp`, `pcl.cpp` |
-| `utils/` | 토픽·변환·시각화 공용 함수 | `topics.py`, `conversions.py`, `visualization.py`, `sonar.py`, `fusion.py`, `profiler.py`, `io.py` |
+| `utils/` | 토픽·변환·시각화 공용 함수 | `topics.py`, `conversions.py`, `visualization.py`, `sonar.py`, `fusion.py`, `io.py` |
 
 !!! note "C++ 확장은 선택"
     `cpp/`의 확장은 빌드되지 않은 환경에서도 동작하도록 `try/except ImportError`로 감싸여 있으며, 실패 시 순수 Python fallback으로 전환된다(특히 `pcl.py`의 ICP). 따라서 C++ 빌드 없이도 SLAM을 실행할 수 있다.

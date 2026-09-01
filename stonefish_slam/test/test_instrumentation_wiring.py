@@ -24,10 +24,19 @@ def _tree(name):
     return ast.parse((CORE / name).read_text(encoding="utf-8"), filename=name)
 
 
-def _self_attr_keys(tree, attr):
-    """`self.<attr>['key']` 형태로 접근되는 문자열 키를 모은다."""
+def _self_attr_keys(tree, attr, incremented_only=False):
+    """`self.<attr>['key']` 로 접근되는 문자열 키를 모은다.
+
+    `incremented_only` 면 `+=` 의 대상만 센다. 읽기까지 갱신으로 인정하면
+    로그 한 줄이 카운터를 "살아 있다" 고 증언해 버려, 정작 증가시키는 곳이
+    사라져도 테스트가 통과한다(적대 검증 MINOR).
+    """
     keys = set()
-    for node in ast.walk(tree):
+    if incremented_only:
+        nodes = (n.target for n in ast.walk(tree) if isinstance(n, ast.AugAssign))
+    else:
+        nodes = ast.walk(tree)
+    for node in nodes:
         if not isinstance(node, ast.Subscript):
             continue
         v = node.value
@@ -59,12 +68,12 @@ def test_every_declared_counter_is_incremented_somewhere():
             break
     assert declared is not None, "self.instr 선언을 찾지 못했다"
 
-    touched = _self_attr_keys(tree, "instr")
-    missing = declared - touched
-    assert not missing, f"선언만 되고 아무도 갱신하지 않는 카운터: {sorted(missing)}"
+    incremented = _self_attr_keys(tree, "instr", incremented_only=True)
+    missing = declared - incremented
+    assert not missing, f"선언만 되고 아무도 증가시키지 않는 카운터: {sorted(missing)}"
 
-    unknown = touched - declared
-    assert not unknown, f"선언에 없는 카운터를 갱신한다(오타 의심): {sorted(unknown)}"
+    unknown = _self_attr_keys(tree, "instr") - declared
+    assert not unknown, f"선언에 없는 카운터를 건드린다(오타 의심): {sorted(unknown)}"
 
 
 def test_dr_fallback_flag_is_read_not_only_written():
@@ -187,11 +196,41 @@ def test_fft_return_dict_carries_the_values_instrumentation_consumes():
 
     consumed = {"rot_peak", "trans_peak", "covariance", "rotation_fft",
                 "rotation_override_used", "rotation"}
-    produced = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Dict):
-            produced |= {k.value for k in node.keys
-                         if isinstance(k, ast.Constant) and isinstance(k.value, str)}
 
-    missing = consumed - produced
-    assert not missing, f"계측이 읽는데 FFT 가 안 내보내는 키: {sorted(missing)}"
+    # 모듈 안 모든 dict 의 합집합을 보면 서로 다른 반환 경로에 흩어진 키들이
+    # 서로를 가려 준다 — 실제로는 어느 한 반환도 계측이 읽는 조합을 다 싣지
+    # 않는데 통과한다(적대 검증 MINOR). 그래서 **한 dict 가 통째로** 만족하는지
+    # 본다.
+    best = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = {k.value for k in node.keys
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        if "success" in keys and len(consumed & keys) > len(consumed & best):
+            best = keys
+
+    missing = consumed - best
+    assert not missing, f"계측이 읽는 키를 한 반환 dict 가 다 싣지 않는다: {sorted(missing)}"
+
+
+def test_instrumented_methods_still_have_callers():
+    """계측이 든 메서드에 실제 호출자가 남아 있어야 한다.
+
+    다른 검사들은 메서드 **안**만 본다. 그래서 콜백에서 호출 한 줄을 지우면
+    메서드도 계측도 온전한 채로 영영 실행되지 않는데 전부 통과한다
+    (적대 검증 MINOR). 이 브랜치가 막으려는 실패가 정확히 그것이므로
+    바깥쪽 배선도 같이 못 박는다.
+    """
+    tree = _tree("slam.py")
+
+    defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    called = {n.func.attr for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+
+    for name in ("add_sequential_scan_matching", "validate_fft_with_odom"):
+        assert name in defined, f"{name} 정의가 사라졌다"
+        assert name in called, (
+            f"{name} 을 부르는 곳이 없다 — 메서드도 계측도 남아 있지만 "
+            "실행되지 않아 로그가 영영 안 나온다"
+        )

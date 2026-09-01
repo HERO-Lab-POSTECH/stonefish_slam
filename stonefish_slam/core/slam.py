@@ -692,8 +692,13 @@ class SLAMNode(Node):
         #   I8  peak   : 품질 게이트 임계값을 정하려면 분포가 먼저 필요하다(P1-5)
         #   I9  cov    : FFT 자체 불확실도가 DR 불일치를 예측하는지 상관 분석용
         #   I10 rot_fft: `use_dr_rotation` 을 끌 수 있는지 판단할 유일한 근거
+        # np.diag 는 입력 차원에 따라 길이가 달라진다 — 2x2 면 길이 2, 1-D 면 정사각
+        # 행렬. 로그 한 줄 때문에 IndexError 가 나면 caller 의 broad except 가 그걸
+        # FFT 실패로 바꾸므로 "계측은 판정을 바꾸지 않는다" 는 전제가 깨진다.
+        # 길이를 3 으로 못 박아 그 경로 자체를 없앤다(적대 검증 NIT).
         cov = fft_result.get('covariance')
-        cov_diag = np.diag(cov) if cov is not None else (np.nan,) * 3
+        cov_diag = tuple(np.ravel(np.diag(np.atleast_2d(cov)))) if cov is not None else ()
+        cov_diag = cov_diag + (np.nan,) * 3
         self.get_logger().info(
             f"[INSTR] gate pos_err={pos_error:.3f} rot_err_deg={np.degrees(rot_error):.2f} "
             f"dr_ty={dr_ty:.3f} "
