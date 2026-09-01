@@ -71,7 +71,7 @@ struct RayProcessorConfig {
           use_range_weighting(true),
           lambda_decay(2.0),
           enable_gaussian_weighting(false),
-          gaussian_sigma_factor(3.0),
+          gaussian_sigma_factor(2.5),  // matches mapping_3d.py and the standalone node
           voxel_resolution(0.2),
           bearing_step(2),
           intensity_threshold(30),

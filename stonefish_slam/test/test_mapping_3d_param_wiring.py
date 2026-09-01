@@ -189,3 +189,61 @@ def test_3d_mapper_gets_the_3d_intensity_threshold():
         f"mapping_3d_config['intensity_threshold'] reads {source!r}; the 3D "
         "mapper must use mapping_3d.intensity_threshold, not the 2D one"
     )
+
+
+# ---------------------------------------------------------------------------
+# P1-7: a knob forwarded to one C++ config but not the other
+# ---------------------------------------------------------------------------
+
+MAPPING_3D_PY = REPO_ROOT / "stonefish_slam" / "core" / "mapping_3d.py"
+
+
+def _fields_assigned_on(obj_name):
+    """Every `<obj_name>.<field> = ...` target in mapping_3d.py.
+
+    ray_config is a local, dda_config is reached as self.dda_config — accept both.
+    """
+    tree = ast.parse(MAPPING_3D_PY.read_text())
+    fields = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if not isinstance(target, ast.Attribute):
+                continue
+            base = target.value
+            if isinstance(base, ast.Name) and base.id == obj_name:
+                fields.add(target.attr)
+            elif isinstance(base, ast.Attribute) and base.attr == obj_name:
+                fields.add(target.attr)
+    return fields
+
+
+def test_gaussian_sigma_factor_reaches_the_ray_processor():
+    """The DDA path forwarded this knob; the RayProcessor path did not.
+
+    RayProcessorConfig carries its own C++ default, so a missing assignment is
+    silent — the operator's YAML value simply never applies on the production
+    path (mapping_3d.py:226-252), which is the one slam_node uses.
+    """
+    ray_fields = _fields_assigned_on("ray_config")
+    dda_fields = _fields_assigned_on("dda_config")
+
+    assert "gaussian_sigma_factor" in dda_fields, "test premise moved"
+    assert "gaussian_sigma_factor" in ray_fields, (
+        "ray_config never receives gaussian_sigma_factor, so the C++ default "
+        "wins and the knob is inert on the production path"
+    )
+
+
+def test_ray_processor_default_matches_the_python_default():
+    """The two defaults must agree, or the knob's meaning depends on the path.
+
+    Every Python-side default is 2.5 (mapping_3d.py, the standalone node, and
+    test_mapping_3d_characterization.py); ray_processor.h shipped 3.0.
+    """
+    ray_processor = pytest.importorskip(
+        "stonefish_slam.ray_processor",
+        reason="ray_processor extension not staged",
+    )
+    assert ray_processor.RayProcessorConfig().gaussian_sigma_factor == pytest.approx(2.5)
