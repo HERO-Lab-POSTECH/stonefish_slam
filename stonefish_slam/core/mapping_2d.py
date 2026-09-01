@@ -586,8 +586,15 @@ class SonarMapping2D:
         #           local_x = local_x_raw * np.cos(actual_tilt)
         # Requires: Preserve pose3 (gtsam.Pose3) instead of only pose (gtsam.Pose2)
 
-        # Use pixel center (+ 0.5 offset) for consistency with polar_to_cartesian
-        local_x_raw = (fan_h - yy_valid - 0.5) * range_resolution
+        # Use pixel center (+ 0.5 offset) for consistency with polar_to_cartesian.
+        # range_min is NOT optional: polar_to_cartesian_image builds its rows as
+        # x_meters = range_max - range_resolution * YY with
+        # range_resolution = (range_max - range_min) / rows, so row 0 sits at
+        # range_max, not at rows * range_resolution. Substituting
+        # range_max = range_min + rows * range_resolution gives the form below.
+        # Without the term every mapped point sat range_min (0.5 m slant,
+        # 0.433 m horizontal at 30 deg tilt) toward the vehicle.
+        local_x_raw = (fan_h - yy_valid - 0.5) * range_resolution + self.range_min
         local_x = local_x_raw * np.cos(self.sonar_tilt_rad)
         local_y = (xx_valid - fan_w / 2.0 + 0.5) * range_resolution
 
