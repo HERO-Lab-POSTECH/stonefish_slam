@@ -1251,7 +1251,7 @@ class SLAMNode(Node):
                     ret2.status.description = message
                 else:
                     ret2.estimated_transform = odom
-                    ret.status.description = ""
+                    ret2.status.description = ""
 
         # Verify transform
         if ret2.status:
