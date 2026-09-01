@@ -96,7 +96,6 @@ MatrixXb os(const MatrixXf &img, int train_hs, int guard_hs, int k, double tau)
   {
     for (int row = train_hs + guard_hs; row < img.rows() - train_hs - guard_hs; ++row)
     {
-      float leading_sum = 0.0, lagging_sum = 0.0;
       std::vector<float> train;
       for (int i = row - train_hs - guard_hs; i < row + train_hs + guard_hs + 1; ++i)
       {
