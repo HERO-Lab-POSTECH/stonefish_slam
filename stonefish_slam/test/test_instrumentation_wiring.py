@@ -122,6 +122,44 @@ def test_ssm_disabled_counter_exists_and_increments():
     assert incr, "ssm_disabled_count 를 증가시키는 곳이 없다 — 영영 0 으로 보고된다"
 
 
+def test_every_exit_path_of_ssm_logs_the_summary():
+    """`add_sequential_scan_matching` 의 **모든** 종료 경로가 요약을 내야 한다.
+
+    조기 return 이 요약을 건너뛰면, 그 경로로만 빠지는 구성에서는 카운터가 영영
+    보이지 않는다. 실제로 그런 구멍이 있었다 — `ssm.enable: false` 면 초기화가
+    실패해 매 키프레임 조기 return 으로 빠지는데, 하필 그 상황이 I1
+    (`ssm_disabled_count`)이 답해야 할 바로 그 질문이었다. 계측의 출발점이
+    자기 질문에서만 침묵하던 셈이다.
+    """
+    tree = _tree("slam.py")
+
+    func = next(
+        (n for n in ast.walk(tree)
+         if isinstance(n, ast.FunctionDef) and n.name == "add_sequential_scan_matching"),
+        None,
+    )
+    assert func is not None, "add_sequential_scan_matching 을 찾지 못했다"
+
+    def _logs_before(stop_lineno):
+        """stop_lineno 이전에 _log_instrumentation() 호출이 있는가."""
+        return any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "_log_instrumentation" and n.lineno < stop_lineno
+            for n in ast.walk(func)
+        )
+
+    returns = [n for n in ast.walk(func) if isinstance(n, ast.Return)]
+    assert returns, "조기 return 이 하나도 없다 — 테스트 전제가 깨졌다"
+    for r in returns:
+        assert _logs_before(r.lineno), (
+            f"slam.py:{r.lineno} 의 return 앞에 _log_instrumentation() 이 없다 — "
+            "이 경로로 빠지는 구성에서는 계측이 통째로 침묵한다"
+        )
+
+    # 함수 끝(암묵 return)도 요약을 내야 한다
+    assert _logs_before(func.end_lineno + 1), "정상 종료 경로에 요약 호출이 없다"
+
+
 def test_fft_return_dict_carries_the_values_instrumentation_consumes():
     """I8·I9·I10 — slam.py 가 읽는 키가 FFT 반환 dict 에 실제로 있어야 한다.
 
