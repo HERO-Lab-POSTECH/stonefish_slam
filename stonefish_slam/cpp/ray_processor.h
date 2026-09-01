@@ -273,13 +273,6 @@ private:
 
 
     /**
-     * @brief Find first intensity peak above threshold
-     * @param intensity_profile Intensity values (0-255)
-     * @return Index of first hit, or -1 if none found
-     */
-    int find_first_hit(const std::vector<uint8_t>& intensity_profile) const;
-
-    /**
      * @brief Compute range-based weighting factor
      *
      * Exponential decay: w(r) = exp(-λ × r / r_max)
@@ -312,29 +305,6 @@ private:
     double compute_bearing_angle(int bearing_idx, int num_beams) const;
 
     /**
-     * @brief Compute intensity-based weighting factor
-     *
-     * Sigmoid function: w(I) = sigmoid((I - I_mid) / (sharpness * scale))
-     * High intensity (>127) → weight > 0.5 → stronger occupied update
-     * Low intensity (<127) → weight < 0.5 → weaker occupied update
-     *
-     * @param intensity Intensity value (0-255)
-     * @return Weight factor (0.0 to 1.0)
-     */
-    double compute_intensity_weight(uint8_t intensity) const;
-
-    /**
-     * @brief Compute 3D ray direction from bearing angle
-     *
-     * Sonar frame convention: X=forward, Y=right, Z=down (FRD)
-     * Bearing: 0=forward, positive=right, negative=left
-     *
-     * @param bearing_angle Horizontal angle (radians)
-     * @return Unit direction vector in sonar frame
-     */
-    Eigen::Vector3d compute_ray_direction(double bearing_angle) const;
-
-    /**
      * @brief Compute number of vertical steps for full voxel coverage
      *
      * Full coverage: sample every voxel in vertical aperture
@@ -361,11 +331,6 @@ private:
     int compute_num_horizontal_steps(double range_m, int bearing_step, int num_beams) const;
 
 private:
-    /**
-     * @brief Convert world coordinates to voxel key
-     */
-    std::array<int, 3> world_to_voxel_key(const Eigen::Vector3d& point) const;
-
 private:
     // External dependencies (non-owning pointers)
     OctreeMapping* octree_;     // Octree for voxel updates

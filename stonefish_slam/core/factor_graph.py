@@ -70,29 +70,6 @@ class FactorGraph:
         """
         return self.keyframes[-1]
 
-    def add_keyframe(self, keyframe: Keyframe) -> int:
-        """Add a keyframe to the list.
-
-        Args:
-            keyframe: Keyframe to add
-
-        Returns:
-            int: Index of the added keyframe
-        """
-        self.keyframes.append(keyframe)
-        return len(self.keyframes) - 1
-
-    def get_keyframe(self, key: int) -> Keyframe:
-        """Get keyframe by index.
-
-        Args:
-            key: Keyframe index
-
-        Returns:
-            Keyframe: The requested keyframe
-        """
-        return self.keyframes[key]
-
     def set_noise_models(self, prior_model, odom_model, icp_odom_model):
         """Set noise models for factors.
 
@@ -122,11 +99,6 @@ class FactorGraph:
         Args:
             keyframe: Current keyframe
         """
-        # Compute time delta (ROS2: Time message has sec and nanosec fields)
-        current_sec = keyframe.time.sec + keyframe.time.nanosec / 1e9
-        last_sec = self.keyframes[-1].time.sec + self.keyframes[-1].time.nanosec / 1e9
-        dt = current_sec - last_sec
-
         # Compute odometry from dead reckoning
         dr_odom = self.keyframes[-1].pose.between(keyframe.pose)
 
@@ -425,62 +397,6 @@ class FactorGraph:
                     subg, cand, ext_u = stack.pop()
         except IndexError:
             pass
-
-    def get_states(self) -> np.ndarray:
-        """Retrieve all states as structured array.
-
-        Returns:
-            Structured numpy array with fields:
-            - time: timestamp
-            - pose: [x, y, yaw]
-            - dr_pose3: [x, y, z, roll, pitch, yaw]
-            - cov: flattened 3x3 covariance
-        """
-        states = np.zeros(
-            self.current_key,
-            dtype=[
-                ("time", np.float64),
-                ("pose", np.float32, 3),
-                ("dr_pose3", np.float32, 6),
-                ("cov", np.float32, 9),
-            ],
-        )
-
-        # Update all keyframes with latest estimates
-        values = self.isam.calculateEstimate()
-        for key in range(self.current_key):
-            pose = values.atPose2(X(key))
-            cov = self.isam.marginalCovariance(X(key))
-            self.keyframes[key].update(pose, cov)
-
-        # Extract state information
-        from stonefish_slam.utils.conversions import g2n
-        t_zero = self.keyframes[0].time
-        for key in range(self.current_key):
-            keyframe = self.keyframes[key]
-            t_zero_sec = t_zero.sec + t_zero.nanosec / 1e9
-            keyframe_sec = keyframe.time.sec + keyframe.time.nanosec / 1e9
-            states[key]["time"] = keyframe_sec - t_zero_sec
-            states[key]["pose"] = g2n(keyframe.pose)
-            states[key]["dr_pose3"] = g2n(keyframe.dr_pose3)
-            states[key]["cov"] = keyframe.transf_cov.ravel()
-
-        return states
-
-    @staticmethod
-    def sample_pose(pose: gtsam.Pose2, covariance: np.ndarray) -> gtsam.Pose2:
-        """Generate random pose sample from covariance.
-
-        Args:
-            pose: Mean pose
-            covariance: 3x3 covariance matrix
-
-        Returns:
-            Sampled pose
-        """
-        from stonefish_slam.utils.conversions import n2g
-        delta = np.random.multivariate_normal(np.zeros(3), covariance)
-        return pose.compose(n2g(delta, "Pose2"))
 
     @staticmethod
     def create_full_noise_model(cov: np.ndarray) -> gtsam.noiseModel.Gaussian:

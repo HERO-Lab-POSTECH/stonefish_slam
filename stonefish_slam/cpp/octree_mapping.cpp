@@ -530,11 +530,6 @@ size_t OctreeMapping::get_num_nodes() const {
     return tree_->size();
 }
 
-void OctreeMapping::set_log_odds_thresholds(double occupied, double free) {
-    log_odds_occupied_ = occupied;
-    log_odds_free_ = free;
-}
-
 void OctreeMapping::set_clamping_thresholds(double min, double max) {
     if (min <= 0.0 || min >= 1.0 || max <= 0.0 || max >= 1.0 || min >= max) {
         throw std::invalid_argument("Invalid clamping thresholds");
@@ -646,121 +641,6 @@ py::bytes OctreeMapping::serialize_to_binary() {
 }
 
 // C++ native batch insert (zero NumPy overhead)
-void OctreeMapping::insert_voxels_batch_native(
-    const std::vector<Eigen::Vector3d>& points,
-    const std::vector<double>& log_odds,
-    const Eigen::Vector3d& sensor_origin
-) {
-    // Input validation
-    if (points.size() != log_odds.size()) {
-        throw std::runtime_error("Points and log_odds must have same length");
-    }
-
-    size_t num_points = points.size();
-    if (num_points == 0) {
-        return;  // No work to do
-    }
-
-    // Convert sensor origin to OctoMap point
-    octomap::point3d sensor_pos(sensor_origin.x(), sensor_origin.y(), sensor_origin.z());
-
-    // Identical logic to insert_point_cloud(), but using std::vector instead of NumPy
-#ifdef _OPENMP
-    // Thread-local storage for batched updates
-    struct UpdateBatch {
-        std::vector<octomap::OcTreeKey> keys;
-        std::vector<double> log_odds_updates;
-
-        void reserve(size_t n) {
-            keys.reserve(n);
-            log_odds_updates.reserve(n);
-        }
-
-        void add(const octomap::OcTreeKey& key, double log_odds) {
-            keys.push_back(key);
-            log_odds_updates.push_back(log_odds);
-        }
-    };
-
-    // Parallel phase: compute keys and prepare updates (no tree access)
-    std::vector<UpdateBatch> thread_batches(omp_get_max_threads());
-    for (auto& batch : thread_batches) {
-        batch.reserve(num_points / omp_get_max_threads() + 100);
-    }
-
-    #pragma omp parallel
-    {
-        int thread_id = omp_get_thread_num();
-        UpdateBatch& my_batch = thread_batches[thread_id];
-
-        #pragma omp for schedule(dynamic, 100) nowait
-        for (size_t i = 0; i < num_points; ++i) {
-            const Eigen::Vector3d& pt = points[i];
-            octomap::point3d endpoint(pt.x(), pt.y(), pt.z());
-
-            double log_odds_update = log_odds[i];
-
-            octomap::OcTreeKey key;
-            if (tree_->coordToKeyChecked(endpoint, key)) {
-                my_batch.add(key, log_odds_update);
-            }
-        }
-    }
-
-    // Sequential phase: merge all updates into tree
-    for (const auto& batch : thread_batches) {
-        for (size_t i = 0; i < batch.keys.size(); ++i) {
-            const auto& key = batch.keys[i];
-            double log_odds_update = batch.log_odds_updates[i];
-
-            // Adaptive protection (unidirectional: Free → Occupied only)
-            double final_log_odds = log_odds_update;
-            if (adaptive_update_ && log_odds_update > 0.0) {
-                // Check current probability BEFORE update
-                octomap::OcTreeNode* node = tree_->search(key);
-                double current_prob = node ? node->getOccupancy() : 0.5;
-
-                // Apply protection if needed
-                if (current_prob <= adaptive_threshold_) {
-                    double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
-                    final_log_odds = log_odds_update * update_scale;
-                }
-            }
-            // Single update with final log_odds
-            tree_->updateNode(key, static_cast<float>(final_log_odds), false);
-        }
-    }
-
-#else
-    // Single-threaded fallback
-    for (size_t i = 0; i < num_points; ++i) {
-        const Eigen::Vector3d& pt = points[i];
-        octomap::point3d endpoint(pt.x(), pt.y(), pt.z());
-
-        double log_odds_update = log_odds[i];
-
-        octomap::OcTreeKey key;
-        if (tree_->coordToKeyChecked(endpoint, key)) {
-            // Adaptive protection (unidirectional: Free → Occupied only)
-            double final_log_odds = log_odds_update;
-            if (adaptive_update_ && log_odds_update > 0.0) {
-                // Check current probability BEFORE update
-                octomap::OcTreeNode* node = tree_->search(key);
-                double current_prob = node ? node->getOccupancy() : 0.5;
-
-                // Apply protection if needed
-                if (current_prob <= adaptive_threshold_) {
-                    double update_scale = (current_prob / adaptive_threshold_) * adaptive_max_ratio_;
-                    final_log_odds = log_odds_update * update_scale;
-                }
-            }
-            // Single update with final log_odds
-            tree_->updateNode(key, static_cast<float>(final_log_odds), false);
-        }
-    }
-#endif
-}
-
 // Pybind11 module definition
 PYBIND11_MODULE(octree_mapping, m) {
     m.doc() = "High-performance Octree mapping using OctoMap library";
@@ -820,11 +700,6 @@ PYBIND11_MODULE(octree_mapping, m) {
         .def("get_num_nodes",
              &OctreeMapping::get_num_nodes,
              "Get total number of nodes in the tree")
-        .def("set_log_odds_thresholds",
-             &OctreeMapping::set_log_odds_thresholds,
-             py::arg("occupied"),
-             py::arg("free"),
-             "Set log-odds thresholds for occupied/free updates")
         .def("set_clamping_thresholds",
              &OctreeMapping::set_clamping_thresholds,
              py::arg("min"),

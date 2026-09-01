@@ -307,28 +307,10 @@ class SonarMapping3D:
 
         # Performance profiling
         self.enable_profiling = config.get('enable_profiling', True)
-        self.performance_stats = {
-            'frame_times': [],           # Processing times per frame
-            'voxel_updates': [],          # Number of voxel updates per frame
-            'ray_times': [],              # Processing times per ray
-            'total_frames': 0,
-            'total_voxels_updated': 0,
-            'propagation_times': []       # Times for propagation operations
-        }
-
-        # Detailed profiling infrastructure (7 measurement points)
-        self.profiling_enabled = True  # Enable detailed profiling
-        self.profiling_data = {
-            'frame_total': [],
-            'ray_processing': [],
-            'dda_traversal': [],
-            'dict_merge': [],
-            'occupied_processing': [],
-            'bearing_propagation': [],
-            'octree_updates': [],
-            'voxels_per_frame': [],
-            'rays_per_frame': []
-        }
+        # Wall-clock accumulators for the C++/Python ray paths. Nothing consumes
+        # them today -- the two unbounded stats dicts that did were removed as a
+        # leak (P1-8). Kept because feat/loc-instrumentation redesigns this layer.
+        self.profiling_enabled = True
 
         # CSV profiling infrastructure (P3.1/P3.2)
         self.csv_sample_interval = config.get('frame_interval', 10)  # Use frame_interval
@@ -1119,9 +1101,6 @@ class SonarMapping3D:
         if not use_cpp_path:
             # Python Ray Processing Path (existing code)
             for b_idx in range(0, bearing_bins, bearing_step):
-                if self.enable_profiling:
-                    ray_start = time.time()
-
                 bearing_angle = self.bearing_angles[b_idx]
                 intensity_profile = polar_image[:, b_idx]
 
@@ -1151,9 +1130,6 @@ class SonarMapping3D:
 
                 # Propagate to adjacent bearings if enabled
                 if self.enable_propagation and len(voxel_updates) > 0:
-                    if self.enable_profiling:
-                        prop_start = time.time()
-
                     propagated = self.propagate_bearing_updates_optimized(
                         voxel_updates, b_idx, bearing_bins, T_sonar_to_world
                     )
@@ -1176,15 +1152,7 @@ class SonarMapping3D:
                         all_voxel_updates[voxel_key]['sum'] += update_info['sum']
                         all_voxel_updates[voxel_key]['count'] += update_info['count']
 
-                    if self.enable_profiling:
-                        prop_time = time.time() - prop_start
-                        self.performance_stats['propagation_times'].append(prop_time)
-
                 processed_bearings.append(b_idx)
-
-                if self.enable_profiling:
-                    ray_time = time.time() - ray_start
-                    self.performance_stats['ray_times'].append(ray_time)
 
             # [B] Ray processing timing end
             if self.profiling_enabled:
@@ -1236,14 +1204,6 @@ class SonarMapping3D:
             polar_image: 2D numpy array (height x width) with intensity values
             robot_pose: Robot pose (dict with 'position'/'orientation' or ROS Pose message)
         """
-        # [A] Frame start timing
-        if self.profiling_enabled:
-            t_frame_start = time.perf_counter()
-
-        # Start timing if profiling enabled (legacy)
-        if self.enable_profiling:
-            frame_start_time = time.time()
-
         # [A] Coerce image, adapt dimensions, compute transforms + first-hit map
         polar_image, _range_bins, bearing_bins, T_sonar_to_world, T_world_to_sonar, first_hit_map = \
             self._prepare_image_frame(polar_image, robot_pose)
@@ -1263,39 +1223,8 @@ class SonarMapping3D:
             if self.profiling_enabled:
                 t_octree_total = 0.0  # No additional octree update needed
 
-        # [A] Frame total timing end
-        if self.profiling_enabled:
-            t_frame_total = time.perf_counter() - t_frame_start
-
-            # Store profiling data
-            self.profiling_data['frame_total'].append(t_frame_total)
-            self.profiling_data['ray_processing'].append(t_ray_total)
-            self.profiling_data['dda_traversal'].append(timing_accumulators['dda'])
-            self.profiling_data['dict_merge'].append(timing_accumulators['merge'])
-            self.profiling_data['occupied_processing'].append(timing_accumulators['occupied'])
-            self.profiling_data['bearing_propagation'].append(0.0)  # Not used in C++ path
-            self.profiling_data['octree_updates'].append(t_octree_total)
-            self.profiling_data['voxels_per_frame'].append(num_voxels_updated)
-            self.profiling_data['rays_per_frame'].append(len(processed_bearings))
-
         # Increment frame counter
         self.frame_count += 1
-
-        # Print detailed profiling statistics every csv_sample_interval frames (주석 처리 - iteration 로그 제거)
-        # if self.profiling_enabled and self.frame_count % self.csv_sample_interval == 0:
-        #     if len(self.profiling_data['frame_total']) >= self.csv_sample_interval:
-        #         self._print_profiling_stats()
-        #         # Keep only last csv_sample_interval frames
-        #         for key in self.profiling_data:
-        #             self.profiling_data[key] = self.profiling_data[key][-self.csv_sample_interval:]
-
-        # Performance profiling statistics (legacy - keep for compatibility)
-        if self.enable_profiling:
-            frame_time = time.time() - frame_start_time
-            self.performance_stats['frame_times'].append(frame_time)
-            self.performance_stats['voxel_updates'].append(num_voxels_updated)
-            self.performance_stats['total_frames'] += 1
-            self.performance_stats['total_voxels_updated'] += num_voxels_updated
 
         # Optional: Clear old voxels if frame limit reached
         if self.max_frames > 0 and self.frame_count > self.max_frames:
@@ -1304,13 +1233,12 @@ class SonarMapping3D:
             self.octree.clear()
             self.frame_count = 0
 
-    def update_map_from_slam(self, new_keyframes, all_slam_keyframes=None):
+    def update_map_from_slam(self, new_keyframes):
         """
         Update 3D map from SLAM keyframes (similar to mapping_2d.update_global_map_from_slam)
 
         Args:
             new_keyframes: List of new Keyframe objects
-            all_slam_keyframes: Complete list of keyframes (for bounds - not used in 3D)
         """
         for kf in new_keyframes:
             # Keyframe.image contains the polar sonar image
@@ -1421,70 +1349,6 @@ class SonarMapping3D:
 
             return result
 
-    def get_pointcloud2_msg(self, frame_id='world_ned', stamp=None):
-        """
-        Generate ROS2 PointCloud2 message for visualization
-
-        Args:
-            frame_id: Coordinate frame (default 'world_ned')
-            stamp: ROS timestamp (optional)
-
-        Returns:
-            sensor_msgs/PointCloud2 message
-        """
-        import struct
-        from sensor_msgs.msg import PointCloud2, PointField
-        from std_msgs.msg import Header
-
-        # Get occupied voxels
-        result = self.get_point_cloud(include_free=False)
-        points = result['points']
-        probs = result['probabilities']
-
-        if len(points) == 0:
-            # Return empty point cloud
-            msg = PointCloud2()
-            msg.header = Header()
-            msg.header.frame_id = frame_id
-            if stamp:
-                msg.header.stamp = stamp
-            msg.height = 1
-            msg.width = 0
-            return msg
-
-        # Create PointCloud2 message
-        msg = PointCloud2()
-        msg.header = Header()
-        msg.header.frame_id = frame_id
-        if stamp:
-            msg.header.stamp = stamp
-
-        # Define fields: x, y, z, intensity
-        msg.fields = [
-            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-            PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1),
-        ]
-
-        msg.is_bigendian = False
-        msg.point_step = 16  # 4 floats * 4 bytes
-        msg.row_step = msg.point_step * len(points)
-        msg.is_dense = True
-        msg.height = 1
-        msg.width = len(points)
-
-        # Pack data: probability -> intensity (0.0-1.0)
-        data = []
-        for i in range(len(points)):
-            x, y, z = points[i]
-            intensity = float(probs[i])  # Already 0-1 range
-            data.append(struct.pack('ffff', x, y, z, intensity))
-
-        msg.data = b''.join(data)
-
-        return msg
-
     def get_octomap_msg(self, frame_id='world_ned', stamp=None):
         """
         Generate ROS2 Octomap message for visualization
@@ -1520,125 +1384,6 @@ class SonarMapping3D:
             msg.data = []
 
         return msg
-
-    def reset_map(self):
-        """Reset the probabilistic map"""
-        if self.use_cpp_backend:
-            self.cpp_octree.clear()
-        else:
-            self.octree.clear()
-
-        self.frame_count = 0
-
-        # Reset performance stats
-        if self.enable_profiling:
-            self.performance_stats = {
-                'frame_times': [],
-                'voxel_updates': [],
-                'ray_times': [],
-                'total_frames': 0,
-                'total_voxels_updated': 0,
-                'propagation_times': []
-            }
-
-    def get_performance_summary(self):
-        """
-        Get performance statistics summary
-
-        Returns:
-            Dictionary with performance metrics
-        """
-        if not self.enable_profiling or len(self.performance_stats['frame_times']) == 0:
-            return {'profiling_enabled': False}
-
-        stats = {
-            'profiling_enabled': True,
-            'total_frames': self.performance_stats['total_frames'],
-            'total_voxels_updated': self.performance_stats['total_voxels_updated'],
-            'avg_frame_time': np.mean(self.performance_stats['frame_times']) if len(self.performance_stats['frame_times']) > 0 else 0,
-            'avg_voxels_per_frame': np.mean(self.performance_stats['voxel_updates']) if len(self.performance_stats['voxel_updates']) > 0 else 0,
-            'avg_ray_time': np.mean(self.performance_stats['ray_times']) if len(self.performance_stats['ray_times']) > 0 else 0,
-            'total_rays_processed': len(self.performance_stats['ray_times']),
-        }
-
-        if self.enable_propagation and len(self.performance_stats['propagation_times']) > 0:
-            stats['propagation_enabled'] = True
-            stats['avg_propagation_time'] = np.mean(self.performance_stats['propagation_times'])
-            stats['propagation_radius'] = self.propagation_radius
-            stats['propagation_sigma'] = self.propagation_sigma
-        else:
-            stats['propagation_enabled'] = False
-
-        # Add percentiles for frame times
-        if len(self.performance_stats['frame_times']) > 0:
-            stats['frame_time_p50'] = np.percentile(self.performance_stats['frame_times'], 50)
-            stats['frame_time_p90'] = np.percentile(self.performance_stats['frame_times'], 90)
-            stats['frame_time_p99'] = np.percentile(self.performance_stats['frame_times'], 99)
-
-        return stats
-
-    def _print_profiling_stats(self):
-        """Print concise profiling statistics and save to CSV (called every 10 frames)"""
-        import numpy as np
-
-        # Calculate averages (convert to milliseconds)
-        avg_frame = np.mean(self.profiling_data['frame_total']) * 1000  # ms
-        avg_ray = np.mean(self.profiling_data['ray_processing']) * 1000
-        avg_octree = np.mean(self.profiling_data['octree_updates']) * 1000
-        avg_voxels = np.mean(self.profiling_data['voxels_per_frame'])
-
-        fps = 1000.0 / avg_frame if avg_frame > 0 else 0
-
-        # Concise console output (1 line)
-        print(f"Frame {self.frame_count}: {avg_frame:.1f}ms ({fps:.1f} FPS) | {int(avg_voxels)} voxels")
-
-        # CSV sampling using MappingProfiler
-        if self.enable_profiling:
-            # Get C++ stats (P3.1/P3.2)
-            exp_calls = 0
-            exp_ms = 0.0
-            map_voxels = 0
-            memory_mb = 0.0
-
-            if self.use_cpp_ray_processor and self.cpp_ray_processor is not None:
-                try:
-                    ray_stats = self.cpp_ray_processor.get_ray_stats()
-                    exp_calls = ray_stats.exp_calls
-                    exp_ms = ray_stats.exp_time_ms
-                except Exception:
-                    pass
-
-            if self.use_cpp_backend and hasattr(self.cpp_octree, 'get_map_stats'):
-                try:
-                    map_stats = self.cpp_octree.get_map_stats()
-                    map_voxels = map_stats.num_leaf_nodes
-                    memory_mb = map_stats.memory_mb
-                except Exception:
-                    pass
-
-            # Dedup count (from Python octree or estimate)
-            dedup_count = avg_voxels if hasattr(self, 'octree') else 0
-
-            # Record frame metrics with profiler
-            self.profiler.record_frame(
-                frame_id=self.frame_count,
-                timestamp=time.time(),
-                total_ms=avg_frame,
-                ray_ms=avg_ray,
-                octree_ms=avg_octree,
-                exp_calls=exp_calls,
-                exp_ms=exp_ms,
-                map_voxels=map_voxels,
-                memory_mb=memory_mb,
-                dedup_count=int(dedup_count)
-            )
-
-            # Reset C++ stats for next sampling window
-            if self.use_cpp_ray_processor and self.cpp_ray_processor is not None:
-                try:
-                    self.cpp_ray_processor.reset_ray_stats()
-                except Exception:
-                    pass
 
     def __del__(self):
         """Cleanup resources on destruction"""
