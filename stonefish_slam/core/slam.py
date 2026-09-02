@@ -474,6 +474,9 @@ class SLAMNode(Node):
                 sonar_tilt_deg = self.get_parameter('sonar.sonar_tilt_deg').value
                 self.localization.oculus.tilt_angle_deg = sonar_tilt_deg
                 self.localization.oculus.tilt_angle_rad = np.deg2rad(sonar_tilt_deg)
+                # 투영 규약도 같이 넘긴다. 이게 없으면 점군만 투영되고 FFT 직교영상은
+                # legacy 로 남아 시드와 점군이 서로 다른 좌표계가 된다.
+                self.localization.oculus.projection = self.get_parameter('sonar.projection').value
 
                 fft_verbose = self.get_parameter('fft_localization.verbose').value
                 fft_erosion = self.get_parameter('fft_localization.trans_erosion_iterations').value
