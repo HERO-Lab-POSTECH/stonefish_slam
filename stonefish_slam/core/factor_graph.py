@@ -232,7 +232,9 @@ class FactorGraph:
 
         # Insert the variable only once. A second insert of the same key raises,
         # and two detections in one tick can associate to the same new landmark.
-        if not self.values.exists(L(j)) and not self.isam.calculateEstimate().exists(L(j)):
+        # valueExists is an O(1) theta_ lookup; calculateEstimate() would
+        # re-solve the whole Bayes tree once per detection.
+        if not self.values.exists(L(j)) and not self.isam.valueExists(L(j)):
             self.values.insert(L(j), world_guess)
 
         self.graph.add(gtsam.BearingRangeFactor2D(

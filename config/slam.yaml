@@ -124,6 +124,9 @@
         range_sigma: 1.0       # m   — 형식적 사용: 크게 잡아 궤적을 거의 안 끈다
         bearing_sigma_deg: 10.0
         robust_c: 3.0          # Cauchy c (loop closure 의 slam_loop_robust_c 와 독립)
+      # 3D 복셀 라벨 + mapping/cloud_3d 발행. enable_3d_mapping 이 false 면
+      # 이 값과 무관하게 꺼진다(라벨 큐를 비우는 곳이 3D map tick 뿐이다).
+      label_3d: true
 
     # ==================== 2D mapping (occupancy grid) ====================
     mapping_2d:

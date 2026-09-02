@@ -149,6 +149,29 @@ All notable changes to this project will be documented in this file.
     발견했다 — 배포 기본값(`use_cpp_backend: true`)에서 `max_frames` 가 사실상
     동작하지 않는다. 매핑 정책 결정이라 범위 밖으로 두고 `P4_FLAGS.md` 에 적었다.
 
+- **2차 적대 검증 지적 6건 반영** (agy oracle, ground 4 — codex 는 사용량 한도로
+  중단돼 다른 벤더로 다시 돌렸다):
+  - **MAJOR**: `semantic.enable: true` + `enable_3d_mapping: false` 조합에서
+    `pending_semantic_map` 이 영원히 안 비워져 검출이 붙은 모든 키프레임(점군·
+    이미지 포함)이 쌓였다 — 큐를 비우는 곳이 3D map tick 안에만 있었기 때문이다.
+    `label_3d` 를 `enable_3d_mapping` 과 묶었다. 라벨링 중 예외가 나도 큐가
+    막히지 않도록 `clear()` 를 `finally` 로 옮겼다(안 그러면 다음 틱마다 같은
+    예외가 재발한다).
+  - **MINOR**: 한 map tick 에서 키프레임이 M 개면 C++ 옥트리를 M+1 번 걸었다 →
+    점유 복셀을 한 번만 읽어 넘긴다(`label_voxels_from_keyframe(points=...)`,
+    `labels_for_points()` 분리).
+  - **MINOR**: 콜백이 `update_graph` 에 닿기 전에 예외로 끊기면 그 키프레임은
+    append 되지 않고 다음 키프레임이 같은 X 인덱스를 받는다. 그 상태로 늦은
+    검출이 오면 **엉뚱한 pose** 를 조용히 구속했다 → 랜드마크 factor 를 붙이기
+    전에 `keyframes[pose_key] is frame` 을 확인하고, 어긋나면
+    `pose_key_mismatch` 로 센다.
+  - **NIT**: `add_landmark_factor` 가 검출마다 `calculateEstimate()` 로 전체
+    Bayes tree 를 다시 풀었다 → `isam.valueExists()`(O(1) theta_ 조회).
+  - **NIT**: `config/slam.yaml` 의 `semantic:` 블록에 `label_3d` 가 빠져 있었다
+    (선언·문서에는 있는데 파라미터 카탈로그에만 없었다) → 추가하고, 블록이
+    선언된 키를 다 담는지 테스트로 고정했다.
+  - **NIT**: off 동일성 docstring 의 "파라미터 5개" 를 실제 11개로 정정.
+
 - **`cpp/pcl.py` fallback 의 descriptor 집계를 C++ 과 맞췄다**: 순수 파이썬
   `downsample` 은 descriptor 를 **평균**냈다. 이 채널로 keyframe index 와
   semantic 라벨이 나가므로, 한 복셀에 라벨 1·2 가 섞이면 1.5 가 되고 소비자가

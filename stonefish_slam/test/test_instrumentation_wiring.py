@@ -102,6 +102,79 @@ def test_every_declared_semantic_counter_is_incremented_somewhere():
     assert not unknown, f"선언에 없는 카운터를 건드린다(오타 의심): {sorted(unknown)}"
 
 
+def test_label_3d_is_gated_on_3d_mapping_being_enabled():
+    """`pending_semantic_map` 을 비우는 곳이 3D map tick 뿐이라서다.
+
+    `enable_3d_mapping: false` 인데 `label_3d` 가 살아 있으면 검출이 붙은 모든
+    키프레임(점군·이미지 포함)이 큐에 영원히 쌓인다 — 프로세스 수명 내내 자라는
+    메모리 누수다.
+    """
+    src = (CORE / "slam.py").read_text(encoding="utf-8")
+    tree = ast.parse(src, filename="slam.py")
+
+    assign = next(
+        (n for n in ast.walk(tree)
+         if isinstance(n, ast.Assign) and len(n.targets) == 1
+         and isinstance(n.targets[0], ast.Attribute)
+         and n.targets[0].attr == "label_3d"),
+        None,
+    )
+    assert assign is not None, "self.label_3d 대입을 찾지 못했다"
+    assert "enable_3d_mapping" in ast.dump(assign.value), (
+        "label_3d 가 enable_3d_mapping 과 묶여 있지 않다 — 3D 매핑을 끄면 "
+        "재투영 큐를 비우는 곳이 사라진다"
+    )
+
+
+def test_the_reprojection_queue_is_always_cleared():
+    """예외가 나도 큐를 비워야 한다.
+
+    실패한 프레임이 남으면 다음 틱에서 같은 예외가 다시 나고, 그 뒤로 영원히
+    같은 자리에서 죽는다.
+    """
+    tree = _tree("slam.py")
+    func = next(
+        (n for n in ast.walk(tree)
+         if isinstance(n, ast.FunctionDef) and n.name == "_label_and_publish_cloud_3d"),
+        None,
+    )
+    assert func is not None, "_label_and_publish_cloud_3d 를 찾지 못했다"
+
+    tries = [n for n in ast.walk(func) if isinstance(n, ast.Try)]
+    assert tries, "예외 가드가 없다"
+    cleared_in_finally = any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "clear"
+        and "pending_semantic_map" in ast.dump(node.func.value)
+        for t in tries for stmt in t.finalbody for node in ast.walk(stmt)
+    )
+    assert cleared_in_finally, (
+        "pending_semantic_map.clear() 가 finally 밖에 있다 — 예외 한 번에 큐가 "
+        "영구히 막힌다"
+    )
+
+
+def test_landmark_factors_verify_the_pose_key_belongs_to_the_frame():
+    """큐에 잡아둔 X 인덱스가 정말 그 키프레임인지 확인해야 한다.
+
+    콜백이 `update_graph` 에 닿기 전에 예외로 끊기면 그 키프레임은 append 되지
+    않고 다음 키프레임이 같은 인덱스를 받는다. 그 상태로 늦은 검출이 도착하면
+    **엉뚱한 pose** 를 조용히 구속한다.
+    """
+    tree = _tree("slam.py")
+    func = next(
+        (n for n in ast.walk(tree)
+         if isinstance(n, ast.FunctionDef) and n.name == "_add_landmark_factors"),
+        None,
+    )
+    assert func is not None, "_add_landmark_factors 를 찾지 못했다"
+
+    checks = [n for n in ast.walk(func) if isinstance(n, ast.Compare)
+              and any(isinstance(op, ast.Is) for op in n.ops)
+              and "keyframes" in ast.dump(n.left)]
+    assert checks, "keyframes[pose_key] is frame 확인이 없다"
+
+
 def test_dr_fallback_flag_is_read_not_only_written():
     """I4 — `fft_is_dr_fallback` 에 읽기 접근이 있어야 한다.
 

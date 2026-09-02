@@ -180,6 +180,26 @@ def test_only_currently_occupied_voxels_come_out(mapper):
     assert len(points) == 0 and len(labels) == 0
 
 
+def test_prefetched_points_are_used_instead_of_walking_the_octree_again(mapper):
+    """맵 틱 하나에서 키프레임이 여럿이면 옥트리를 M+1 번 걷게 된다 — 한 번만."""
+    target = _cpp_placement(40, 128)
+    _occupy(mapper, [target])
+    points = mapper.get_point_cloud()['points']
+    dets = np.array([[0, 0.9, 120.0, 35.0, 136.0, 45.0]])
+
+    calls = {'n': 0}
+    real = mapper.get_point_cloud
+
+    def _counting(*a, **k):
+        calls['n'] += 1
+        return real(*a, **k)
+    mapper.get_point_cloud = _counting
+
+    assert mapper.label_voxels_from_keyframe(IDENTITY_POSE, dets, points=points) == 1
+    assert calls['n'] == 0, "points 를 넘겼는데도 옥트리를 다시 걸었다"
+    assert list(mapper.labels_for_points(points)) == [1]
+
+
 def test_empty_map_gives_empty_arrays(mapper):
     points, probs, labels = mapper.get_labeled_point_cloud()
     assert len(points) == 0 and len(probs) == 0 and len(labels) == 0

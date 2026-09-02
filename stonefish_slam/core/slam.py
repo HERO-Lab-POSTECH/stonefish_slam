@@ -659,7 +659,12 @@ class SLAMNode(Node):
 
         self.semantic_min_conf = float(self.get_parameter('semantic.min_conf').value)
         self.landmark_enable = self.get_parameter('semantic.landmark.enable').value
-        self.label_3d = self.get_parameter('semantic.label_3d').value
+        # Tied to 3D mapping on purpose: the queue below is only drained from
+        # the map tick, which lives inside `if self.enable_3d_mapping`. Leaving
+        # label_3d true without a mapper makes every detected keyframe pile up
+        # in pending_semantic_map for the life of the process.
+        self.label_3d = (self.get_parameter('semantic.label_3d').value
+                         and self.enable_3d_mapping)
         # Keyframes whose detections are confirmed but whose voxels have not been
         # labelled yet. NOT the same set as `new_keyframes`: a detection can land
         # on a keyframe the mapper already consumed, and
@@ -696,6 +701,7 @@ class SLAMNode(Node):
             'landmark_factors_added': 0,  # ★ "검출이 위치 추정에 쓰였다"의 유일한 증거
             'landmarks_created': 0,     # 새로 만들어진 랜드마크 변수 수
             'voxels_labeled': 0,        # 역투영으로 라벨이 붙은 복셀 수(누적)
+            'pose_key_mismatch': 0,     # 큐에 잡아둔 X 인덱스가 그 키프레임이 아니었다
         }
 
         if self.label_3d and self.enable_3d_mapping:
@@ -804,6 +810,15 @@ class SLAMNode(Node):
             pose_key (int): 그 키프레임의 X 인덱스.
             dets: (K, 6) `[class, conf, x1, y1, x2, y2]`.
         """
+        # 큐에 넣을 때 잡아둔 인덱스가 정말 이 키프레임인지 확인한다. 콜백이
+        # update_graph 에 도달하기 전에 예외로 끊기면 그 키프레임은 append 되지
+        # 않고, 다음 키프레임이 같은 인덱스를 받는다 — 그 상태로 늦은 검출이
+        # 도착하면 **엉뚱한 pose** 를 조용히 구속하게 된다.
+        if not (pose_key < len(self.fg.keyframes)
+                and self.fg.keyframes[pose_key] is frame):
+            self.semantic_instr['pose_key_mismatch'] += 1
+            return
+
         for cls, _conf, x1, y1, x2, y2 in dets:
             col_c, row_c = 0.5 * (x1 + x2), 0.5 * (y1 + y2)
             bearing, rng = pixel_to_bearing_range(
@@ -870,18 +885,22 @@ class SLAMNode(Node):
         검출이 확정된 키프레임을 따로 모아 두었다가 여기서 비운다.
         """
         try:
+            # 지도는 이 안에서 안 바뀌므로 점유 복셀을 한 번만 읽는다 —
+            # 프레임마다 다시 읽으면 C++ 옥트리 순회가 M+1 번 돈다.
+            cloud = self.mapper_3d.get_point_cloud()
             for frame in self.pending_semantic_map:
                 self.semantic_instr['voxels_labeled'] += \
                     self.mapper_3d.label_voxels_from_keyframe(
-                        self.mapper_3d.keyframe_pose_dict(frame), frame.detections)
-            self.pending_semantic_map.clear()
+                        self.mapper_3d.keyframe_pose_dict(frame), frame.detections,
+                        points=cloud['points'])
 
-            points, probs, labels = self.mapper_3d.get_labeled_point_cloud()
+            points, probs = cloud['points'], cloud['probabilities']
             if len(points) == 0:
                 return
-            cloud = np.c_[points, probs.reshape(-1, 1),
-                          labels.reshape(-1, 1).astype(np.float64)]
-            msg = n2r(cloud, "PointCloudXYZPL")
+            labels = self.mapper_3d.labels_for_points(points)
+            msg = n2r(np.c_[points, probs.reshape(-1, 1),
+                            labels.reshape(-1, 1).astype(np.float64)],
+                      "PointCloudXYZPL")
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "world_ned"
             self.cloud_3d_pub.publish(msg)
@@ -889,6 +908,9 @@ class SLAMNode(Node):
             import traceback
             self.get_logger().error(
                 f"labelled 3D cloud failed: {e}\n{traceback.format_exc()}")
+        finally:
+            # 실패한 프레임을 큐에 남기면 매 틱마다 같은 예외가 다시 난다.
+            self.pending_semantic_map.clear()
 
     def _finalize_node_config(self) -> None:
         """Loads ICP config, extracts the robot ID, and calls configure() to finish init."""

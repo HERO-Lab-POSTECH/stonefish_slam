@@ -1282,7 +1282,7 @@ class SonarMapping3D:
                             'w': np.cos(kf.pose.theta() / 2)}
         }
 
-    def label_voxels_from_keyframe(self, robot_pose, detections) -> int:
+    def label_voxels_from_keyframe(self, robot_pose, detections, points=None) -> int:
         """Give occupied voxels the class of the detection box they fall in.
 
         The C++ ray processor never carries the source pixel out of C++ and an
@@ -1296,6 +1296,10 @@ class SonarMapping3D:
                 (`{'position': {...}, 'orientation': {...}}`) for the keyframe
                 the detections belong to.
             detections: (K, 6) `[class, conf, x1, y1, x2, y2]` in image pixels.
+            points (np.ndarray, optional): occupied voxel centres to label, when
+                the caller already has them. Labelling several keyframes in one
+                map tick would otherwise walk the C++ octree once per keyframe,
+                and the map does not change between those calls.
 
         Returns:
             int: how many voxels received a label.
@@ -1303,7 +1307,8 @@ class SonarMapping3D:
         if detections is None or len(detections) == 0:
             return 0
 
-        points = self.get_point_cloud()['points']
+        if points is None:
+            points = self.get_point_cloud()['points']
         if len(points) == 0:
             return 0
 
@@ -1342,12 +1347,34 @@ class SonarMapping3D:
             labelled += int(np.count_nonzero(inside))
         return labelled
 
-    def get_labeled_point_cloud(self):
-        """Occupied voxels with their semantic label.
+    def labels_for_points(self, points) -> np.ndarray:
+        """Label of each given voxel centre (0 = unlabeled).
 
-        Only the voxels that are occupied **now** are returned, so a label on a
+        Only voxels that are occupied **now** are asked about, so a label on a
         cell that has since been cleared never reaches a consumer; it is dropped
         for good at the next `max_frames` reset.
+
+        ponytail: a Python dict lookup per point, O(N) with a tuple built each
+        time. Measured negligible beside the octree walk that produced `points`;
+        key it by a packed int64 and use searchsorted if a big map ever makes
+        this the map tick's bottleneck.
+
+        Args:
+            points (np.ndarray): (N, 3) world coordinates of occupied voxels.
+
+        Returns:
+            np.ndarray: (N,) uint8 labels.
+        """
+        points = np.asarray(points)
+        if len(points) == 0:
+            return np.zeros(0, np.uint8)
+        keys = np.floor(points / self.voxel_resolution).astype(np.int64)
+        return np.fromiter(
+            (self.voxel_labels.get(tuple(k), 0) for k in keys),
+            dtype=np.uint8, count=len(keys))
+
+    def get_labeled_point_cloud(self):
+        """Occupied voxels with their semantic label.
 
         Returns:
             tuple: `(points (N,3), probabilities (N,), labels (N,) uint8)`.
@@ -1355,13 +1382,7 @@ class SonarMapping3D:
         """
         cloud = self.get_point_cloud()
         points, probs = cloud['points'], cloud['probabilities']
-        if len(points) == 0:
-            return points, probs, np.zeros(0, np.uint8)
-        keys = np.floor(points / self.voxel_resolution).astype(np.int64)
-        labels = np.fromiter(
-            (self.voxel_labels.get(tuple(k), 0) for k in keys),
-            dtype=np.uint8, count=len(keys))
-        return points, probs, labels
+        return points, probs, self.labels_for_points(points)
 
     def get_point_cloud(self, include_free=False):
         """

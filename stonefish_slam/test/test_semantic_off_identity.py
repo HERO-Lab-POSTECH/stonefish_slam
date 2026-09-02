@@ -8,9 +8,11 @@ A/B 검증의 기준선은 off 런이므로, off 에서 달라질 수 있는 것
 **`/slam/cloud` 의 PointField 스키마**, **새 토픽·구독의 존재**, **`[INSTR]` 줄의
 형식**, **`vision_msgs` 를 import 하지 않는 것**.
 
-"동일"의 범위는 여기까지다. off 에서도 `semantic.*` 파라미터 5개는 선언되므로
-`ros2 param list` 와 parameter event 는 달라지고, `Keyframe` 은 `labels`·
-`detections` 필드를 갖는다. 관측 가능한 산출물(알고리즘 결과·토픽·메시지 스키마·
+"동일"의 범위는 여기까지다. off 에서도 `semantic.*` 파라미터 11개
+(`enable`·`detection_topic`·`max_stamp_delta`·`pending_timeout`·`min_conf`·
+`landmark.{enable,assoc_radius,range_sigma,bearing_sigma_deg,robust_c}`·
+`label_3d`)는 선언되므로 `ros2 param list` 와 parameter event 는 달라지고,
+`Keyframe` 은 `labels`·`detections` 필드를 갖는다. 관측 가능한 산출물(알고리즘 결과·토픽·메시지 스키마·
 로그)이 같다는 뜻이지 프로세스가 바이트 단위로 같다는 뜻이 아니다.
 
 런타임이 아니라 AST 로 본다. `slam.py`·`conversions.py` 는 import-time 에
@@ -247,5 +249,9 @@ def test_semantic_defaults_to_off_in_code_and_config():
 
     yaml_text = (PKG.parent / "config" / "slam.yaml").read_text(encoding="utf-8")
     assert "semantic:" in yaml_text, "config/slam.yaml 에 semantic 블록이 없다"
-    block = yaml_text.split("semantic:", 1)[1]
-    assert "enable: false" in block.split("# ====", 1)[0]
+    block = yaml_text.split("semantic:", 1)[1].split("# ====", 1)[0]
+    assert "enable: false" in block
+    # 선언만 있고 yaml 에 없으면 파라미터 카탈로그로서의 slam.yaml 이 거짓말을 한다.
+    for key in ("detection_topic", "max_stamp_delta", "pending_timeout",
+                "min_conf", "landmark", "label_3d"):
+        assert f"{key}:" in block, f"config/slam.yaml semantic 블록에 {key} 가 없다"
