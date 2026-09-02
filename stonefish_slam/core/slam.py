@@ -1106,10 +1106,18 @@ class SLAMNode(Node):
 
             # get the registered point cloud
             transf_points = self.fg.keyframes[key].transf_points
+            if transf_points is None:
+                # mapping-only keyframes are appended but never registered
+                # (no factor-graph update), so they carry no global-frame
+                # points — publishing crashed on len(None) at the first one.
+                continue
 
             # append
             all_points.append(transf_points)
             all_keys.append(key * np.ones((len(transf_points), 1)))
+
+        if not all_keys:
+            return
 
         # 3. Merge point clouds
         all_points = np.concatenate(all_points)
