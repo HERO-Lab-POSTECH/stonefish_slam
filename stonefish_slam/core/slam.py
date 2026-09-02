@@ -220,6 +220,7 @@ class SLAMNode(Node):
             'nssm_icp_ok': 0,           # I7 — ICP·변환·overlap 검증까지 통과한 횟수
             'feat_frames': 0,           # I8 — 피처 추출이 성공한 소나 프레임 수(분모)
             'feat_points_sum': 0,       # I8 — 그 프레임들의 피처 점 수 합(평균의 분자)
+            'icp_inert': 0,             # I12 — ICP 가 시드에서 1 cm 미만 움직인 횟수
         }
 
         # 고도계 최신값 (sonar.projection == 'altitude' 의 입력). 없으면 None.
@@ -1264,6 +1265,14 @@ class SLAMNode(Node):
         if ret2.status:
             init_norm = float(np.linalg.norm(ret2.initial_transform.translation()))
             est_norm = float(np.linalg.norm(ret2.estimated_transform.translation()))
+            # I12 — ICP 가 시드에서 실제로 얼마나 움직였는가(m). 부정행위 감사용이다:
+            # 대응 필터를 조이면 ICP 가 시드를 그대로 돌려주는 상태로 수렴할 수 있는데,
+            # 시드의 대부분이 DR fallback 이라 그 상태의 궤적은 사실상 DR 궤적이다.
+            # ratio 만 보면 1.0 에 가까워져 '좋아졌다'로 읽힌다.
+            move = float(np.linalg.norm(
+                ret2.initial_transform.between(ret2.estimated_transform).translation()))
+            if move < 0.01:
+                self.instr['icp_inert'] += 1
             if init_norm > 1e-6:
                 # 시드 출처는 세 가지다. `fft_seeded` 가드 없이 seed_is_dr 만 보면
                 # FFT 를 아예 안 쓴 경우(`fft_localization.enable: false`, FFT 실패)
@@ -1276,6 +1285,7 @@ class SLAMNode(Node):
                     seed_src = 'fft'
                 self.get_logger().info(
                     f"[INSTR] scale init={init_norm:.4f} est={est_norm:.4f} "
+                    f"move={move:.4f} "
                     f"ratio={est_norm / init_norm:.4f} seed={seed_src}"
                 )
 
@@ -1362,7 +1372,8 @@ class SLAMNode(Node):
             f"proj={getattr(self.feature_extractor, 'projection', '?')} "
             f"alt={self.altitude_m if self.altitude_m is not None else float('nan'):.2f} "
             f"proj_drop={getattr(self.feature_extractor, 'proj_dropped', -1)} "
-            f"alt_missing={getattr(self.feature_extractor, 'proj_alt_missing', -1)}"
+            f"alt_missing={getattr(self.feature_extractor, 'proj_alt_missing', -1)} "
+            f"icp_inert={i['icp_inert']}"
         )
 
     def add_nonsequential_scan_matching(self) -> bool:
