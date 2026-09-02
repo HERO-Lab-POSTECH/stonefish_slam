@@ -32,12 +32,12 @@ class Mapping2DStandaloneNode(Node):
         self.declare_parameter('odom_topic', '/bluerov2/odometry')
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
 
-        # Mapping 2D parameters (must match mapping.yaml: mapping_2d.*)
-        self.declare_parameter('mapping_2d.map_2d_resolution', 0.1)
+        # Mapping 2D parameters (must match slam.yaml: mapping_2d.*)
+        self.declare_parameter('mapping_2d.map_2d_resolution', 0.2)
         self.declare_parameter('mapping_2d.map_size', [4000, 4000])
         self.declare_parameter('mapping_2d.intensity_threshold', 50)
 
-        # Sonar parameters (defaults match sonar.yaml)
+        # Sonar parameters (defaults match slam.yaml: sonar.*)
         self.declare_parameter('sonar.range_max', 40.0)
         self.declare_parameter('sonar.range_min', 0.5)
         self.declare_parameter('sonar.horizontal_fov', 130.0)

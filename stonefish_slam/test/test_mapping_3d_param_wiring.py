@@ -1,6 +1,6 @@
 """The main slam_node must actually forward the 3D update-method parameters.
 
-`config/mapping.yaml:34` sets `update_method: 'iwlo'` and
+`config/slam.yaml:34` sets `update_method: 'iwlo'` and
 `launch/slam.launch.py:45` loads `config/mapping/method_{update_method}.yaml`
 accordingly, but `SonarMapping3D` reads the method from the config DICT that
 `core/slam.py` builds (`config.get('update_method', 'log_odds')` at
@@ -127,7 +127,7 @@ def test_launch_override_uses_the_declared_parameter_name():
 def test_launch_default_method_comes_from_mapping_yaml():
     """The launch default must not hardcode a method that contradicts the config."""
     yaml = pytest.importorskip("yaml")
-    mapping_yaml = REPO_ROOT / "config" / "mapping.yaml"
+    mapping_yaml = REPO_ROOT / "config" / "slam.yaml"
     with open(mapping_yaml) as fh:
         configured = (
             yaml.safe_load(fh)["slam_node"]["ros__parameters"]["mapping_3d"]
@@ -147,7 +147,7 @@ def test_launch_default_method_comes_from_mapping_yaml():
             for kw in node.keywords:
                 if kw.arg == "default_value":
                     assert not isinstance(kw.value, ast.Constant), (
-                        f"update_method default is hardcoded; config/mapping.yaml "
+                        f"update_method default is hardcoded; config/slam.yaml "
                         f"selects {configured!r} and would be overridden"
                     )
                     return
@@ -159,12 +159,12 @@ def test_every_mapping_3d_yaml_key_is_declared():
 
     The IWLO fix closed four instances of this defect class; this test closes
     the class. Any key advertised under slam_node.ros__parameters.mapping_3d
-    in config/mapping.yaml or config/mapping/method_*.yaml must be declared
+    in config/slam.yaml or config/mapping/method_*.yaml must be declared
     by core/slam.py, or ROS discards it without a sound.
     """
     yaml = pytest.importorskip("yaml")
     declared = _declared_parameters(_slam_tree())
-    yaml_files = [REPO_ROOT / "config" / "mapping.yaml"] + sorted(
+    yaml_files = [REPO_ROOT / "config" / "slam.yaml"] + sorted(
         (REPO_ROOT / "config" / "mapping").glob("method_*.yaml")
     )
     missing = []

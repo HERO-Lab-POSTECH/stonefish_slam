@@ -3,7 +3,7 @@
 slam_node:
   ros__parameters:
     mapping_3d:
-      # Log-odds parameters (overrides mapping.yaml)
+      # Log-odds parameters (override slam.yaml mapping_3d)
       log_odds_occupied: 2.0      # Log-odds increment for occupied
       log_odds_free: -4.0         # Log-odds decrement for free space
       log_odds_max: 2.0          # Maximum log-odds (clamping)

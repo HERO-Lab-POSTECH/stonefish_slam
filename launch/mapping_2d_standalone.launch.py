@@ -33,9 +33,7 @@ def generate_launch_description():
         executable='mapping_2d_standalone',
         name='slam_node',  # Must match yaml namespace (slam_node.ros__parameters)
         parameters=[
-            str(config_dir / 'sonar.yaml'),    # Sonar parameters
-            str(config_dir / 'mapping.yaml'),  # Mapping parameters
-            str(config_dir / 'slam.yaml'),     # General SLAM params
+            str(config_dir / 'slam.yaml'),     # every slam_node parameter (sonar, mapping_2d, ...)
             {
                 'frame_interval': 10,
                 'odom_topic': ['/', vehicle_name, '/odometry'],

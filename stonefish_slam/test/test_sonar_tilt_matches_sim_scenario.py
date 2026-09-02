@@ -1,9 +1,9 @@
-"""sonar.yaml's sonar_tilt_deg must equal the tilt the simulator actually mounts the FLS at.
+"""slam.yaml's sonar_tilt_deg must equal the tilt the simulator actually mounts the FLS at.
 
 The two numbers live in two repos — the FLS <origin rpy> in stonefish_sim's
-bluerov2.scn and sonar_tilt_deg in this repo's sonar.yaml — and nothing held
+bluerov2.scn and sonar_tilt_deg in this repo's slam.yaml — and nothing held
 them together: they drifted twice (sim 54636c6 read the .scn roll as the tilt
-and moved the real down-angle 30° -> 10° while sonar.yaml kept 30°).
+and moved the real down-angle 30° -> 10° while slam.yaml kept 30°).
 
 Geometry, from the simulator source rather than from the .scn comments:
 - ScenarioParser.cpp:4211 builds the sensor origin as
@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SONAR_YAML = REPO_ROOT / "config" / "sonar.yaml"
+SLAM_YAML = REPO_ROOT / "config" / "slam.yaml"
 SIM_SCN = (
     REPO_ROOT.parent / "stonefish_sim" / "stonefish_description" / "data"
     / "robots" / "bluerov2" / "bluerov2.scn"
@@ -61,7 +61,7 @@ def down_tilt_deg(roll, pitch, yaw):
 
 
 def test_geometry_helper_reproduces_the_known_mountings():
-    # roll 60° = the historic mounting that matched sonar.yaml's 30°,
+    # roll 60° = the historic mounting that matched slam.yaml's 30°,
     # roll 80° = the mounting 54636c6 introduced, which is 10° down, not 80°.
     assert down_tilt_deg(math.radians(60), 0.0, math.radians(90)) == pytest.approx(30.0, abs=1e-6)
     assert down_tilt_deg(math.radians(80), 0.0, math.radians(90)) == pytest.approx(10.0, abs=1e-6)
@@ -71,7 +71,7 @@ def test_sonar_tilt_deg_matches_the_simulator_mounting():
     if not SIM_SCN.exists():
         pytest.skip(f"sibling stonefish_sim checkout not found at {SIM_SCN}")
     yaml = pytest.importorskip("yaml")
-    with open(SONAR_YAML) as fh:
+    with open(SLAM_YAML) as fh:
         tilt_cfg = yaml.safe_load(fh)["slam_node"]["ros__parameters"]["sonar"]["sonar_tilt_deg"]
 
     roll, pitch, yaw = _fls_origin_rpy(SIM_SCN.read_text())
@@ -81,5 +81,5 @@ def test_sonar_tilt_deg_matches_the_simulator_mounting():
     tilt_sim = down_tilt_deg(roll, pitch, yaw)
     assert tilt_sim == pytest.approx(tilt_cfg, abs=0.05), (
         f"simulator mounts the FLS {tilt_sim:.2f}° down (rpy={roll:.5f} {pitch:.5f} {yaw:.5f}) "
-        f"but sonar.yaml says {tilt_cfg}° — fix both repos together (CONTRIBUTING.md §5)"
+        f"but slam.yaml says {tilt_cfg}° — fix both repos together (CONTRIBUTING.md §5)"
     )

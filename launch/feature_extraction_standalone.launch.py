@@ -7,7 +7,7 @@ the optional standalone variant that only publishes feature points.
 Parameters are passed directly as a dict because the node name
 ('feature_extraction_node') does not match the config YAML namespace
 ('slam_node'). The node's declare_parameter defaults already mirror
-config/feature.yaml and config/sonar.yaml, so these values keep the
+config/slam.yaml (CFAR.*, filter.*, sonar.*), so these values keep the
 launch self-documenting and parameterized by vehicle_name.
 """
 

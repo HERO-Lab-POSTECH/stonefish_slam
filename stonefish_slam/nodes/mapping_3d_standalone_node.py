@@ -27,7 +27,7 @@ class Mapping3DStandaloneNode(Node):
     """3D Mapping Standalone Node - Time-synchronized sonar + odometry processing"""
 
     def __init__(self):
-        super().__init__('slam_node')  # Use same namespace as slam.yaml
+        super().__init__('slam_node')  # Must match yaml namespace (slam_node.ros__parameters)
 
         # Declare parameters
         self.declare_parameter('resolution', 0.2)  # Test 3: 0.3 → 0.2
@@ -35,7 +35,7 @@ class Mapping3DStandaloneNode(Node):
         self.declare_parameter('odom_topic', '/bluerov2/odometry')
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
 
-        # Sonar hardware parameters (defaults match sonar.yaml)
+        # Sonar hardware parameters (defaults match slam.yaml: sonar.*)
         self.declare_parameter('sonar.range_max', 40.0)
         self.declare_parameter('sonar.range_min', 0.5)
         self.declare_parameter('sonar.horizontal_fov', 130.0)
@@ -74,8 +74,8 @@ class Mapping3DStandaloneNode(Node):
         self.declare_parameter('max_frames', 0)  # 0 = unlimited (was 1000, caused hang at frame #1300)
         self.declare_parameter('dynamic_expansion', True)
         self.declare_parameter('gaussian_sigma_factor', 2.5)
-        self.declare_parameter('propagation_radius', 2)
-        self.declare_parameter('propagation_sigma', 1.5)
+        self.declare_parameter('mapping_3d.propagation_radius', 2)
+        self.declare_parameter('mapping_3d.propagation_sigma', 1.5)
         self.declare_parameter('use_cpp_ray_processor', True)
 
         # Get parameters
@@ -120,8 +120,8 @@ class Mapping3DStandaloneNode(Node):
             'bearing_step': self.get_parameter('mapping_3d.bearing_step').value,
             'use_dda_traversal': self.get_parameter('mapping_3d.use_dda_traversal').value,
             'enable_propagation': self.get_parameter('mapping_3d.enable_propagation').value,
-            'propagation_radius': self.get_parameter('propagation_radius').value,
-            'propagation_sigma': self.get_parameter('propagation_sigma').value,
+            'propagation_radius': self.get_parameter('mapping_3d.propagation_radius').value,
+            'propagation_sigma': self.get_parameter('mapping_3d.propagation_sigma').value,
             # IWLO parameters
             'sharpness': self.get_parameter('mapping_3d.sharpness').value,
             'decay_rate': self.get_parameter('mapping_3d.decay_rate').value,

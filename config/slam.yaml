@@ -1,35 +1,128 @@
-# SLAM Integration Configuration
-# Contains: Module enable flags
-# NOTE: For module-specific parameters, see:
-#   - sonar.yaml: Sonar hardware parameters (shared with feature extraction)
-#   - feature.yaml: CFAR and filtering parameters
-#   - localization.yaml: SLAM keyframes, noise models, SSM, ICP config path
-#   - factor_graph.yaml: Loop closure (NSSM) and consistency verification (PCM)
-#   - mapping.yaml: 2D/3D mapping parameters
+# stonefish_slam — every slam_node parameter, in one file.
+#
+# Loaded first by every launch file; later sources override it (last wins):
+#   config/mapping/method_<update_method>.yaml  per-method 3D probability-update values (picked by launch)
+#   config/real_bag_overrides.yaml               real sea-trial profile (override_config:=… launch argument)
+#   launch arguments                             mode:=…, enable_2d_mapping:=…, update_method:=…
+# Separate files that are NOT slam_node parameters:
+#   config/icp.yaml, config/icp_real_bag.yaml    libpointmatcher ICP chain (icp_config_file:=… launch argument)
+#   config/dead_reckoning.yaml                   dead_reckoning_node (its own node, not started by slam.launch.py)
+#
+# Angles are radians unless the key says _deg. Frames: world_ned (NED) / base_link (FRD).
 slam_node:
   ros__parameters:
-    # ==================== Module Enable Flags ====================
+    # ==================== Data source ====================
+    vehicle_name: 'bluerov2'
+    sonar_topic: ''            # '' = /{vehicle_name}/fls/image      (real bag: the bag's FLS topic)
+    odom_topic: ''             # '' = /{vehicle_name}/odometry       (real bag: the nav solution topic)
+    sonar_compressed: false    # true = subscribe sensor_msgs/CompressedImage instead of Image
+
+    # ==================== Module switches ====================
+    # slam.launch.py mode:=localization / mode:=mapping overrides these presets; see the launch docstring.
     enable_2d_mapping: true
     enable_3d_mapping: true
+    publish_point_cloud: true  # aggregated /stonefish_slam/slam/cloud (measured blocking ~30 s at 45 keyframes on real bags)
 
-    # Localization modules
-    ssm.enable: true    # Sequential Scan Matching (for localization)
-    nssm.enable: true   # Non-Sequential Scan Matching (loop closure)
+    # ==================== Sonar hardware ====================
+    # Must match the simulator's FLS (stonefish_description bluerov2.scn <sensor name="fls">).
+    sonar:
+      horizontal_fov: 130.0            # degrees
+      vertical_fov: 20.0               # degrees (beam aperture)
+      num_beams: 512                   # = image width  (bearings)
+      num_bins: 500                    # = image height (range bins)
+      range_min: 0.5                   # m
+      range_max: 40.0                  # m
+      sonar_position: [0.0, 0.0, 0.0]  # m, relative to base_link (FRD)
+      # Depression angle below the horizontal plane (0 = level, 90 = straight down).
+      # The .scn <origin rpy> roll is measured from nadir instead: tilt = 90° − roll.
+      # test_sonar_tilt_matches_sim_scenario.py holds the two repos to the same value.
+      sonar_tilt_deg: 30.0
 
-    # FFT localization (optional)
+    # ==================== Feature extraction (CFAR, internal to slam_node) ====================
+    CFAR:
+      Ntc: 20        # training cells (reduced for the simulator)
+      Ngc: 10        # guard cells
+      Pfa: 0.01      # false-alarm rate
+      rank: 10       # matrix rank (Ntc/2 recommended)
+      alg: 'SOCA'    # CFAR variant, see cfar.cpp; SOCA works best here
+    filter:
+      threshold: 80    # min intensity (0-255) to keep a point; higher = fewer points
+      resolution: 0.5  # point-cloud downsampling leaf size (m)
+      radius: 1.0      # outlier-rejection radius (m)
+      min_points: 5    # outlier-rejection min neighbours
+      skip: 5          # process every Nth frame
+    visualization:
+      coordinates: 'cartesian'
+      radius: 2.0
+      color: 'green'
+
+    # ==================== Keyframes & noise models ====================
+    keyframe_duration: 1.0        # s between keyframes (1-4 m spacing works best)
+    keyframe_duration_max: 0.0    # s; > 0 forces a keyframe even if the thresholds below never trip (real bags)
+    keyframe_translation: 1.0     # m
+    keyframe_rotation: 0.174533   # rad (10°)
+    slam_prior_noise: [0.1, 0.1, 0.01]  # [x_sigma_m, y_sigma_m, theta_sigma_rad] initial pose
+    slam_odom_noise: [0.2, 0.2, 0.02]   # dead-reckoning factor
+    slam_icp_noise: [0.1, 0.1, 0.01]    # ICP factor
+    slam_loop_robust_c: 3.0             # Cauchy robust kernel c, loop-closure (NSSM) factors only
+    point_downsample_resolution: 0.5    # voxel leaf size (m) for ICP / publishing
+
+    # ==================== Localization: sequential scan matching (ICP) ====================
+    # FFT (below) seeds ICP when it succeeds; ICP then refines rotation and translation.
+    ssm:
+      enable: true
+      min_points: 50         # min points to attempt SSM
+      max_translation: 3.0   # m, rejection gate
+      max_rotation: 0.5236   # rad (30°), rejection gate
+      target_frames: 3       # previous keyframes the current frame is matched against
+
+    # ==================== Loop closure (NSSM) + pairwise consistency (PCM) ====================
+    nssm:
+      enable: true
+      min_st_sep: 15         # exclusion zone (keyframes) around the newest keyframe
+      min_points: 150
+      max_translation: 5.0   # m
+      max_rotation: 0.5236   # rad (30°)
+      source_frames: 5       # frames aggregated when trying a loop closure
+      cov_samples: 30        # 0 = skip covariance sampling (slow on real data)
+      try_interval: 1        # try a loop closure every N keyframes
+    pcm_queue_size: 5        # PCM sliding window
+    min_pcm: 3               # min pairwise-consistent loop closures to accept
+
+    # ==================== FFT localization (rotation/translation seed for ICP) ====================
     fft_localization:
-      enable: true     # Enable FFT-based rotation/translation estimation
-      range_min: 0.5   # Minimum reliable range (meters)
-      verbose: true    # Enable debug output for FFT localization
-      trans_erosion_iterations: 2  # Erosion iterations for translation mask (0=disabled)
-      trans_gaussian_sigma: 2.0    # Gaussian sigma for edge smoothing (default: 4.0)
-      trans_gaussian_truncate: 3.0 # Gaussian kernel truncation factor (default: 4.0)
-      # Validation parameters (compare FFT with odometry)
-      validate_with_odom: true   # Enable DR vs FFT comparison
-      max_position_error: 0.5    # Max allowed position difference (meters)
-      # 주석이 아니라 값이 진실이다: 0.0872665 rad = 5.000°. 종전 주석의 "~20°"
-      # 는 노드 declare_parameter 기본값(0.35 rad)의 주석을 그대로 옮겨 온 것으로
-      # 보인다 — 값을 20°로 올릴지 5°를 유지할지는 기각률을 바꾸는 동작 변경이라
-      # owner 결정 사항이고, 여기서는 주석만 실제값에 맞춘다.
-      max_rotation_error: 0.0872665   # Max allowed rotation difference (radians, 5.000°)
-      use_dr_rotation: true  # true: DR 회전 사용 (테스트), false: FFT 회전 사용
+      enable: true
+      range_min: 0.5                 # m, minimum reliable range
+      verbose: true
+      trans_erosion_iterations: 2    # translation-mask erosion (0 = off)
+      trans_gaussian_sigma: 2.0
+      trans_gaussian_truncate: 3.0
+      # Validation against odometry (dead reckoning)
+      validate_with_odom: true
+      max_position_error: 0.5        # m
+      max_rotation_error: 0.0872665  # rad (5.000° — the value, not an old "~20°" comment, is the truth)
+      use_dr_rotation: true          # true: rotation from DR, FFT supplies translation only
+
+    # ==================== 2D mapping (occupancy grid) ====================
+    mapping_2d:
+      map_2d_resolution: 0.2    # m/pixel. 0.2 keeps the grid message ~1 MB; 0.1 would be 4x (this key was
+                                # previously advertised as 0.1 but the node hard-coded 0.2 — now it is read)
+      map_size: [4000, 4000]    # [width, height] pixels
+      map_update_interval: 1    # update every N keyframes
+      intensity_threshold: 10   # min intensity (0-255) for a pixel to count
+
+    # ==================== 3D mapping (OctoMap; method_*.yaml adds the per-method values) ====================
+    mapping_3d:
+      map_3d_voxel_size: 0.3          # m
+      min_probability: 0.7            # occupied-voxel threshold
+      use_cpp_backend: true           # C++ backend (DDA + OpenMP)
+      use_cpp_ray_processor: true
+      use_dda_traversal: true
+      bearing_step: 4                 # process every Nth bearing (4 → 128 of 512)
+      use_range_weighting: true       # exponential range weighting
+      lambda_decay: 0.1
+      enable_propagation: true        # interpolate between neighbouring bearings
+      propagation_radius: 2           # ± bearings
+      propagation_sigma: 1.5          # Gaussian weight sigma
+      enable_gaussian_weighting: true
+      update_method: 'iwlo'           # 'log_odds' | 'weighted_avg' | 'iwlo' → config/mapping/method_<name>.yaml

@@ -1,8 +1,8 @@
-"""Every node's sonar.* declare_parameter defaults must match sonar.yaml — hold them to it.
+"""Every node's sonar.* declare_parameter defaults must match slam.yaml (sonar section) — hold them to it.
 
 mapping_2d_standalone_node.py and mapping_3d_standalone_node.py carry the
-comment "defaults match sonar.yaml" directly above their sonar.* declarations,
-and both shipped range_max=15.0 / sonar_tilt_deg=10.0 against sonar.yaml's
+comment "defaults match slam.yaml (sonar section)" directly above their sonar.* declarations,
+and both shipped range_max=15.0 / sonar_tilt_deg=10.0 against slam.yaml's sonar section's
 40.0 / 30.0. Run without a parameter file — which is the whole point of a
 standalone node — that is silently wrong geometry: a 2.7x range error and a
 20 degree tilt error, with nothing in the logs to say so.
@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SONAR_YAML = REPO_ROOT / "config" / "sonar.yaml"
+SLAM_YAML = REPO_ROOT / "config" / "slam.yaml"
 NODES = (
     "core/slam.py",
     "nodes/feature_extraction_node.py",
@@ -56,7 +56,7 @@ def _sonar_defaults(node_filename):
 @pytest.fixture(scope="module")
 def sonar_yaml():
     yaml = pytest.importorskip("yaml")
-    with open(SONAR_YAML) as fh:
+    with open(SLAM_YAML) as fh:
         return yaml.safe_load(fh)["slam_node"]["ros__parameters"]["sonar"]
 
 
@@ -71,6 +71,6 @@ def test_sonar_defaults_match_the_yaml(node_filename, sonar_yaml):
         if key in sonar_yaml and value != sonar_yaml[key]
     }
     assert not mismatched, (
-        f"{node_filename} says 'defaults match sonar.yaml' but they do not "
+        f"{node_filename} says 'defaults match slam.yaml (sonar section)' but they do not "
         f"(key: (node, yaml)): {mismatched}"
     )

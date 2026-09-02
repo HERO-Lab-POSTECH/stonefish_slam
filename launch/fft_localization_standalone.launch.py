@@ -8,7 +8,7 @@ transforms (no odom validation, no DR fallback).
 Parameters are passed directly as a dict because the node name
 ('fft_localization_node') does not match the config YAML namespace
 ('slam_node'). The node's declare_parameter defaults already mirror
-config/slam.yaml (fft_localization.*) and config/sonar.yaml (sonar.*), so
+config/slam.yaml (fft_localization.* and sonar.*), so
 these values keep the launch self-documenting and parameterized by vehicle_name.
 """
 
