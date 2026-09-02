@@ -10,6 +10,7 @@ Completely independent module - no ROS2 or ICP dependencies.
 
 import numpy as np
 from scipy.interpolate import interp1d
+import scipy.fft as _sfft
 from typing import Tuple, Dict, Any, Optional
 import warnings
 
@@ -435,7 +436,7 @@ class FFTLocalizer:
         v[:, -1] += u[:, 0] - u[:, -1]    # Right col: left - right
 
         # Step 2: Solve Poisson equation via FFT
-        v_fft = np.fft.fft2(v)
+        v_fft = _sfft.fft2(v, workers=-1)
 
         q = np.arange(M).reshape(M, 1)
         r = np.arange(N).reshape(1, N)
@@ -446,7 +447,7 @@ class FFTLocalizer:
         s_fft[0, 0] = 0  # DC component is zero
 
         # Step 3: Periodic = original - smooth
-        s = np.real(np.fft.ifft2(s_fft))
+        s = np.real(_sfft.ifft2(s_fft, workers=-1))
         return u - s
 
     def compute_phase_correlation(self,
@@ -475,8 +476,11 @@ class FFTLocalizer:
             img2 = self._periodic_decomposition(img2)
 
         # Compute 2D FFT (no fftshift - standard phase correlation)
-        F1 = np.fft.fft2(img1)
-        F2 = np.fft.fft2(img2)
+        # scipy.fft 는 numpy.fft 와 같은 결과를 내면서 스레드를 쓴다 — 1028x1422
+        # 에서 49.9 → 3.9 ms (실측 2026-09-02). 회전 후보 K 개마다 도는 변환이라
+        # 이 한 줄이 K=9 의 온라인 성립 여부를 갈랐다.
+        F1 = _sfft.fft2(img1, workers=-1)
+        F2 = _sfft.fft2(img2, workers=-1)
 
         # Compute cross power spectrum
         cross_power = F1 * np.conj(F2)
@@ -487,7 +491,7 @@ class FFTLocalizer:
 
         # Inverse FFT to get PCM
         # fftshift applied AFTER ifft2 for peak detection at center
-        pcm = np.fft.ifft2(cross_power_spectrum)
+        pcm = _sfft.ifft2(cross_power_spectrum, workers=-1)
         pcm = np.abs(pcm)
         pcm = np.fft.fftshift(pcm)
 
