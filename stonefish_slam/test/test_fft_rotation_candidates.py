@@ -66,7 +66,10 @@ def _stub(cls, candidates, translations):
         **({'candidates': candidates} if len(candidates) > 1 else {}),
     }
 
-    def _trans(c1, c2, rotation=0.0):
+    f.trans_calls = []
+
+    def _trans(c1, c2, rotation=0.0, refine=True):
+        f.trans_calls.append((round(rotation, 6), refine))
         t, peak = translations[round(rotation, 6)]
         return {'translation': list(t), 'peak_value': peak,
                 'variance_x': 0.1, 'variance_y': 0.2, 'success': True}
@@ -100,6 +103,22 @@ def test_the_strongest_translation_peak_wins(localizer):
     assert out['covariance'][2, 2] == pytest.approx(0.01), \
         "회전 분산이 전역 최대(0.04)의 것이면 팩터 그래프가 틀린 신뢰도를 받는다"
     assert out['rotation_fft'] == pytest.approx(3.0), "FFT 원본 추정은 따로 남아야 한다"
+
+
+def test_discarded_candidates_skip_the_subpixel_refinement(localizer):
+    """버릴 후보에 100배 업샘플 DFT 를 물리면 실시간 예산을 넘긴다.
+
+    peak_value 는 보간 전에 정해지므로 점수는 같다 — 후보 채점은 refine=False,
+    이긴 후보만 refine=True 로 한 번 더. 이 가드가 없으면 최적화가 조용히 되돌아간다.
+    """
+    cands = [(3.0, 0.9, 0.04), (-1.5, 0.8, 0.01), (7.25, 0.7, 0.09)]
+    trans = {3.0: ((9.0, 9.0), 0.20), -1.5: ((1.0, 2.0), 0.77), 7.25: ((5.0, 5.0), 0.31)}
+    f = _stub(localizer, cands, trans)
+    f.estimate_transform(IMG, IMG)
+    scoring = [c for c in f.trans_calls if c[1] is False]
+    refined = [c for c in f.trans_calls if c[1] is True]
+    assert len(scoring) == 3, "후보 셋 다 채점돼야 한다"
+    assert refined == [(-1.5, True)], "보간은 이긴 후보 한 번뿐이어야 한다"
 
 
 def test_the_override_still_bypasses_the_search(localizer):

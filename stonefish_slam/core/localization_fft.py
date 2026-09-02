@@ -936,7 +936,8 @@ class FFTLocalizer:
     def estimate_translation(self,
                              img1_cart: np.ndarray,
                              img2_cart: np.ndarray,
-                             rotation: float = 0.0) -> Dict[str, Any]:
+                             rotation: float = 0.0,
+                             refine: bool = True) -> Dict[str, Any]:
         """
         Estimate translation between two Cartesian sonar images.
 
@@ -946,6 +947,11 @@ class FFTLocalizer:
             img1_cart: First Cartesian image
             img2_cart: Second Cartesian image
             rotation: Pre-computed rotation to compensate (degrees)
+            refine: Run subpixel refinement and peak variance. False is for scoring a
+                rotation hypothesis that may be discarded — `peak_value` is the maximum
+                of the correlation surface and is taken *before* refinement, so the score
+                is identical either way while the 100x-upsampled DFT is not paid for.
+                The chosen hypothesis is re-run with refine=True.
 
         Returns:
             dict with keys:
@@ -1027,15 +1033,20 @@ class FFTLocalizer:
             return_cross_power=True,
             apply_periodic_decomp=False
         )
-        row_offset, col_offset, peak_value = self.detect_peak(pcm, cross_power_spectrum=cross_power)
+        row_offset, col_offset, peak_value = self.detect_peak(
+            pcm, subpixel=refine,
+            cross_power_spectrum=cross_power if refine else None)
 
         # Compute translation variance
-        peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
-        var_row, var_col = self.compute_peak_variance(
-            pcm,
-            peak_loc,
-            self.cart_range_resolution
-        )
+        if refine:
+            peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
+            var_row, var_col = self.compute_peak_variance(
+                pcm,
+                peak_loc,
+                self.cart_range_resolution
+            )
+        else:
+            var_row = var_col = 0.0
 
         # Convert to meters (NED coordinate frame)
         # Phase correlation: row_offset > 0 = image2 shifts down = object farther = robot backward
@@ -1124,12 +1135,18 @@ class FFTLocalizer:
                 print(f"[FFT] Using rotation override: {rotation:.2f}° (FFT estimate: {rot_result['rotation']:.2f}°)")
             trans_result = self.estimate_translation(img1_cart, img2_cart, rotation)
         elif candidates:
-            best = None
+            # 점수만 필요한 동안은 서브픽셀 보간을 끈다 — peak_value 는 보간 전에
+            # 정해지므로 선택 결과가 같고, 버릴 후보 K-1 개에 100배 업샘플 DFT 를
+            # 물리지 않는다. 이긴 후보만 refine=True 로 한 번 더 푼다.
+            best_rot = best_peak = best_var = None
+            best_score = -np.inf
             for cand_rot, cand_peak, cand_var in candidates:
-                trial = self.estimate_translation(img1_cart, img2_cart, cand_rot)
-                if best is None or trial['peak_value'] > best[3]['peak_value']:
-                    best = (cand_rot, cand_peak, cand_var, trial)
-            rotation, rot_peak, var_theta, trans_result = best
+                score = self.estimate_translation(
+                    img1_cart, img2_cart, cand_rot, refine=False)['peak_value']
+                if score > best_score:
+                    best_score, best_rot, best_peak, best_var = score, cand_rot, cand_peak, cand_var
+            rotation, rot_peak, var_theta = best_rot, best_peak, best_var
+            trans_result = self.estimate_translation(img1_cart, img2_cart, rotation)
             if self.verbose:
                 print(f"[FFT] Rotation {rotation:.2f}° chosen from {len(candidates)} candidates "
                       f"by translation peak {trans_result['peak_value']:.4f} "
