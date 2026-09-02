@@ -67,11 +67,6 @@ def test_geometry_helper_reproduces_the_known_mountings():
     assert down_tilt_deg(math.radians(80), 0.0, math.radians(90)) == pytest.approx(10.0, abs=1e-6)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="A2 pending: bluerov2.scn mounts the FLS 10° down (roll 80°) while "
-           "sonar.yaml says 30°. Drop this marker in the PR that aligns them.",
-)
 def test_sonar_tilt_deg_matches_the_simulator_mounting():
     if not SIM_SCN.exists():
         pytest.skip(f"sibling stonefish_sim checkout not found at {SIM_SCN}")
