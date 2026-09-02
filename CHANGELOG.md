@@ -149,6 +149,15 @@ All notable changes to this project will be documented in this file.
     발견했다 — 배포 기본값(`use_cpp_backend: true`)에서 `max_frames` 가 사실상
     동작하지 않는다. 매핑 정책 결정이라 범위 밖으로 두고 `P4_FLAGS.md` 에 적었다.
 
+- **`cpp/pcl.py` fallback 의 descriptor 집계를 C++ 과 맞췄다**: 순수 파이썬
+  `downsample` 은 descriptor 를 **평균**냈다. 이 채널로 keyframe index 와
+  semantic 라벨이 나가므로, 한 복셀에 라벨 1·2 가 섞이면 1.5 가 되고 소비자가
+  정수로 자르면 경고 없이 클래스 1 이 된다. C++ 경로(libpointmatcher OctreeGrid,
+  `samplingMethod=3`)는 medoid 를 고르므로 정수가 보존되는데, fallback 만 달라서
+  `.so` 유무로 라벨이 갈렸다 — 이제 대표점(centroid 최근접)의 descriptor 를
+  그대로 쓴다. 점 좌표는 종전대로 centroid 라 ICP 동작은 그대로다
+  (`docs/CONVENTIONS.md` §2.9 "C++ 동작을 바꾸면 fallback 도 동기화한다").
+
 - **적대 검증 지적 9건 반영** (codex oracle, ground 4):
   - **BLOCKER**: mapping-only + semantic on 에서 두 번째 키프레임부터 점군 발행이
     `ValueError` 로 죽었다. `frame.update()` 가 점을 넣기 **전에** 불려

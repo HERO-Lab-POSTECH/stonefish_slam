@@ -135,3 +135,25 @@ def test_match_returns_zero_distance_for_identical_clouds(load_module):
     pts = _square()
     idx, dist = m.match(pts, pts, knn=1)
     np.testing.assert_allclose(np.asarray(dist).ravel(), 0.0, atol=1e-9)
+
+
+def test_downsample_fallback_keeps_descriptors_integral(load_module):
+    """descriptor 는 평균이 아니라 대표점의 것이어야 한다.
+
+    이 채널로 keyframe index 와 semantic 라벨이 나간다. 두 라벨 1·2 를 평균내면
+    1.5 가 되고, 소비자가 정수로 자르면 경고 없이 클래스 1 이 된다. C++ 경로
+    (libpointmatcher OctreeGrid, samplingMethod=3)는 medoid 를 고르므로 정수가
+    보존되는데, 이 순수 파이썬 fallback 만 다르면 `.so` 유무로 라벨이 갈린다.
+    """
+    pcl = load_module("stonefish_slam/cpp/pcl.py", "pcl_fallback_downsample")
+
+    points = np.array([[0.20, 0.15], [0.21, 0.16], [0.22, 0.14], [5.0, 5.0]])
+    descriptors = np.array([[0.0, 3.0], [1.0, 2.0], [1.0, 2.0], [7.0, 9.0]])
+
+    sampled_points, sampled_desc = pcl.downsample(points, descriptors, 0.5)
+
+    assert len(sampled_points) == 2
+    for row in sampled_desc:
+        assert any(np.array_equal(row, d) for d in descriptors), (
+            f"descriptor {row} 가 입력에 없다 — 평균이 섞였다"
+        )

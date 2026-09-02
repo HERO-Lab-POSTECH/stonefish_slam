@@ -50,6 +50,15 @@ P4d에서 SLAM 출력 토픽의 `frame_id`는 전부 `world_ned`로 통일되었
 | `/stonefish_slam/slam/cloud` | `sensor_msgs/PointCloud2` | - | `world_ned` |
 | `/stonefish_slam/mapping/map_2d_image` | `sensor_msgs/Image` | - | `world_ned` |
 | `/stonefish_slam/mapping/map_3d_octomap` | `octomap_msgs/Octomap` | - | `world_ned` |
+| `/stonefish_slam/mapping/cloud_3d` | `sensor_msgs/PointCloud2` | map tick, **`semantic.enable` 일 때만** | `world_ned` |
+
+`semantic.enable: false`(기본값)면 `cloud_3d` 발행자는 아예 만들어지지 않고
+`/slam/cloud` 도 4필드(`x, y, z, i`) 그대로다. `true` 면 `/slam/cloud` 에 다섯 번째
+`label` 필드가 붙고(검출 클래스 + 1, 0 = 미라벨), `cloud_3d` 가
+`x, y, z, prob, label` 로 3D 복원에 라벨을 실어 나간다 — OctoMap binary 메시지에는
+확률도 라벨도 실을 자리가 없기 때문이다. 검출 입력은
+`/sonar_yolo/detections`(`vision_msgs/Detection2DArray`, sim repo 의
+`stonefish_sonar_yolo` 가 발행)이며 이 역시 `semantic.enable` 일 때만 구독한다.
 
 standalone·dead_reckoning 노드의 발행 토픽은 다음과 같다.
 
