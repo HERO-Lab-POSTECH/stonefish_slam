@@ -53,9 +53,12 @@ class FakeDetectionPublisher(Node):
         self.declare_parameter('class_id', 0)
         self.declare_parameter('score', 0.9)
         self.declare_parameter('box_size', [64, 64])   # [width_px, height_px]
-        # SLAM 은 `filter.skip`(기본 5) 을 통과한 프레임만 처리하므로 1 로 두면
-        # 나머지 검출은 전부 만료되고, 검출 토픽(depth 10)이 넘쳐 `det_missing`
-        # 까지 커진다. 그 값을 낮추려면 `filter.skip` 과 맞춘다.
+        # 1 로 두면 SLAM 이 `filter.skip`(기본 5) 로 건너뛴 프레임의 검출은
+        # 짝을 못 찾고 `det_expired` 로 만료된다 — 정상이고, 이 값을 올려
+        # 줄이려 하면 안 된다. 두 카운터가 각자의 첫 수신 프레임부터 세므로
+        # 위상이 맞는다는 보장이 없어, `filter.skip` 과 같은 값을 넣으면
+        # 오히려 어긋난 프레임만 골라 쏘게 될 수 있다. 전 프레임 발행이
+        # 정합을 보장하는 유일한 설정이다.
         self.declare_parameter('every_n', 1)           # N 프레임마다 한 번
 
         self.class_id = int(self.get_parameter('class_id').value)
@@ -63,6 +66,7 @@ class FakeDetectionPublisher(Node):
         self.box_w, self.box_h = [int(v) for v in self.get_parameter('box_size').value]
         self.every_n = max(1, int(self.get_parameter('every_n').value))
         self.frame_count = 0
+        self.published = 0
 
         self.bridge = CvBridge()
         qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -108,6 +112,11 @@ class FakeDetectionPublisher(Node):
         out.header = msg.header
         out.detections = [det]
         self.pub.publish(out)
+        # 발행 수를 남긴다: SLAM 의 `det_received` 와 대조해야 "검출이
+        # 안 왔다"와 "보냈는데 큐에서 떨어졌다"가 갈린다.
+        self.published += 1
+        self.get_logger().info(f"published={self.published}",
+                               throttle_duration_sec=10.0)
 
     def _brightest_center(self, img: np.ndarray):
         """Centre of the box-sized window with the most energy.

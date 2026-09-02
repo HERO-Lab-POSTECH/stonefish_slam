@@ -1110,9 +1110,18 @@ class SonarMapping3D:
 
             except Exception as e:
                 print(f"[ERROR] C++ RayProcessor failed: {e}")
-                print(f"[INFO] Falling back to Python implementation for this frame")
-                # Disable C++ for this frame and fall through to Python
-                use_cpp_path = False
+                if self.octree is None:
+                    # 파이썬 광선 경로는 마지막에 `self.octree` 로 flush 하는데
+                    # C++ 백엔드에서는 그 옥트리가 아예 없다. 여기서 폴백하면
+                    # `_apply_octree_updates` 가 `NoneType.update_voxel` 로 죽어
+                    # "이 프레임만 실패"가 "노드 사망"이 된다. 이 프레임의 지도
+                    # 갱신만 버린다 — 지금까지의 지도는 C++ 옥트리에 그대로 있다.
+                    print("[ERROR] no Python octree to fall back to "
+                          "(use_cpp_backend) - dropping this frame's map update")
+                else:
+                    print(f"[INFO] Falling back to Python implementation for this frame")
+                    # Disable C++ for this frame and fall through to Python
+                    use_cpp_path = False
 
         if not use_cpp_path:
             # Python Ray Processing Path (existing code)

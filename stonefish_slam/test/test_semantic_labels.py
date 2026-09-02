@@ -125,23 +125,53 @@ def test_a_keyframe_about_to_be_appended_is_accepted(sem):
     `landmark_factors_added=0` · `pose_key_mismatch=19` 로 드러났다(2026-09-02).
     """
     frame = object()
-    assert sem.landmark_pose_key_is_valid(0, [], frame) is True
-    assert sem.landmark_pose_key_is_valid(3, [1, 2, 3], frame) is True
+    assert sem.landmark_pose_key_is_valid(0, [], frame, pre_append=True) is True
+    assert sem.landmark_pose_key_is_valid(
+        3, [1, 2, 3], frame, pre_append=True) is True
 
 
 def test_an_already_appended_keyframe_is_accepted_by_identity(sem):
     frame = object()
-    assert sem.landmark_pose_key_is_valid(1, ["a", frame, "c"], frame) is True
+    assert sem.landmark_pose_key_is_valid(
+        1, ["a", frame, "c"], frame, pre_append=False) is True
 
 
 def test_a_displaced_keyframe_is_rejected(sem):
     """콜백이 끊겨 append 되지 못한 키프레임의 늦은 검출 — 이걸 막는 게 목적이다."""
     dropped, appended = object(), object()
-    assert sem.landmark_pose_key_is_valid(1, ["a", appended], dropped) is False
+    assert sem.landmark_pose_key_is_valid(
+        1, ["a", appended], dropped, pre_append=False) is False
 
 
 def test_a_negative_pose_key_is_rejected(sem):
-    assert sem.landmark_pose_key_is_valid(-1, ["a", "b"], object()) is False
+    assert sem.landmark_pose_key_is_valid(
+        -1, ["a", "b"], object(), pre_append=False) is False
+
+
+def test_a_late_detection_may_not_borrow_the_next_keyframes_index(sem):
+    """같은 `pose_key == len(keyframes)` 도 맥락에 따라 정반대다.
+
+    키프레임 콜백이 `update_graph` 에 닿기 전에 끊기면 그 키프레임은 append 되지
+    않고 `len(keyframes)` 는 그대로다. 그 상태로 늦은 검출이 도착하면 길이만
+    보고는 "곧 append 될 정상 키프레임"과 구별할 수 없고, 통과시키면 그 인덱스를
+    물려받을 **다음** 키프레임이 남의 측정값에 묶인다. 그래서 늦은 경로
+    (`pre_append=False`)는 동일성까지 본다.
+    """
+    dropped = object()
+    keyframes = ["a", "b"]              # dropped 는 여기 없다
+    assert sem.landmark_pose_key_is_valid(
+        2, keyframes, dropped, pre_append=True) is True      # 동기 경로면 정상
+    assert sem.landmark_pose_key_is_valid(
+        2, keyframes, dropped, pre_append=False) is False    # 늦은 경로면 차단
+
+
+def test_the_synchronous_path_still_demands_the_exact_next_index(sem):
+    """`pre_append=True` 가 아무 인덱스나 통과시키는 백도어가 되면 안 된다."""
+    frame = object()
+    assert sem.landmark_pose_key_is_valid(
+        1, ["a", "b"], frame, pre_append=True) is False
+    assert sem.landmark_pose_key_is_valid(
+        -1, [], frame, pre_append=True) is False
 
 
 # --------------------------------------------------------- 라벨 길이 정합

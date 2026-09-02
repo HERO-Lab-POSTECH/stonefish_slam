@@ -712,6 +712,17 @@ class SLAMNode(Node):
                 f"Publishing labelled 3D cloud to: {SLAM_NS}mapping/cloud_3d")
 
         topic = self.get_parameter('semantic.detection_topic').value or '/sonar_yolo/detections'
+        # 깊이 10 을 **유지한다** — 얕아서 검출을 놓치는 것처럼 보이지만,
+        # 100 으로 늘려 같은 bag 을 재생한 결과 `det_missing` 이 오히려
+        # 나빠졌다(`det_matched=37` 시점에서 4 → 71, 2026-09-02 실측).
+        # 노드가 `rclpy.spin`(단일 스레드)이라 ICP 도는 수백 ms 동안 검출 콜백이
+        # 멈추는데, 큐를 깊게 잡으면 그 정체가 **유실**이 아니라 **지연**으로
+        # 바뀐다. 매칭은 `semantic.pending_timeout`(3 s) 안에서만 성립하므로
+        # 뒤늦게 꺼낸 검출은 이미 만료된 키프레임을 찾는다. 오래된 것을 버리는
+        # KEEP_LAST(10) 이 이 파이프라인에서 옳은 정책이다.
+        # ponytail: 진짜 지렛대는 큐 깊이가 아니라 검출 콜백을 별도 콜백 그룹 +
+        # MultiThreadedExecutor 로 빼는 것. `PendingSemantic` 과 `semantic_instr`
+        # 의 동시 접근 설계가 선행돼야 해서 여기서는 하지 않는다.
         self.detection_sub = self.create_subscription(
             Detection2DArray, topic, self.semantic_detection_callback, 10)
         self.get_logger().info(
@@ -766,7 +777,8 @@ class SLAMNode(Node):
         pending = self.pending_semantic.offer_detection(stamp_ns, dets)
         if pending is not None:
             frame, peak_locs, pose_key = pending
-            self._apply_semantic(frame, peak_locs, pose_key, dets)
+            self._apply_semantic(frame, peak_locs, pose_key, dets,
+                                 pre_append=False)
             # 늦게 온 검출은 slam 콜백 밖에서 소비되므로, 여기서 요약을 내지
             # 않으면 `det_matched` 증가가 로그에 영영 안 나타난다.
             self._log_instrumentation()
@@ -775,13 +787,16 @@ class SLAMNode(Node):
         # 검출 쪽에서도 워터마크를 돌린다.
         self._expire_semantic(stamp_ns)
 
-    def _apply_semantic(self, frame: Keyframe, peak_locs, pose_key: int, dets) -> None:
+    def _apply_semantic(self, frame: Keyframe, peak_locs, pose_key: int, dets,
+                        *, pre_append: bool) -> None:
         """검출을 키프레임의 점 라벨과 랜드마크 factor 로 굳힌다.
 
         Args:
             frame (Keyframe): 짝이 맞은 키프레임.
             peak_locs: 그 키프레임의 CFAR 피크 픽셀 (N, 2) `[row, col]`.
             pose_key (int): 그 키프레임이 factor graph 에서 갖는 X 인덱스.
+            pre_append (bool): 키프레임 콜백 안에서 부르는가 —
+                `semantic.landmark_pose_key_is_valid` 로 그대로 넘어간다.
             dets: `_detections_from_msg` 의 (K, 6) 배열.
         """
         self.semantic_instr['det_matched'] += 1
@@ -792,11 +807,13 @@ class SLAMNode(Node):
             # 비는 원인이라 따로 센다(랜드마크 factor 와는 무관하다).
             self.semantic_instr['det_no_labeled_peaks'] += 1
         if self.landmark_enable and self.mode != 'mapping-only':
-            self._add_landmark_factors(frame, pose_key, dets)
+            self._add_landmark_factors(frame, pose_key, dets,
+                                       pre_append=pre_append)
         if self.label_3d and len(dets) > 0:
             self.pending_semantic_map.append(frame)
 
-    def _add_landmark_factors(self, frame: Keyframe, pose_key: int, dets) -> None:
+    def _add_landmark_factors(self, frame: Keyframe, pose_key: int, dets,
+                              *, pre_append: bool) -> None:
         """검출 하나마다 BearingRange factor 하나를 factor graph 에 넣는다.
 
         측정값은 **bbox 중심 픽셀**이다. 라벨이 붙은 CFAR 점의 centroid 를 쓰면
@@ -808,11 +825,14 @@ class SLAMNode(Node):
         Args:
             frame (Keyframe): 짝이 맞은 키프레임.
             pose_key (int): 그 키프레임의 X 인덱스.
+            pre_append (bool): 키프레임 콜백 안에서 부르는가. 늦은 검출
+                경로(False)는 append 동일성까지 확인한다.
             dets: (K, 6) `[class, conf, x1, y1, x2, y2]`.
         """
         # 큐에 잡아둔 X 인덱스가 정말 이 키프레임의 것인지 확인한다
         # (판정 근거는 `semantic.landmark_pose_key_is_valid` 의 docstring).
-        if not landmark_pose_key_is_valid(pose_key, self.fg.keyframes, frame):
+        if not landmark_pose_key_is_valid(pose_key, self.fg.keyframes, frame,
+                                          pre_append=pre_append):
             self.semantic_instr['pose_key_mismatch'] += 1
             return
 
@@ -870,7 +890,8 @@ class SLAMNode(Node):
         dets = self.pending_semantic.offer_keyframe(
             stamp_ns, (frame, peak_locs, pose_key))
         if dets is not None:
-            self._apply_semantic(frame, peak_locs, pose_key, dets)
+            self._apply_semantic(frame, peak_locs, pose_key, dets,
+                                 pre_append=True)
 
         self._expire_semantic(stamp_ns)
 

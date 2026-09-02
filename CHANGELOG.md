@@ -204,8 +204,25 @@ All notable changes to this project will be documented in this file.
   60, `--rate 1.0` 이면 112). 회귀 판정은 **수렴률**(양쪽 1.000)과 위 카운터로
   한다. `det_expired=2178` 도 정상이다 — 주입기는 모든 이미지에 검출을 내지만
   SLAM 은 `filter.skip` 을 통과해 키프레임이 된 프레임만 큐에 넣는다.
-  `det_missing=47` 은 주입기를 `every_n:=1` 로 돌려 검출 토픽(depth 10)이 넘친
-  탓이며, `every_n:=5` 로 `filter.skip` 과 맞추면 줄어든다.
+  `det_missing=47` 의 원인은 **구독 큐가 얕아서가 아니다** — 그 가설로 깊이를
+  10 → 100 으로 올려 같은 bag 을 재생한 결과 매칭률이 72 %(118/165) 에서
+  31 %(40/128) 로 **떨어졌다**(2026-09-02 실측). 주입기 발행 7,328 건 중 slam
+  도달은 두 설정 모두 2.3~2.9 k 로 거의 같다(발행자 history 도 깊이 10 이라
+  거기가 상한이다) — 깊이가 바꾸는 것은 전달률이 아니라 **지연**이다. 노드가
+  단일 스레드 executor 라 ICP 도는 동안 검출 콜백이 멈추는데, 큐를 깊게 잡으면
+  그 정체가 유실이 아니라 지연이 되고, 뒤늦게 꺼낸 검출은 `pending_timeout`
+  (3 s) 을 넘긴 키프레임을 찾는다. 오래된 것을 버리는 KEEP_LAST(10) 이 이
+  파이프라인에서 옳은 정책이라 **깊이 10 을 유지한다**. 진짜 지렛대는 검출
+  콜백을 별도 콜백 그룹 + `MultiThreadedExecutor` 로 빼는 것이고, 그건
+  `PendingSemantic`·`semantic_instr` 동시 접근 설계가 선행돼야 한다.
+  `det_missing` 은 회귀 지표가 아니라 executor 점유 시간의 대리 지표로 읽는다.
+  반증 런 원본은 `.hq/work/project/plan-2026-09-02-semantic-localization/
+  ab-2026-09-02-depth100/`.
+
+  주입기의 `every_n` 을 `filter.skip` 과 맞추라던 이전 안내도 **철회한다** —
+  주입기와 SLAM 이 각자의 첫 수신 프레임부터 세므로 위상이 맞는다는 보장이 없고,
+  한 프레임만 어긋나면 매칭이 0 이 된다. 전 프레임 발행(`every_n:=1`)이 정합을
+  보장하는 유일한 설정이다.
 
   진짜 검출(YOLO)로 하는 데모는 별도 마일스톤이다 — 시뮬 씬에 학습된 클래스
   (sofa) 자산이 없다.
@@ -309,6 +326,26 @@ All notable changes to this project will be documented in this file.
     되돌리는 뮤테이션으로 실효를 확인했다(각각 2건·1건 red). C++ 확장이 없는 CI
     에서도 `max_frames` 쪽은 스텁으로 판정이 서고, 폴백 쪽은 확장이 없으면 어차피
     생성자가 파이썬으로 떨어지므로 그 환경에서는 vacuous 하게 통과한다.
+
+- **런타임에 C++ RayProcessor 가 던지면 노드가 죽던 것**
+  (`core/mapping_3d.py` `_process_all_rays`). 그 `except` 는 "이 프레임만
+  파이썬으로 폴백한다"고 적혀 있었지만, C++ 백엔드에서는 flush 대상
+  `self.octree` 가 없어 `_apply_octree_updates` 가 `NoneType.update_voxel` 로
+  죽었다 — 프레임 단위 실패가 노드 사망이 됐다. 파이썬 옥트리가 없으면
+  폴백하지 않고 그 프레임의 지도 갱신만 버린다(지도는 C++ 옥트리에 남는다).
+  위의 초기화 시점 폴백과 **다른 자리**다(그쪽은 `__init__`, 이쪽은 매 프레임).
+  agy 적대 검증(ground 4) MAJOR 2.
+- **늦게 온 검출이 다음 키프레임의 X 인덱스를 빌려 쓸 수 있던 것**
+  (`core/semantic.py` `landmark_pose_key_is_valid`). 이 술어는 두 호출 맥락을
+  `pose_key == len(keyframes)` 라는 **길이 하나로 추론**하고 있었다. 키프레임
+  콜백 안에서는 그것이 정상 신호(곧 append 된다)지만, 늦은 검출 경로에서는
+  정반대 — 콜백이 append 전에 끊긴 키프레임의 검출이 그 인덱스를 물려받을
+  **다음** 키프레임을 구속한다. 구분을 docstring 이 이미 설명하고 있었는데
+  코드에는 없었다. 이제 호출부가 `pre_append` 로 맥락을 명시한다. 현재 코드에서
+  offer 와 append 사이에는 early return 이 없어 실제 도달에는 예외가 필요하고
+  그러면 노드가 죽지만, 이 술어는 이미 한 번 정반대 방향으로 프로덕션 결함을
+  냈으므로 거리로 지켜지던 불변식을 검사되는 불변식으로 바꾼다.
+  agy 적대 검증(ground 4) MAJOR 1. 케이스 2건 추가.
 
 ### Removed
 

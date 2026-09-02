@@ -91,7 +91,7 @@ ros2 bag play data/bags/2026-09-02-bluerov2-lawnmower-tilt10 --clock
 ros2 launch stonefish_slam slam.launch.py vehicle_name:=bluerov2 \
     use_sim_time:=true rviz:=false semantic:=true
 python3 scripts/fake_detection_publisher.py --ros-args \
-    -p use_sim_time:=true -p every_n:=5      # filter.skip 과 맞춘다, 아래 참조
+    -p use_sim_time:=true                    # every_n 기본 1 = 전 프레임 (아래 참조)
 ros2 bag play data/bags/2026-09-02-bluerov2-lawnmower-tilt10 --clock
 ```
 
@@ -102,7 +102,7 @@ ros2 bag play data/bags/2026-09-02-bluerov2-lawnmower-tilt10 --clock
 | `landmark_factors_added` | > 0, 그리고 `det_matched` 와 **같다** | "검출이 위치 추정에 쓰였다"의 유일한 증거. bbox 중심을 측정값으로 쓰므로 검출 1건 ⇒ factor 1건이 구성상 보장된다 |
 | `pose_key_mismatch` | 0 | > 0 이면 늦은 검출이 엉뚱한 pose 에 붙을 뻔한 것을 막은 것 |
 | `det_expired` | **크다(정상)** | 주입기는 모든 이미지에 검출을 내지만 SLAM 은 `filter.skip` 을 통과해 키프레임이 된 프레임만 큐에 넣는다. 큐 버그의 신호가 아니다 |
-| `det_missing` | 작을수록 좋다 | 키프레임은 생겼는데 검출이 워터마크까지 안 왔다. 주입기를 `every_n:=1` 로 두면 검출 토픽(depth 10)이 넘쳐 커진다 — `filter.skip` 과 맞추면 줄어든다 |
+| `det_missing` | 작을수록 좋다 | 키프레임은 생겼는데 검출이 워터마크까지 안 왔다. **`every_n` 을 `filter.skip` 과 맞춰서 줄이려 하지 말 것** — 주입기와 SLAM 이 각자의 첫 수신 프레임부터 세므로 위상이 맞는다는 보장이 없고, 한 프레임만 어긋나면 매칭이 0 이 된다. 전 프레임 발행(`every_n:=1`)이 정합을 보장하는 유일한 설정이다 |
 | `voxels_labeled` | > 0 | 3D 역투영이 돌았다 |
 | `[FactorGraph] ISAM2 update failed` | 0건 | |
 

@@ -53,7 +53,8 @@ def labels_from_detections(peak_locs: np.ndarray, dets: np.ndarray) -> np.ndarra
     return labels
 
 
-def landmark_pose_key_is_valid(pose_key: int, keyframes, frame) -> bool:
+def landmark_pose_key_is_valid(pose_key: int, keyframes, frame,
+                               *, pre_append: bool) -> bool:
     """큐에 잡아둔 X 인덱스가 정말 이 키프레임의 것인가.
 
     두 경우가 있다. 검출이 이미 와 있어 키프레임 콜백 **안에서** 소비되면 그
@@ -66,17 +67,26 @@ def landmark_pose_key_is_valid(pose_key: int, keyframes, frame) -> bool:
     그 키프레임은 append 되지 않고 다음 키프레임이 같은 인덱스를 받아, 늦은
     검출이 **엉뚱한 pose** 를 조용히 구속하게 된다.
 
+    두 경우를 길이 비교로 **추론하지 않고** 호출부가 `pre_append` 로 밝힌다.
+    같은 `pose_key == len(keyframes)` 라도 앞의 경우엔 정상이고 뒤의 경우엔
+    바로 그 위험 신호이기 때문이다 — 뒤에서 이것을 통과시키면 실패한 키프레임의
+    측정값이 그 인덱스를 물려받은 **다음** 키프레임을 구속한다. 예전에는 이
+    구분이 docstring 에만 있고 코드엔 없었다(agy 적대 검증 2026-09-02).
+
     Args:
         pose_key (int): 큐에 넣을 때 잡아둔 X 인덱스.
         keyframes: 현재 factor graph 의 키프레임 목록.
         frame: 검출이 붙을 키프레임.
+        pre_append (bool): 키프레임 콜백 **안에서** 부르는가. True 면 곧 이어질
+            append 를 예상해 `pose_key == len(keyframes)` 를 통과시키고, False 면
+            이미 append 됐어야 하므로 동일성까지 본다.
 
     Returns:
         bool: factor 를 붙여도 되는가.
     """
     n = len(keyframes)
-    if pose_key == n:
-        return True
+    if pre_append:
+        return pose_key == n
     return 0 <= pose_key < n and keyframes[pose_key] is frame
 
 
