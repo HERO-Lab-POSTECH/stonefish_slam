@@ -86,6 +86,23 @@ def test_detection_rows_drops_non_numeric_class_id_and_counts_it(sem):
     assert len(rows) == 0 and (low, bad) == (0, 1)
 
 
+@pytest.mark.parametrize("class_id", ["-1", "255", "100000"])
+def test_detection_rows_drops_class_ids_the_uint8_label_cannot_hold(sem, class_id):
+    """라벨은 `cls+1` 을 uint8 로 담는다.
+
+    -1 은 라벨 0(=미검출)과 구분이 안 되고, 255 는 wrap 해서 0 이 된다. 조용히
+    틀린 라벨이 되느니 버리고 세는 편이 낫다.
+    """
+    rows, low, bad = sem.detection_rows([(class_id, 0.9, 1.0, 1.0, 2.0, 2.0)], 0.25)
+    assert len(rows) == 0 and (low, bad) == (0, 1)
+
+
+def test_detection_rows_keeps_the_largest_id_the_label_can_hold(sem):
+    rows, _low, bad = sem.detection_rows([("254", 0.9, 1.0, 1.0, 2.0, 2.0)], 0.25)
+    assert len(rows) == 1 and bad == 0
+    assert sem.labels_from_detections(np.array([[1, 1]]), rows)[0] == 255
+
+
 def test_detection_rows_of_nothing_is_an_empty_kx6(sem):
     rows, low, bad = sem.detection_rows([], 0.25)
     assert rows.shape == (0, 6) and (low, bad) == (0, 0)
@@ -96,6 +113,22 @@ def test_detection_rows_feed_labels_from_detections(sem):
     rows, _, _ = sem.detection_rows([("0", 0.9, 100.0, 50.0, 20.0, 10.0)], 0.25)
     peaks = np.array([[50, 100], [50, 89], [44, 100]])  # 중심, 좌측 밖, 상단 밖
     assert list(sem.labels_from_detections(peaks, rows)) == [1, 0, 0]
+
+
+# --------------------------------------------------------- 라벨 길이 정합
+
+
+def test_aligned_labels_passes_a_matching_array_through(sem):
+    labels = np.array([0, 1, 2], np.uint8)
+    assert list(sem.aligned_labels(labels, 3)) == [0, 1, 2]
+
+
+def test_aligned_labels_zeroes_a_mismatched_array(sem):
+    """`transf_points` 가 `points` 보다 오래된 경우 — mapping-only·ISAM2 실패 tick."""
+    out = sem.aligned_labels(np.array([1, 1, 1], np.uint8), 0)
+    assert out.shape == (0,) and out.dtype == np.uint8
+    out = sem.aligned_labels(np.zeros(0, np.uint8), 4)
+    assert list(out) == [0, 0, 0, 0]
 
 
 # ------------------------------------------------- pixel <-> bearing/range
@@ -232,6 +265,39 @@ def test_watermark_expires_unmatched_entries_on_both_sides(sem):
     kfs, dets = q.expire(9_000_000_000)
     assert kfs == ["kf_old"] and dets == ["det_old"]
     assert len(q) == 1
+
+
+def test_matching_is_deterministic_when_two_keyframes_tie(sem):
+    """동률이면 먼저 들어온 키프레임이 이긴다 — 콜백 도착 순서에 안 흔들린다."""
+    q = _queue(sem, delta_ms=50)
+    q.offer_keyframe(1_000_000_000, "kf_first")
+    q.offer_keyframe(1_040_000_000, "kf_second")
+    assert q.offer_detection(1_020_000_000, "det") == "kf_first"
+
+    # 넣는 순서를 뒤집어도 결과가 같아야 한다.
+    q2 = _queue(sem, delta_ms=50)
+    q2.offer_keyframe(1_040_000_000, "kf_second")
+    q2.offer_keyframe(1_000_000_000, "kf_first")
+    assert q2.offer_detection(1_020_000_000, "det") == "kf_second"
+
+
+def test_a_colliding_keyframe_stamp_is_visible_before_it_overwrites(sem):
+    q = _queue(sem)
+    q.offer_keyframe(1_000_000_000, "kf_a")
+    assert q.has_keyframe(1_000_000_000)
+    assert not q.has_keyframe(2_000_000_000)
+
+
+def test_a_backward_clock_jump_drains_the_whole_queue(sem):
+    """bag 루프 재생 — cutoff 가 후퇴하면 이전 epoch 항목이 영원히 안 만료된다."""
+    q = _queue(sem, timeout_s=3.0)
+    q.offer_keyframe(100_000_000_000, "kf_old_epoch")
+    q.offer_detection(100_500_000_000, "det_old_epoch")
+
+    kfs, dets = q.expire(1_000_000_000)      # /clock 이 처음으로 되돌아감
+
+    assert kfs == ["kf_old_epoch"] and dets == ["det_old_epoch"]
+    assert len(q) == 0
 
 
 def test_nothing_expires_before_the_watermark(sem):

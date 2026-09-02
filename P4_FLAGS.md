@@ -304,3 +304,23 @@ P3(기업표준 구조·명명 통일·재구조화·모듈화)에서 **동작 �
 `[INSTR]` 로그는 **경로와 분포**를 준다. 궤적 정확도 자체는 I13(`traj_2d_error_
 accumulator` 의 기존 `mean_err`)이 수정 전후 비교로 답한다 — 신규 코드가 없으므로
 이 브랜치는 그 지표를 건드리지 않는다.
+
+
+## 🔎 `max_frames` 리셋이 C++ 옥트리는 안 지운다 — 미해결 (2026-09-02 발견)
+
+- **파일**: `stonefish_slam/core/mapping_3d.py` `process_sonar_image()` 의 프레임 상한 분기.
+- **발견 경위**: semantic 복셀 라벨의 수명 규칙(라벨은 지도가 비면 같이 비워야 한다)을
+  걸 자리를 찾다가 확인했다. 라벨 쪽은 이 자리에 같이 걸어 뒀다.
+- **증상**: 리셋 분기는 `self.octree.clear()`(**순수 파이썬 백엔드**)만 부른다.
+  `use_cpp_backend: true`(배포 기본값)면 `self.cpp_octree` 는 안 지워지므로
+  `frame_count` 만 0 으로 돌아가고 지도는 계속 누적된다. 즉 **기본 설정에서
+  `max_frames` 는 사실상 동작하지 않는다.**
+- **영향 범위**: 장시간 런의 메모리·`get_occupied_cells` 비용. 정확도에는 직접
+  영향이 없어 지금까지 드러나지 않았다. semantic 라벨은 "현재 점유 복셀과의
+  교집합만 출력" 규칙 때문에 이 결함에 안 물린다.
+- **미수정 이유**: C++ 옥트리를 언제 비울지는 매핑 정책 결정이고(전체 clear 대신
+  sliding window·decay 가 원래 TODO 로 적혀 있다) semantic 작업의 범위 밖이다.
+- **수정 시 확인할 것**: `OctreeMapping.clear()` 바인딩은 이미 있다
+  (`cpp/octree_mapping.cpp`). 지우면 `voxel_labels` 도 같이 지워야 한다 —
+  파이썬 경로에는 이미 그렇게 걸려 있다.
+

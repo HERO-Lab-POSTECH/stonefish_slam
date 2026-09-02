@@ -108,8 +108,10 @@
       use_dr_rotation: false         # false: FFT estimates rotation too; true: rotation from DR, FFT supplies translation only
 
     # ==================== Semantic labels (object detection → SLAM) ====================
-    # off = 오늘과 동일한 동작: 구독도 발행자도 카운터도 생기지 않고
-    # /slam/cloud 는 4필드(XYZI) 스키마를 그대로 유지한다. A/B 의 기준선이다.
+    # off = semantic 이전과 같은 산출물: 구독도 발행자도 카운터도 생기지 않고,
+    # /slam/cloud 는 4필드(XYZI) 스키마를, [INSTR] 은 기존 형식을 유지하며
+    # vision_msgs 를 import 조차 하지 않는다. A/B 의 기준선이다.
+    # (파라미터 목록에는 아래 키들이 선언되므로 `ros2 param list` 는 달라진다.)
     semantic:
       enable: false
       detection_topic: ''      # '' = /sonar_yolo/detections (vision_msgs/Detection2DArray)

@@ -65,12 +65,17 @@ All notable changes to this project will be documented in this file.
   `det_received`·`det_empty`·`det_below_conf`·`det_bad_class`·`det_duplicate`·
   `det_missing`·`det_expired`·`det_matched`·`det_no_labeled_peaks`).
 
-  **`semantic.enable: false` 는 오늘과 동일하다** — 구독도, 새 토픽도, 새
-  `[INSTR]` 줄도 생기지 않고 `/slam/cloud` 는 4필드(XYZI) 스키마를 유지한다.
-  `vision_msgs` import 조차 `_init_semantic()` 의 조기 return 뒤에 있어, 그
-  패키지가 없는 머신에서도 off 런은 그대로 뜬다. 이 동일성이 A/B 검증의 기준선
-  이므로 `test_semantic_off_identity.py` 가 AST 로 못 박는다(PointField 골든
-  표·`PointCloudXYZIL` 게이트·`[INSTR] semantic` 게이트·구독 위치·기본값).
+  **`semantic.enable: false` 는 semantic 이전과 같은 산출물을 낸다** — 구독도,
+  새 토픽도, 새 `[INSTR]` 줄도 생기지 않고 `/slam/cloud` 는 4필드(XYZI) 스키마를
+  유지한다. `vision_msgs` import 조차 `_init_semantic()` 의 조기 return 뒤에
+  있어, 그 패키지가 없는 머신에서도 off 런은 그대로 뜬다. (프로세스가 바이트
+  단위로 같다는 뜻은 아니다: `semantic.*` 파라미터 5개가 선언되므로
+  `ros2 param list` 는 달라지고 `Keyframe` 에 필드 둘이 는다.) 이 동일성이
+  A/B 기준선이므로 `test_semantic_off_identity.py` 가 AST 로 못 박는다 —
+  PointField 골든 표, `PointCloudXYZIL`·`PointCloudXYZPL` 게이트,
+  `[INSTR] semantic` 게이트, 구독·발행자 위치, 기본값, 그리고 **게이트 자신이
+  부정 조건에 속지 않는지**(`if not semantic_enable:` 로 뒤집어도 통과하면
+  회귀 테스트가 아무것도 안 지킨다).
 
   검증용 주입기 `scripts/fake_detection_publisher.py` 를 함께 둔다 — 시뮬 씬에
   학습된 클래스(sofa) 자산이 없어 진짜 YOLO 로는 소비 경로를 검증할 수 없다.
@@ -115,6 +120,65 @@ All notable changes to this project will be documented in this file.
     기준으로 재도록 한다.
   - `semantic.landmark.enable: false` 면 라벨 채널만 돌고 factor 는 안 생긴다.
     `mapping-only` 모드에서도 안 생긴다(factor graph 자체가 안 돈다).
+
+- **3D 복원에 라벨을 얹는다 — 복셀 역투영과 `mapping/cloud_3d` (Stage 3)**:
+  점유 복셀을 검출이 그려진 이미지로 **되쏘아** bbox 안에 떨어지는 것에 클래스를
+  붙이고, `[x, y, z, prob, label]` PointCloud2 로 발행한다. 요청의 "3D 복원 후
+  그 정보를 위치 인식에 사용"에서 3D 산출물에 해당한다.
+
+  C++ 경로를 안 건드리는 이유: `ray_processor` 는 픽셀 인덱스를 C++ 밖으로
+  내보내지 않고 OctoMap 노드에는 라벨 슬롯이 없다. 갱신 시점에 라벨을 붙이려면
+  `VoxelUpdate`·옥트리 노드·pybind 세 층을 같이 고쳐야 하는데, 역투영은 파이썬
+  40여 줄로 같은 결과를 낸다.
+
+  - **경사거리로 역산한다.** `ray_processor.cpp` 는 복셀을
+    `x=r·cos(v)·cos(b), y=r·cos(v)·sin(b), z=r·sin(v)` 로 놓으므로 `|P|=r` 이다.
+    `mapping_3d._voxel_to_sonar_coords` 는 `sqrt(x²+y²)`(수평거리)를 내므로
+    앙각이 0 이 아닌 복셀에서 range bin 이 어긋난다 — 그래서 쓰지 않는다.
+    C++ 이 실제로 그 자리에 놓는지는 `test_cpp_extensions.py` 의 왕복 케이스가
+    스테이징된 `.so` 로 확인한다.
+  - **복셀 중심에는 정확한 픽셀 역산이 없다**(격자에 스냅된 자리라서). 허용
+    오차는 복셀 반대각선(`voxel_resolution·√3/2`)을 픽셀로 환산한 pad 다.
+  - **수명**: `max_frames` 리셋으로 지도가 비면 라벨도 같이 비운다. 출력은 항상
+    **현재 점유 복셀과의 교집합**이라, 점유가 풀린 셀의 라벨은 소비자에게
+    도달하지 않는다. 충돌은 나중 관측이 이긴다.
+  - **재투영 큐**: `keyframes[last_map_update_kf:]` 는 늦게 검출이 붙은
+    키프레임을 다시 돌려주지 않는다. 그래서 검출이 확정된 키프레임을
+    `pending_semantic_map` 에 모아 두었다가 map tick 에서 비운다.
+  - `⚠️ max_frames` 리셋이 **C++ 옥트리는 안 지운다**는 기존 결함을 이 자리에서
+    발견했다 — 배포 기본값(`use_cpp_backend: true`)에서 `max_frames` 가 사실상
+    동작하지 않는다. 매핑 정책 결정이라 범위 밖으로 두고 `P4_FLAGS.md` 에 적었다.
+
+- **적대 검증 지적 9건 반영** (codex oracle, ground 4):
+  - **BLOCKER**: mapping-only + semantic on 에서 두 번째 키프레임부터 점군 발행이
+    `ValueError` 로 죽었다. `frame.update()` 가 점을 넣기 **전에** 불려
+    `transf_points` 가 (0,2) 로 굳는데 `labels` 는 N 이라 `np.c_` 가 터진다.
+    `aligned_labels()` 로 길이를 `transf_points` 에 맞춘다(ISAM2 실패 tick 도 같은
+    불일치를 만든다).
+  - **MAJOR**: 워터마크를 키프레임 콜백에서만 돌려, 키프레임이 안 생기는
+    구간(정지·특징 없음)에서 큐가 무한히 자랐다 → 검출 콜백에서도 돌린다.
+    `/clock` 이 크게 뒤로 뛰면(bag 루프) cutoff 가 후퇴해 이전 epoch 항목이
+    영원히 안 만료되므로, 그때는 큐를 통째로 비운다.
+  - **MAJOR**: 짝짓기 동률에서 dict 순회 순서가 결과를 갈랐다 → 엄격한 개선일
+    때만 갱신해 **먼저 들어온 쪽**이 이기게 했다. 같은 stamp 의 키프레임이
+    덮어써지는 사건은 `kf_stamp_collision` 으로 센다.
+  - **MAJOR**: 늦게 온 검출이 계측 로그에 안 나타났다 → 매칭 성공 시 검출
+    콜백에서도 요약을 낸다. (점군은 다음 키프레임 발행에 실린다 — 전체를 매번
+    다시 만드는 함수라 검출마다 부르면 비용이 감당이 안 된다.)
+  - **MAJOR**: A/B 절차의 `-p semantic.enable:=true` 는 launch 문법이 아니었다 →
+    `slam.launch.py` 에 `semantic:=true|false` 인자를 넣었다. 주입기 문서의
+    "`det_expired` 가 0 이 아니면 큐 버그" 도 **거짓**이었다 — SLAM 은
+    `filter.skip` 을 통과해 키프레임이 된 프레임만 큐에 넣으므로 나머지 검출은
+    정상적으로 만료된다. 판정 기준을 `det_missing == 0` 과
+    `landmark_factors_added ≈ det_matched` 로 고쳤다.
+  - **MINOR**: off 동일성 주장의 범위를 산출물(알고리즘·토픽·스키마·로그)로
+    좁혔다 — 파라미터 5개는 off 에서도 선언되고 `Keyframe` 필드도 는다.
+  - **MINOR**: AST 게이트가 `if not semantic_enable:` 로 뒤집어도 통과했다 →
+    부정 조건을 거부하고, 그 성질 자체를 테스트로 고정했다.
+  - **MINOR**: `class_id` 가 `-1`(라벨 0 과 구분 불가)·`255`(uint8 wrap)여도
+    통과했다 → 0..254 범위 밖은 `det_bad_class` 로 버린다.
+  - **MINOR**: `det_empty` 가 필터 **뒤** 값을 세어 "검출기가 빈 결과를 냈다"로
+    읽을 수 없었다 → 발행자가 보낸 탐지 0건만 센다.
 
 - **위치 추정 파이프라인 계측 I1~I11** (`feat/loc-instrumentation`): "icp 0%" 도
   "DR seed 17%" 도 **분모가 없는 보고**였다 — 어느 경로를 몇 번 탔는지 세는 곳이

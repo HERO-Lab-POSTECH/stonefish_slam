@@ -20,6 +20,10 @@ ROS·gtsam·OpenCV 를 import 하지 않는다. 같은 일을 `feature_extractio
 
 import numpy as np
 
+# 라벨은 `cls + 1` 을 uint8 로 담는다 — 0 은 "라벨 없음" 이므로 255 가 상한이고
+# 클래스 인덱스는 254 까지다.
+MAX_CLASS_ID = 254
+
 
 def labels_from_detections(peak_locs: np.ndarray, dets: np.ndarray) -> np.ndarray:
     """CFAR 피크 픽셀마다 그것을 덮는 bbox 의 클래스 라벨을 붙인다.
@@ -49,6 +53,28 @@ def labels_from_detections(peak_locs: np.ndarray, dets: np.ndarray) -> np.ndarra
     return labels
 
 
+def aligned_labels(labels, n: int) -> np.ndarray:
+    """라벨 배열을 점 개수에 맞춘다 — 길이가 어긋나면 전부 미라벨로.
+
+    `Keyframe.transf_points` 는 `points` 보다 오래됐을 수 있다: mapping-only 는
+    점을 넣은 뒤 키프레임을 다시 등록하지 않고, ISAM2 실패로 `update_graph` 가
+    조기 반환한 tick 도 마찬가지다. 점군은 `transf_points` 를 따르므로 라벨도
+    그것을 따라야 한다 — 길이가 어긋난 채로 `np.c_` 에 넣으면 `ValueError` 로
+    죽어 점군 발행이 통째로 멈춘다.
+
+    Args:
+        labels: 키프레임의 라벨 배열.
+        n (int): 실제로 발행될 점 개수.
+
+    Returns:
+        np.ndarray: (n,) uint8. 길이가 맞으면 원본, 아니면 zeros.
+    """
+    labels = np.asarray(labels, dtype=np.uint8)
+    if len(labels) == n:
+        return labels
+    return np.zeros(n, np.uint8)
+
+
 def detection_rows(items, min_conf: float):
     """검출 메시지에서 뽑은 값들을 Kx6 배열로 — 필터링 규칙이 사는 곳.
 
@@ -64,9 +90,11 @@ def detection_rows(items, min_conf: float):
     Returns:
         tuple: `(rows, n_below_conf, n_bad_class)`.
         `rows` 는 (K, 6) float32 `[class, conf, x1, y1, x2, y2]`(bbox 모서리).
-        `class_id` 가 정수 문자열이 아니면 버리고 `n_bad_class` 로 센다 —
-        표준상 그 필드는 `VisionInfo` DB 의 키라 발행자가 이름을 실을 수도
-        있고, 그런 값은 이 파이프라인이 정수 라벨로 쓸 수 없다.
+        `class_id` 가 **0..254 범위의 정수 문자열이 아니면** 버리고
+        `n_bad_class` 로 센다. 표준상 그 필드는 `VisionInfo` DB 의 키라 발행자가
+        이름이나 임의 정수를 실을 수 있는데, 라벨은 `cls + 1` 을 uint8 로 담으므로
+        음수는 "라벨 없음"(0)과 구분이 안 되고 255 이상은 wrap 해서 조용히
+        엉뚱한 클래스가 된다.
     """
     rows, n_below_conf, n_bad_class = [], 0, 0
     for class_id, score, cx, cy, size_x, size_y in items:
@@ -76,6 +104,9 @@ def detection_rows(items, min_conf: float):
         try:
             cls = int(class_id)
         except (TypeError, ValueError):
+            n_bad_class += 1
+            continue
+        if not 0 <= cls <= MAX_CLASS_ID:
             n_bad_class += 1
             continue
         half_x, half_y = float(size_x) / 2.0, float(size_y) / 2.0
@@ -231,8 +262,21 @@ class PendingSemantic:
         return None
 
     def has_detection(self, stamp_ns: int) -> bool:
-        """같은 stamp 의 미결 검출이 이미 큐에 있는가 (중복 계수용)."""
+        """같은 stamp 의 **아직 안 짝지어진** 검출이 큐에 있는가.
+
+        이미 소비된 stamp 는 기억하지 않는다 — 한 번 매칭된 검출이 재전송되면
+        중복이 아니라 새 미결 검출로 쌓이고, 워터마크에서 만료된다.
+        """
         return stamp_ns in self._detections
+
+    def has_keyframe(self, stamp_ns: int) -> bool:
+        """같은 stamp 의 미결 키프레임이 이미 큐에 있는가.
+
+        같은 소나 프레임이 두 번 키프레임이 되는 일은 없어야 하지만, 그런 일이
+        생기면 뒤엣것이 앞엣것을 조용히 덮어써 앞 키프레임은 `det_missing` 으로도
+        안 잡힌다. 호출자가 그 사건을 셀 수 있게 노출한다.
+        """
+        return stamp_ns in self._keyframes
 
     def expire(self, now_ns: int):
         """워터마크를 넘긴 미결 항목을 빼낸다.
@@ -245,7 +289,18 @@ class PendingSemantic:
             "검출이 끝내 안 왔다"(det_missing), 검출 쪽은 "짝지을 키프레임이
             없었다"(det_expired)를 뜻한다.
         """
-        cutoff = int(now_ns) - self.timeout_ns
+        now_ns = int(now_ns)
+        # `/clock` 이 크게 뒤로 뛰면(bag 루프 재생) cutoff 도 후퇴해 이전 epoch 의
+        # 항목이 영원히 만료되지 않고, 같은 stamp 의 새 키프레임과 잘못 짝지어진다.
+        newest = max([*self._keyframes, *self._detections], default=None)
+        if newest is not None and now_ns < newest - self.timeout_ns:
+            kfs = list(self._keyframes.values())
+            dets = list(self._detections.values())
+            self._keyframes.clear()
+            self._detections.clear()
+            return kfs, dets
+
+        cutoff = now_ns - self.timeout_ns
         kfs = [self._keyframes.pop(k) for k in
                [k for k in self._keyframes if k < cutoff]]
         dets = [self._detections.pop(k) for k in
@@ -257,11 +312,18 @@ class PendingSemantic:
         return len(self._keyframes) + len(self._detections)
 
     def _pop_closest(self, store: dict, stamp_ns: int):
-        """`stamp_ns` 에 가장 가까운 항목을 허용오차 안에서 꺼낸다."""
-        best_key, best_delta = None, self.max_stamp_delta_ns
+        """`stamp_ns` 에 가장 가까운 항목을 허용오차 안에서 꺼낸다.
+
+        동률이면 **먼저 들어온 것**이 이긴다(엄격한 개선일 때만 갱신). `<=` 로
+        두면 dict 순회 순서상 나중 항목이 이겨서, 같은 입력이라도 콜백 도착
+        순서에 따라 결과가 갈린다.
+        """
+        best_key, best_delta = None, None
         for key in store:
             delta = abs(key - stamp_ns)
-            if delta <= best_delta:
+            if delta > self.max_stamp_delta_ns:
+                continue
+            if best_delta is None or delta < best_delta:
                 best_key, best_delta = key, delta
         if best_key is None:
             return None

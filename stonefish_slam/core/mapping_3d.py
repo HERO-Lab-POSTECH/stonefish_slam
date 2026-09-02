@@ -33,6 +33,9 @@ except ImportError as e:
     CPP_RAY_PROCESSOR_AVAILABLE = False
 
 
+from stonefish_slam.core.semantic import slant_range_bearing, sonar_to_pixel
+
+
 def create_transform_matrix(position, tilt_rad):
     """
     Create 4x4 transform with tilt angle (pitch rotation)
@@ -124,6 +127,13 @@ class SonarMapping3D:
         self.min_probability = config['min_probability']
         self.max_frames = config['max_frames']
         self.dynamic_expansion = config['dynamic_expansion']
+
+        # Semantic labels for occupied voxels: floor(P_world / voxel_resolution)
+        # -> class + 1. Kept beside the octree rather than inside it because the
+        # C++ OctoMap node has no label slot and the ray processor never carries
+        # the source pixel out of C++; the labels are computed by projecting
+        # voxels back into the image instead. Empty unless a detection lands.
+        self.voxel_labels: dict = {}
 
         # Sonar mounting transform (convert tilt from degrees to radians, negative for FRD)
         self.sonar_position = np.array(config['sonar_position'])
@@ -1226,6 +1236,10 @@ class SonarMapping3D:
             # Simple approach: clear and restart
             # More sophisticated: implement sliding window or decay
             self.octree.clear()
+            # Labels key off voxel positions, so they have to go when the map
+            # they describe does — otherwise a later voxel re-occupying the
+            # same cell inherits a label from a place the robot has left.
+            self.voxel_labels.clear()
             self.frame_count = 0
 
     def update_map_from_slam(self, new_keyframes):
@@ -1243,18 +1257,111 @@ class SonarMapping3D:
             if polar_img is None:
                 continue
 
-            # Convert gtsam.Pose2/Pose3 to simple pose dict for processing
-            # Use x, y, yaw from Pose2, z from Pose3, assume roll=0, pitch=0
-            pose_dict = {
-                'position': {'x': kf.pose.x(),
-                            'y': kf.pose.y(),
-                            'z': kf.pose3.z()},  # Use actual depth from Pose3
-                'orientation': {'x': 0.0, 'y': 0.0,
-                               'z': np.sin(kf.pose.theta()/2),
-                               'w': np.cos(kf.pose.theta()/2)}
-            }
+            self.process_sonar_image(polar_img, self.keyframe_pose_dict(kf))
 
-            self.process_sonar_image(polar_img, pose_dict)
+    @staticmethod
+    def keyframe_pose_dict(kf):
+        """Pose dict this class consumes, built from a Keyframe.
+
+        Shared with the semantic re-projection so a voxel is un-projected with
+        exactly the transform that placed it.
+
+        Args:
+            kf (Keyframe): the keyframe whose pose to convert.
+
+        Returns:
+            dict: `{'position': {...}, 'orientation': {...}}` — x, y, yaw from
+            the 2D pose, z from the 3D pose, roll and pitch assumed zero.
+        """
+        return {
+            'position': {'x': kf.pose.x(),
+                         'y': kf.pose.y(),
+                         'z': kf.pose3.z()},
+            'orientation': {'x': 0.0, 'y': 0.0,
+                            'z': np.sin(kf.pose.theta() / 2),
+                            'w': np.cos(kf.pose.theta() / 2)}
+        }
+
+    def label_voxels_from_keyframe(self, robot_pose, detections) -> int:
+        """Give occupied voxels the class of the detection box they fall in.
+
+        The C++ ray processor never carries the source pixel out of C++ and an
+        OctoMap node has no label slot, so labelling at update time would mean
+        changing `VoxelUpdate`, the octree node, and the pybind layer. Instead
+        the occupied voxels are projected **back** into the image the detection
+        was drawn on, which is pure Python and leaves the C++ path untouched.
+
+        Args:
+            robot_pose: pose dict as `update_map_from_slam` builds it
+                (`{'position': {...}, 'orientation': {...}}`) for the keyframe
+                the detections belong to.
+            detections: (K, 6) `[class, conf, x1, y1, x2, y2]` in image pixels.
+
+        Returns:
+            int: how many voxels received a label.
+        """
+        if detections is None or len(detections) == 0:
+            return 0
+
+        points = self.get_point_cloud()['points']
+        if len(points) == 0:
+            return 0
+
+        T_world_to_sonar = np.linalg.inv(
+            pose_msg_to_transform(robot_pose) @ self.T_sonar_to_base)
+        points_sonar = points @ T_world_to_sonar[:3, :3].T + T_world_to_sonar[:3, 3]
+
+        slant, bearing = slant_range_bearing(points_sonar)
+        row, col = sonar_to_pixel(
+            slant, bearing, num_bins=self.num_bins, num_beams=self.num_beams,
+            range_min=self.range_min, range_max=self.range_max,
+            horizontal_fov_deg=np.degrees(self.horizontal_fov))
+
+        in_view = ((slant >= self.range_min) & (slant <= self.range_max)
+                   & (np.abs(bearing) <= self.horizontal_fov / 2.0))
+
+        # A voxel centre is not the point the C++ side placed — it is that point
+        # snapped to the grid — so an exact pixel inverse does not exist. Allow
+        # the half-diagonal of a voxel, which bounds the quantization error.
+        pad_m = self.voxel_resolution * np.sqrt(3.0) / 2.0
+        pad_row = pad_m / self.range_resolution
+        pad_col = (np.degrees(pad_m / np.maximum(slant, self.range_min))
+                   / np.degrees(self.horizontal_fov) * (self.num_beams - 1))
+
+        keys = np.floor(points / self.voxel_resolution).astype(np.int64)
+        labelled = 0
+        for cls, _conf, x1, y1, x2, y2 in np.asarray(detections, dtype=np.float64):
+            inside = (in_view
+                      & (col >= x1 - pad_col) & (col <= x2 + pad_col)
+                      & (row >= y1 - pad_row) & (row <= y2 + pad_row))
+            label = np.uint8(int(cls) + 1)
+            for key in keys[inside]:
+                # Later observation wins. ponytail: a majority vote if a voxel
+                # ever needs to survive a wrong detection.
+                self.voxel_labels[tuple(key)] = label
+            labelled += int(np.count_nonzero(inside))
+        return labelled
+
+    def get_labeled_point_cloud(self):
+        """Occupied voxels with their semantic label.
+
+        Only the voxels that are occupied **now** are returned, so a label on a
+        cell that has since been cleared never reaches a consumer; it is dropped
+        for good at the next `max_frames` reset.
+
+        Returns:
+            tuple: `(points (N,3), probabilities (N,), labels (N,) uint8)`.
+            Label 0 means unlabeled.
+        """
+        cloud = self.get_point_cloud()
+        points, probs = cloud['points'], cloud['probabilities']
+        if len(points) == 0:
+            return points, probs, np.zeros(0, np.uint8)
+        keys = np.floor(points / self.voxel_resolution).astype(np.int64)
+        labels = np.fromiter(
+            (self.voxel_labels.get(tuple(k), 0) for k in keys),
+            dtype=np.uint8, count=len(keys))
+        return points, probs, labels
 
     def get_point_cloud(self, include_free=False):
         """

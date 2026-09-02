@@ -8,18 +8,23 @@
 "검출 결과가 위치 인식에 쓰였다"를 보일 수가 없다. 검출기의 성능은 그 질문의
 전제가 아니므로, 검출을 상수로 고정해 **소비 경로만** 먼저 검증한다.
 
-구독한 이미지의 header 를 그대로 복사해 발행하므로 `semantic.max_stamp_delta`
-안에서 반드시 매칭된다 — `det_missing`·`det_expired` 가 0 이 아니면 그건 큐
-버그이지 타이밍 문제가 아니다.
+구독한 이미지의 header 를 그대로 복사해 발행하므로, 그 프레임이 키프레임이
+되기만 하면 `semantic.max_stamp_delta` 안에서 반드시 매칭된다.
+
+**판정 기준을 잘못 읽지 말 것**: SLAM 은 `filter.skip` 을 통과하고 키프레임으로
+뽑힌 프레임만 큐에 넣는다. 주입기는 모든 이미지에 검출을 내므로 나머지는 짝지을
+키프레임이 없어 **정상적으로** `det_expired` 가 된다 — 그 값이 큰 것은 버그가
+아니다. 큐 버그의 신호는 `det_missing`(키프레임은 생겼는데 검출이 끝내 안 옴)
+이 0 이 아닌 것과, `landmark_factors_added` 가 `det_matched` 보다 작은 것이다.
 
 bbox 는 프레임에서 가장 밝은 영역에 놓는다. 랜드마크 factor 는 bbox 중심만
 쓰므로 위치와 무관하게 생기지만, 3D 복셀 라벨 경로는 bbox 안에 실제 반사가
 있어야 라벨이 붙기 때문이다.
 
 ```bash
-# 터미널 A — SLAM (semantic on)
+# 터미널 A — SLAM (semantic on). launch 인자다 — `--ros-args -p` 가 아니다.
 ros2 launch stonefish_slam slam.launch.py vehicle_name:=bluerov2 \
-    use_sim_time:=true rviz:=false -p semantic.enable:=true
+    use_sim_time:=true rviz:=false semantic:=true
 # 터미널 B — 주입기
 python3 scripts/fake_detection_publisher.py --ros-args -p use_sim_time:=true
 # 터미널 C — bag

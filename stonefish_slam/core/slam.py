@@ -27,7 +27,7 @@ from stonefish_slam.core.mapping_3d import SonarMapping3D
 from stonefish_slam.core.feature_extraction import FeatureExtraction
 from stonefish_slam.core.localization_fft import FFTLocalizer
 from stonefish_slam.core.semantic import (
-    PendingSemantic, detection_rows, labels_from_detections,
+    PendingSemantic, aligned_labels, detection_rows, labels_from_detections,
     pixel_to_bearing_range)
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import (
@@ -195,9 +195,10 @@ class SLAMNode(Node):
 
         # Semantic (object-detection) parameters — slam.yaml `semantic:` section.
         # Every one of these is inert while `semantic.enable` is false: no
-        # subscription, no extra publisher, no extra [INSTR] line, and
-        # /slam/cloud keeps its 4-field XYZI schema. Off must stay identical to
-        # the pre-semantic node, because that run is the A/B baseline.
+        # subscription, no extra publisher, no extra [INSTR] line, no
+        # vision_msgs import, and /slam/cloud keeps its 4-field XYZI schema.
+        # That run is the A/B baseline, so its OUTPUT must match the
+        # pre-semantic node (the parameter list itself does grow by these five).
         self.declare_parameter('semantic.enable', False)
         self.declare_parameter('semantic.detection_topic', '')   # '' = /sonar_yolo/detections
         self.declare_parameter('semantic.max_stamp_delta', 0.05)  # s
@@ -211,6 +212,8 @@ class SLAMNode(Node):
         self.declare_parameter('semantic.landmark.range_sigma', 1.0)       # m
         self.declare_parameter('semantic.landmark.bearing_sigma_deg', 10.0)
         self.declare_parameter('semantic.landmark.robust_c', 3.0)
+        # 3D voxel labels + the labelled cloud topic they are published on.
+        self.declare_parameter('semantic.label_3d', True)
 
         # Initialize SLAM modules (composition instead of inheritance)
         self.fg = FactorGraph()
@@ -629,6 +632,10 @@ class SLAMNode(Node):
                 qos_profile=qos_pointcloud_pub_profile
             )
             self.get_logger().info(f"Publishing 3D map to: {SLAM_NS}mapping/map_3d_octomap (QoS: RELIABLE)")
+        # The labelled 3D cloud is created in _init_semantic, not here: with the
+        # feature off the topic must not exist at all.
+        self.cloud_3d_pub = None
+        self.qos_pointcloud_pub_profile = qos_pointcloud_pub_profile
 
         # tf broadcaster to show pose
         self.tf = TransformBroadcaster(self)
@@ -652,6 +659,12 @@ class SLAMNode(Node):
 
         self.semantic_min_conf = float(self.get_parameter('semantic.min_conf').value)
         self.landmark_enable = self.get_parameter('semantic.landmark.enable').value
+        self.label_3d = self.get_parameter('semantic.label_3d').value
+        # Keyframes whose detections are confirmed but whose voxels have not been
+        # labelled yet. NOT the same set as `new_keyframes`: a detection can land
+        # on a keyframe the mapper already consumed, and
+        # `keyframes[last_map_update_kf:]` never hands that one back.
+        self.pending_semantic_map = []
         if self.landmark_enable:
             self.fg.landmark_assoc_radius = float(
                 self.get_parameter('semantic.landmark.assoc_radius').value)
@@ -669,17 +682,28 @@ class SLAMNode(Node):
         # `[INSTR] counters` 줄은 off/on 어느 쪽에서도 형식이 그대로여야 한다.
         self.semantic_instr = {
             'det_received': 0,          # 구독한 Detection2DArray 메시지 수
-            'det_empty': 0,             # 그중 탐지 0건이었던 메시지 수
+            'det_empty': 0,             # 그중 **발행자가** 탐지 0건으로 보낸 메시지 수
+                                        # (필터로 비워진 것은 아래 두 카운터가 센다)
             'det_below_conf': 0,        # min_conf 미만이라 버린 탐지 수
             'det_bad_class': 0,         # class_id 가 정수 문자열이 아니라 버린 탐지 수
-            'det_duplicate': 0,         # 같은 stamp 의 미결 검출을 덮어쓴 횟수
+            'det_duplicate': 0,         # 같은 stamp 의 **미결** 검출을 덮어쓴 횟수
+                                        # (이미 소비된 stamp 의 재전송은 여기 안 잡힌다)
+            'kf_stamp_collision': 0,    # 같은 stamp 의 미결 키프레임을 덮어쓴 횟수
             'det_missing': 0,           # 워터마크까지 검출이 안 온 키프레임 수
             'det_expired': 0,           # 짝지을 키프레임 없이 만료된 검출 수
             'det_matched': 0,           # 키프레임과 짝지어진 검출 메시지 수
             'det_no_labeled_peaks': 0,  # 짝은 맞았으나 bbox 안 CFAR 피크가 0
             'landmark_factors_added': 0,  # ★ "검출이 위치 추정에 쓰였다"의 유일한 증거
             'landmarks_created': 0,     # 새로 만들어진 랜드마크 변수 수
+            'voxels_labeled': 0,        # 역투영으로 라벨이 붙은 복셀 수(누적)
         }
+
+        if self.label_3d and self.enable_3d_mapping:
+            self.cloud_3d_pub = self.create_publisher(
+                PointCloud2, SLAM_NS + 'mapping/cloud_3d',
+                qos_profile=self.qos_pointcloud_pub_profile)
+            self.get_logger().info(
+                f"Publishing labelled 3D cloud to: {SLAM_NS}mapping/cloud_3d")
 
         topic = self.get_parameter('semantic.detection_topic').value or '/sonar_yolo/detections'
         self.detection_sub = self.create_subscription(
@@ -725,9 +749,11 @@ class SLAMNode(Node):
         """
         stamp_ns = _stamp_to_ns(msg.header.stamp)
         self.semantic_instr['det_received'] += 1
-        dets = self._detections_from_msg(msg)
-        if len(dets) == 0:
+        if not msg.detections:
+            # 발행자가 "추론했고 아무것도 없었다"로 보낸 것. 신뢰도·class_id
+            # 필터로 비워진 것과 구분해야 A/B 에서 검출기 상태를 읽을 수 있다.
             self.semantic_instr['det_empty'] += 1
+        dets = self._detections_from_msg(msg)
 
         if self.pending_semantic.has_detection(stamp_ns):
             self.semantic_instr['det_duplicate'] += 1
@@ -735,6 +761,13 @@ class SLAMNode(Node):
         if pending is not None:
             frame, peak_locs, pose_key = pending
             self._apply_semantic(frame, peak_locs, pose_key, dets)
+            # 늦게 온 검출은 slam 콜백 밖에서 소비되므로, 여기서 요약을 내지
+            # 않으면 `det_matched` 증가가 로그에 영영 안 나타난다.
+            self._log_instrumentation()
+
+        # 키프레임이 더 안 생기는 구간(정지·특징 없음)에서도 큐가 자라지 않도록
+        # 검출 쪽에서도 워터마크를 돌린다.
+        self._expire_semantic(stamp_ns)
 
     def _apply_semantic(self, frame: Keyframe, peak_locs, pose_key: int, dets) -> None:
         """검출을 키프레임의 점 라벨과 랜드마크 factor 로 굳힌다.
@@ -754,6 +787,8 @@ class SLAMNode(Node):
             self.semantic_instr['det_no_labeled_peaks'] += 1
         if self.landmark_enable and self.mode != 'mapping-only':
             self._add_landmark_factors(frame, pose_key, dets)
+        if self.label_3d and len(dets) > 0:
+            self.pending_semantic_map.append(frame)
 
     def _add_landmark_factors(self, frame: Keyframe, pose_key: int, dets) -> None:
         """검출 하나마다 BearingRange factor 하나를 factor graph 에 넣는다.
@@ -792,6 +827,20 @@ class SLAMNode(Node):
             if is_new:
                 self.semantic_instr['landmarks_created'] += 1
 
+    def _expire_semantic(self, now_ns: int) -> None:
+        """워터마크를 넘긴 미결 항목을 정리하고 센다.
+
+        키프레임 콜백과 검출 콜백 **양쪽에서** 부른다. 한쪽에서만 부르면 다른
+        쪽만 들어오는 구간(차량 정지로 키프레임이 안 생기거나, 특징이 없어
+        키프레임 판정이 계속 false 인 구간)에서 큐가 무한히 자란다.
+
+        Args:
+            now_ns (int): 방금 처리한 소나 프레임의 stamp(ns).
+        """
+        stale_kfs, stale_dets = self.pending_semantic.expire(now_ns)
+        self.semantic_instr['det_missing'] += len(stale_kfs)
+        self.semantic_instr['det_expired'] += len(stale_dets)
+
     def _offer_keyframe_semantic(self, frame: Keyframe, peak_locs, stamp_ns: int) -> None:
         """키프레임을 미결 큐에 넣고, 워터마크를 넘긴 항목을 정리한다.
 
@@ -804,14 +853,42 @@ class SLAMNode(Node):
         # index it will get is the current length. Carrying it in the payload
         # keeps the key stable for a detection that arrives several frames later.
         pose_key = len(self.fg.keyframes)
+        if self.pending_semantic.has_keyframe(stamp_ns):
+            self.semantic_instr['kf_stamp_collision'] += 1
         dets = self.pending_semantic.offer_keyframe(
             stamp_ns, (frame, peak_locs, pose_key))
         if dets is not None:
             self._apply_semantic(frame, peak_locs, pose_key, dets)
 
-        stale_kfs, stale_dets = self.pending_semantic.expire(stamp_ns)
-        self.semantic_instr['det_missing'] += len(stale_kfs)
-        self.semantic_instr['det_expired'] += len(stale_dets)
+        self._expire_semantic(stamp_ns)
+
+    def _label_and_publish_cloud_3d(self) -> None:
+        """미결 키프레임의 검출을 복셀 라벨로 굳히고 라벨 점군을 발행한다.
+
+        `new_keyframes` 로는 부족하다 — 검출이 늦게 도착한 키프레임은 이미
+        `last_map_update_kf` 뒤로 지나가 다시는 목록에 안 들어온다. 그래서
+        검출이 확정된 키프레임을 따로 모아 두었다가 여기서 비운다.
+        """
+        try:
+            for frame in self.pending_semantic_map:
+                self.semantic_instr['voxels_labeled'] += \
+                    self.mapper_3d.label_voxels_from_keyframe(
+                        self.mapper_3d.keyframe_pose_dict(frame), frame.detections)
+            self.pending_semantic_map.clear()
+
+            points, probs, labels = self.mapper_3d.get_labeled_point_cloud()
+            if len(points) == 0:
+                return
+            cloud = np.c_[points, probs.reshape(-1, 1),
+                          labels.reshape(-1, 1).astype(np.float64)]
+            msg = n2r(cloud, "PointCloudXYZPL")
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = "world_ned"
+            self.cloud_3d_pub.publish(msg)
+        except Exception as e:  # noqa: BLE001 — 부가 산출물이 매핑을 못 죽인다
+            import traceback
+            self.get_logger().error(
+                f"labelled 3D cloud failed: {e}\n{traceback.format_exc()}")
 
     def _finalize_node_config(self) -> None:
         """Loads ICP config, extracts the robot ID, and calls configure() to finish init."""
@@ -1188,6 +1265,9 @@ class SLAMNode(Node):
                                     self.get_logger().info(
                                         f"Published 3D octomap: {len(octomap_msg.data)} bytes"
                                     )
+
+                                if self.semantic_enable and self.label_3d:
+                                    self._label_and_publish_cloud_3d()
                             except Exception as e:
                                 import traceback
                                 self.get_logger().error(f"3D mapping update failed: {e}\n{traceback.format_exc()}")
@@ -1355,7 +1435,8 @@ class SLAMNode(Node):
             all_keys.append(key * np.ones((len(transf_points), 1)))
             if self.semantic_enable:
                 all_labels.append(
-                    self.fg.keyframes[key].labels.reshape(-1, 1).astype(np.float64))
+                    aligned_labels(self.fg.keyframes[key].labels, len(transf_points))
+                    .reshape(-1, 1).astype(np.float64))
 
         if not all_keys:
             return

@@ -180,6 +180,8 @@ def load_mapping_3d():
     # utils/profiler.py는 MappingProfiler를 걷어내면서 사라졌다 — mapping_3d가 더
     # 이상 import하지 않으므로 여기서도 뺀다.
     _load("stonefish_slam/core/octree.py", "stonefish_slam.core.octree")
+    # semantic.py는 numpy만 쓰는 순수 모듈 — mapping_3d가 복셀 라벨 역투영에 쓴다.
+    _load("stonefish_slam/core/semantic.py", "stonefish_slam.core.semantic")
     m3d = _load("stonefish_slam/core/mapping_3d.py", "stonefish_slam.core.mapping_3d")
 
     yield m3d
