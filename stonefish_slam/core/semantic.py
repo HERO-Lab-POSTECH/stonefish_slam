@@ -53,6 +53,33 @@ def labels_from_detections(peak_locs: np.ndarray, dets: np.ndarray) -> np.ndarra
     return labels
 
 
+def landmark_pose_key_is_valid(pose_key: int, keyframes, frame) -> bool:
+    """큐에 잡아둔 X 인덱스가 정말 이 키프레임의 것인가.
+
+    두 경우가 있다. 검출이 이미 와 있어 키프레임 콜백 **안에서** 소비되면 그
+    키프레임은 아직 factor graph 에 append 되기 전이고 곧 그 콜백이 append 한다 —
+    `pose_key == len(keyframes)` 가 **정상**이다. 여기서 막으면 랜드마크 factor 가
+    하나도 안 생긴다(bag 재생 실측 2026-09-02: 실제로 그렇게 막혀 있었다).
+
+    검출이 늦게 와 slam 콜백 **밖에서** 소비될 때만 동일성을 확인할 수 있고,
+    거기가 실제 위험 구간이다: 콜백이 `update_graph` 에 닿기 전에 예외로 끊기면
+    그 키프레임은 append 되지 않고 다음 키프레임이 같은 인덱스를 받아, 늦은
+    검출이 **엉뚱한 pose** 를 조용히 구속하게 된다.
+
+    Args:
+        pose_key (int): 큐에 넣을 때 잡아둔 X 인덱스.
+        keyframes: 현재 factor graph 의 키프레임 목록.
+        frame: 검출이 붙을 키프레임.
+
+    Returns:
+        bool: factor 를 붙여도 되는가.
+    """
+    n = len(keyframes)
+    if pose_key == n:
+        return True
+    return 0 <= pose_key < n and keyframes[pose_key] is frame
+
+
 def aligned_labels(labels, n: int) -> np.ndarray:
     """라벨 배열을 점 개수에 맞춘다 — 길이가 어긋나면 전부 미라벨로.
 

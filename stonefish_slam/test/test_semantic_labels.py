@@ -115,6 +115,35 @@ def test_detection_rows_feed_labels_from_detections(sem):
     assert list(sem.labels_from_detections(peaks, rows)) == [1, 0, 0]
 
 
+# ------------------------------------------------------------- pose key 검증
+
+
+def test_a_keyframe_about_to_be_appended_is_accepted(sem):
+    """정상 경로다 — 검출이 먼저 와 있으면 키프레임은 아직 append 전이다.
+
+    여기서 막으면 랜드마크 factor 가 **하나도** 안 생긴다. 실제로 bag 재생에서
+    `landmark_factors_added=0` · `pose_key_mismatch=19` 로 드러났다(2026-09-02).
+    """
+    frame = object()
+    assert sem.landmark_pose_key_is_valid(0, [], frame) is True
+    assert sem.landmark_pose_key_is_valid(3, [1, 2, 3], frame) is True
+
+
+def test_an_already_appended_keyframe_is_accepted_by_identity(sem):
+    frame = object()
+    assert sem.landmark_pose_key_is_valid(1, ["a", frame, "c"], frame) is True
+
+
+def test_a_displaced_keyframe_is_rejected(sem):
+    """콜백이 끊겨 append 되지 못한 키프레임의 늦은 검출 — 이걸 막는 게 목적이다."""
+    dropped, appended = object(), object()
+    assert sem.landmark_pose_key_is_valid(1, ["a", appended], dropped) is False
+
+
+def test_a_negative_pose_key_is_rejected(sem):
+    assert sem.landmark_pose_key_is_valid(-1, ["a", "b"], object()) is False
+
+
 # --------------------------------------------------------- 라벨 길이 정합
 
 

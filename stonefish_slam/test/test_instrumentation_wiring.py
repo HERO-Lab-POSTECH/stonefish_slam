@@ -169,10 +169,10 @@ def test_landmark_factors_verify_the_pose_key_belongs_to_the_frame():
     )
     assert func is not None, "_add_landmark_factors 를 찾지 못했다"
 
-    checks = [n for n in ast.walk(func) if isinstance(n, ast.Compare)
-              and any(isinstance(op, ast.Is) for op in n.ops)
-              and "keyframes" in ast.dump(n.left)]
-    assert checks, "keyframes[pose_key] is frame 확인이 없다"
+    calls = [n for n in ast.walk(func)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+             and n.func.id == "landmark_pose_key_is_valid"]
+    assert calls, "pose_key 검증 호출이 없다 — 늦은 검출이 엉뚱한 pose 를 구속한다"
 
 
 def test_dr_fallback_flag_is_read_not_only_written():

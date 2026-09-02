@@ -27,8 +27,8 @@ from stonefish_slam.core.mapping_3d import SonarMapping3D
 from stonefish_slam.core.feature_extraction import FeatureExtraction
 from stonefish_slam.core.localization_fft import FFTLocalizer
 from stonefish_slam.core.semantic import (
-    PendingSemantic, aligned_labels, detection_rows, labels_from_detections,
-    pixel_to_bearing_range)
+    PendingSemantic, aligned_labels, detection_rows,
+    labels_from_detections, landmark_pose_key_is_valid, pixel_to_bearing_range)
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import (
     LOCALIZATION_ODOM_TOPIC, SLAM_CLOUD_TOPIC, SLAM_CONSTRAINT_TOPIC,
@@ -810,12 +810,9 @@ class SLAMNode(Node):
             pose_key (int): 그 키프레임의 X 인덱스.
             dets: (K, 6) `[class, conf, x1, y1, x2, y2]`.
         """
-        # 큐에 넣을 때 잡아둔 인덱스가 정말 이 키프레임인지 확인한다. 콜백이
-        # update_graph 에 도달하기 전에 예외로 끊기면 그 키프레임은 append 되지
-        # 않고, 다음 키프레임이 같은 인덱스를 받는다 — 그 상태로 늦은 검출이
-        # 도착하면 **엉뚱한 pose** 를 조용히 구속하게 된다.
-        if not (pose_key < len(self.fg.keyframes)
-                and self.fg.keyframes[pose_key] is frame):
+        # 큐에 잡아둔 X 인덱스가 정말 이 키프레임의 것인지 확인한다
+        # (판정 근거는 `semantic.landmark_pose_key_is_valid` 의 docstring).
+        if not landmark_pose_key_is_valid(pose_key, self.fg.keyframes, frame):
             self.semantic_instr['pose_key_mismatch'] += 1
             return
 

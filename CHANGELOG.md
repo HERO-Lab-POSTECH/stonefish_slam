@@ -163,8 +163,13 @@ All notable changes to this project will be documented in this file.
   - **MINOR**: 콜백이 `update_graph` 에 닿기 전에 예외로 끊기면 그 키프레임은
     append 되지 않고 다음 키프레임이 같은 X 인덱스를 받는다. 그 상태로 늦은
     검출이 오면 **엉뚱한 pose** 를 조용히 구속했다 → 랜드마크 factor 를 붙이기
-    전에 `keyframes[pose_key] is frame` 을 확인하고, 어긋나면
-    `pose_key_mismatch` 로 센다.
+    전에 `landmark_pose_key_is_valid()` 로 확인하고, 어긋나면
+    `pose_key_mismatch` 로 센다. ⚠️ 이 가드의 첫 판이 **정상 경로까지 막았다**:
+    검출이 먼저 와 있으면 키프레임은 아직 append 전이라
+    `pose_key == len(keyframes)` 가 맞는데, 동일성만 보면 전부 걸러진다. bag
+    재생에서 `landmark_factors_added=0` · `pose_key_mismatch=19` 로 드러났고,
+    판정을 순수 함수로 떼어 네 케이스를 테스트로 고정했다 — 단위 테스트 195건이
+    이 구멍을 못 잡았다는 뜻이라 그 자체를 기록으로 남긴다.
   - **NIT**: `add_landmark_factor` 가 검출마다 `calculateEstimate()` 로 전체
     Bayes tree 를 다시 풀었다 → `isam.valueExists()`(O(1) theta_ 조회).
   - **NIT**: `config/slam.yaml` 의 `semantic:` 블록에 `label_3d` 가 빠져 있었다
