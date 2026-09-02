@@ -177,8 +177,7 @@ def test_the_guard_holds_even_where_the_cpp_octree_imports(
     assert m.cpp_octree is None
 
 
-def test_a_runtime_ray_processor_failure_does_not_kill_the_node(
-        load_mapping_3d, monkeypatch):
+def test_a_runtime_ray_processor_failure_does_not_kill_the_node(load_mapping_3d):
     """프레임 처리 중 C++ 광선 처리기가 던져도 노드는 살아야 한다.
 
     예전에는 그 `except` 가 파이썬 경로로 폴백했는데, C++ 백엔드에서는 flush 할
