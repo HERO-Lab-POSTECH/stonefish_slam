@@ -48,6 +48,9 @@ class FactorGraph:
         self.pcm_queue_size = 5
         self.min_pcm = 3
 
+        # 계측 (I7) — PCM 이 실제로 그래프에 넣은 루프 팩터 수. 판정에 쓰이지 않는다.
+        self.pcm_inserted_count = 0
+
         # Robust cost parameter for loop closure (NSSM) factors only.
         # Cauchy kernel: c=3.0 means "down-weight at ~3σ" (conservative).
         self.robust_loop_c: float = 3.0
@@ -284,6 +287,7 @@ class FactorGraph:
                 )
 
                 ret.inserted = True
+                self.pcm_inserted_count += 1
 
     def verify_pcm(self, queue: List[ICPResult], min_pcm_value: int) -> List[int]:
         """Verify Pairwise Consistent Measurements (PCM).

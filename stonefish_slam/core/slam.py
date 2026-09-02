@@ -212,6 +212,11 @@ class SLAMNode(Node):
             'seed_dr_fallback': 0,      # I4 — DR fallback 이 시드로 쓰인 횟수
             'reject_pos': 0,            # I6 — 위치 오차로 기각
             'reject_rot': 0,            # I6 — 회전 오차로 기각
+            'nssm_attempted': 0,        # I7 — 루프 후보 탐색을 실제로 돌린 횟수(분모)
+            'nssm_init_ok': 0,          # I7 — 후보 초기화가 성공한 횟수
+            'nssm_icp_ok': 0,           # I7 — ICP·변환·overlap 검증까지 통과한 횟수
+            'feat_frames': 0,           # I8 — 피처 추출이 성공한 소나 프레임 수(분모)
+            'feat_points_sum': 0,       # I8 — 그 프레임들의 피처 점 수 합(평균의 분자)
         }
 
         # Mapping initialization (configured in init_node)
@@ -730,6 +735,10 @@ class SLAMNode(Node):
         # (ICP, mapping, keyframe 판단 등에 모두 필요 - 항상 수행)
         try:
             points = self.feature_extractor.extract_features(sonar_msg)
+            # I8 — 프레임당 피처 수의 평균을 카운터 줄에 싣는다. 위의 info 로그는
+            # 1 Hz throttle 이라 CFAR 설정 비교의 분모로 쓸 수 없다.
+            self.instr['feat_frames'] += 1
+            self.instr['feat_points_sum'] += len(points)
             self.get_logger().info(
                 f"Callback: extracted {len(points)} features",
                 throttle_duration_sec=1.0
@@ -1304,7 +1313,7 @@ class SLAMNode(Node):
         self._log_instrumentation()
 
     def _log_instrumentation(self) -> None:
-        """계측 카운터 한 줄 요약 (I1~I6).
+        """계측 카운터 한 줄 요약 (I1~I7).
 
         키프레임마다 나가므로 `grep '\\[INSTR\\] counters'` 로 시계열을 그대로 뽑을
         수 있다. `ssm_disabled` 는 `Localization` 이 세므로 여기서 읽어 온다 — 이
@@ -1321,7 +1330,12 @@ class SLAMNode(Node):
             f"factor_icp={i['icp_factor_added']} factor_odom={i['odom_factor_fallback']} "
             f"ssm_init_failed={i['ssm_init_failed']} "
             f"seed_fft={i['seed_fft']} seed_dr={i['seed_dr_fallback']} "
-            f"reject_pos={i['reject_pos']} reject_rot={i['reject_rot']}"
+            f"reject_pos={i['reject_pos']} reject_rot={i['reject_rot']} "
+            f"nssm_attempted={i['nssm_attempted']} nssm_init_ok={i['nssm_init_ok']} "
+            f"nssm_icp_ok={i['nssm_icp_ok']} "
+            f"pcm_accepted={getattr(self.fg, 'pcm_inserted_count', -1)} "
+            f"feat_mean={(i['feat_points_sum'] / i['feat_frames']) if i['feat_frames'] else float('nan'):.1f} "
+            f"feat_frames={i['feat_frames']}"
         )
 
     def add_nonsequential_scan_matching(self) -> bool:
@@ -1335,10 +1349,12 @@ class SLAMNode(Node):
             return False
 
         # Initialize NSSM
+        self.instr['nssm_attempted'] += 1
         ret = self.localization.initialize_nonsequential_scan_matching()
 
         if not ret.status:
             return False
+        self.instr['nssm_init_ok'] += 1
 
         # Create ICP result
         ret2 = ICPResult(ret, self.localization.nssm_params.cov_samples > 0)
@@ -1395,6 +1411,7 @@ class SLAMNode(Node):
 
         # Add to loop closure queue for PCM verification
         if ret2.status:
+            self.instr['nssm_icp_ok'] += 1
             self.fg.add_loop_closure(ret2)
             return True
 
