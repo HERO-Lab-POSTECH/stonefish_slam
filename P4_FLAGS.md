@@ -306,7 +306,26 @@ accumulator` 의 기존 `mean_err`)이 수정 전후 비교로 답한다 — 신
 이 브랜치는 그 지표를 건드리지 않는다.
 
 
-## 🔎 `max_frames` 리셋이 C++ 옥트리는 안 지운다 — 미해결 (2026-09-02 발견)
+## ✅ `max_frames` 리셋이 C++ 옥트리는 안 지운다 — **해결(2026-09-02)**
+
+> **해결 + 정정.** `_reset_map_if_frame_limit()` 로 떼어내 살아있는 백엔드를
+> 지우게 했다. **아래 원 서술의 증상 판정이 틀렸다** — "지도가 계속 누적된다"가
+> 아니라 그 자리에서 **AttributeError 로 죽는다**. `use_cpp_backend: true` 면
+> `self.octree` 는 `None` 이므로(`mapping_3d.py` 초기화 분기) `self.octree.clear()`
+> 는 누적이 아니라 크래시다. 실측:
+>
+> ```
+> use_cpp_backend=True use_cpp_ray_processor=True max_frames=2
+>   frame 1: ok   frame 2: ok
+>   frame 3: AttributeError: 'NoneType' object has no attribute 'clear'
+> ```
+>
+> 같은 원인(`self.octree is None`)에서 나온 **두 번째 크래시**를 함께 찾아 고쳤다:
+> `use_cpp_backend: true` + `use_cpp_ray_processor: false`(둘 다 `config/slam.yaml`
+> 노브) 면 파이썬 광선 경로가 `self.octree.update_voxel` 을 불러 **첫 프레임**에서
+> 죽는다. C++ RayProcessor 가 빠지면 백엔드까지 같이 내리도록 고쳤다.
+> 회귀 가드는 `test/test_mapping_3d_backend_fallback.py`(6케이스, 뮤테이션으로
+> 실효 확인). 아래는 발견 당시 기록(보존).
 
 - **파일**: `stonefish_slam/core/mapping_3d.py` `process_sonar_image()` 의 프레임 상한 분기.
 - **발견 경위**: semantic 복셀 라벨의 수명 규칙(라벨은 지도가 비면 같이 비워야 한다)을

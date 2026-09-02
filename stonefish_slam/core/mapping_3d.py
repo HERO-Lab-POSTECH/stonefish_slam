@@ -293,6 +293,17 @@ class SonarMapping3D:
                     print(f"[INFO] C++ RayProcessor disabled (requires C++ octree backend)")
             self.use_cpp_ray_processor = False
 
+        # 파이썬 광선 경로는 `self.octree` 에 기록하는데, 그 옥트리는
+        # `use_cpp_backend` 가 꺼져 있을 때만 만들어진다. 그래서 C++
+        # RayProcessor 만 빠지고 백엔드는 켜진 채로 남으면 첫 프레임에서
+        # `NoneType.update_voxel` 로 죽는다 — 파이썬 갱신분을 C++ 옥트리에
+        # 넣는 경로는 없으므로, 폴백은 백엔드까지 통째로 내려야 성립한다.
+        if self.use_cpp_backend and not self.use_cpp_ray_processor:
+            print("[WARNING] C++ RayProcessor unavailable -> falling back to the "
+                  "Python octree backend (use_cpp_backend forced off)")
+            self.use_cpp_backend = False
+            self.cpp_octree = None
+
         # Initialize Python octree if C++ backend not used
         if not self.use_cpp_backend:
             self.octree = HierarchicalOctree(
@@ -1231,16 +1242,33 @@ class SonarMapping3D:
         # Increment frame counter
         self.frame_count += 1
 
-        # Optional: Clear old voxels if frame limit reached
-        if self.max_frames > 0 and self.frame_count > self.max_frames:
-            # Simple approach: clear and restart
-            # More sophisticated: implement sliding window or decay
+        self._reset_map_if_frame_limit()
+
+    def _reset_map_if_frame_limit(self) -> bool:
+        """`max_frames` 를 넘겼으면 지도를 비우고 프레임 카운터를 되돌린다.
+
+        어느 옥트리를 지울지는 **실제로 살아있는 백엔드**가 정한다.
+        `use_cpp_backend` 가 켜지면 `self.octree` 는 `None` 이므로 무조건
+        파이썬 옥트리를 지우려 들면 그 자리에서 AttributeError 로 죽는다.
+
+        Returns:
+            bool: 이번 호출에서 지도를 비웠으면 True.
+        """
+        if self.max_frames <= 0 or self.frame_count <= self.max_frames:
+            return False
+
+        # Simple approach: clear and restart
+        # More sophisticated: implement sliding window or decay
+        if self.use_cpp_backend:
+            self.cpp_octree.clear()
+        else:
             self.octree.clear()
-            # Labels key off voxel positions, so they have to go when the map
-            # they describe does — otherwise a later voxel re-occupying the
-            # same cell inherits a label from a place the robot has left.
-            self.voxel_labels.clear()
-            self.frame_count = 0
+        # Labels key off voxel positions, so they have to go when the map
+        # they describe does — otherwise a later voxel re-occupying the
+        # same cell inherits a label from a place the robot has left.
+        self.voxel_labels.clear()
+        self.frame_count = 0
+        return True
 
     def update_map_from_slam(self, new_keyframes):
         """

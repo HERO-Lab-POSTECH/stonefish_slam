@@ -286,6 +286,30 @@ All notable changes to this project will be documented in this file.
   cadence 유지). 기본 0.0(비활성)으로 기존 동작 불변
 - slam.launch.py에 `override_config`(프로파일 yaml 후순위 로드)·`icp_config_file` 인자 추가
 
+### Fixed
+
+- **`use_cpp_backend` 에서 `self.octree` 가 `None` 이라 죽던 두 자리**
+  (`core/mapping_3d.py`). 둘 다 `config/slam.yaml` 노브만으로 도달하는 크래시였고,
+  같은 사실 하나에서 나온다 — C++ 백엔드를 쓰면 파이썬 옥트리는 아예 만들어지지
+  않는다(`self.octree = None`).
+  - `use_cpp_backend: true` + `use_cpp_ray_processor: false` → 파이썬 광선 경로가
+    `self.octree.update_voxel` 을 불러 **첫 프레임**에서 `AttributeError`. C++
+    RayProcessor 초기화가 실패했을 때(확장 부재·생성자 예외) 타는 폴백 경로도
+    같은 곳으로 떨어졌으므로, "C++ 이 없으면 파이썬으로 폴백한다"는 문서화된
+    동작이 실제로는 한 번도 성립하지 않았다. 이제 광선 처리기가 빠지면 백엔드까지
+    같이 내린다(파이썬 갱신분을 C++ 옥트리에 넣는 경로는 존재하지 않으므로 절반만
+    내리는 상태는 표현할 수 없다).
+  - `use_cpp_backend: true` + `max_frames > 0` → 프레임 상한 리셋이 무조건
+    `self.octree.clear()` 를 불러 **`max_frames + 1` 번째 프레임**에서
+    `AttributeError`. `_reset_map_if_frame_limit()` 로 떼어내 살아있는 백엔드를
+    지운다(`voxel_labels` 는 그대로 함께 비운다).
+  - `P4_FLAGS.md` 의 이 항목은 증상을 "지도가 계속 누적된다"로 적고 있었다 —
+    **정정**: 누적이 아니라 크래시다. 실측으로 확인하고 항목에 정정 배너를 달았다.
+  - 회귀 가드 `test/test_mapping_3d_backend_fallback.py` 6케이스. 두 수정을 각각
+    되돌리는 뮤테이션으로 실효를 확인했다(각각 2건·1건 red). C++ 확장이 없는 CI
+    에서도 `max_frames` 쪽은 스텁으로 판정이 서고, 폴백 쪽은 확장이 없으면 어차피
+    생성자가 파이썬으로 떨어지므로 그 환경에서는 vacuous 하게 통과한다.
+
 ### Removed
 
 - **`MappingProfiler` — 헤더만 있는 빈 CSV 만 남기던 프로파일러**
