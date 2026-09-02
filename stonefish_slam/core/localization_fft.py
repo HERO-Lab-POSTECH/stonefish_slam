@@ -454,7 +454,8 @@ class FFTLocalizer:
                                   img1: np.ndarray,
                                   img2: np.ndarray,
                                   return_cross_power: bool = False,
-                                  apply_periodic_decomp: bool = None):
+                                  apply_periodic_decomp: bool = None,
+                                  f1: np.ndarray = None):
         """
         Compute phase correlation between two images.
 
@@ -479,7 +480,9 @@ class FFTLocalizer:
         # scipy.fft 는 numpy.fft 와 같은 결과를 내면서 스레드를 쓴다 — 1028x1422
         # 에서 49.9 → 3.9 ms (실측 2026-09-02). 회전 후보 K 개마다 도는 변환이라
         # 이 한 줄이 K=9 의 온라인 성립 여부를 갈랐다.
-        F1 = _sfft.fft2(img1, workers=-1)
+        # f1 이 주어지면 img1 의 변환을 건너뛴다. 회전 후보 K 개를 시험하는 동안
+        # img1 쪽은 한 번도 바뀌지 않으므로 K-1 회가 순수 낭비다.
+        F1 = _sfft.fft2(img1, workers=-1) if f1 is None else f1
         F2 = _sfft.fft2(img2, workers=-1)
 
         # Compute cross power spectrum
@@ -937,11 +940,46 @@ class FFTLocalizer:
                 pcm, np.rad2deg(self.oculus.angular_resolution))
         return result
 
+    def prepare_translation(self, img1_cart: np.ndarray, img2_cart: np.ndarray) -> dict:
+        """회전 후보 사이에서 바뀌지 않는 준비 작업을 한 번만 해 둔다.
+
+        `estimate_translation` 은 후보마다 두 이미지의 침식 마스크·패딩·CLAHE·정규화와
+        img1 의 2D 변환을 다시 한다. 그런데 회전은 패딩 *이후* 에 img2 에만 걸리므로
+        (`_rotate_image(img2_padded, ...)`) 그 앞 단계는 전부 후보와 무관하다.
+        K=9 에서 후보당 96 ms 중 약 24 ms 가 이 낭비였다(실측 2026-09-02).
+
+        `use_roi` 가 켜져 있으면 ROI 가 회전된 img2 에 의존해 img1 쪽도 후보마다
+        달라지므로 이 경로를 쓰지 않는다 — 호출자가 None 을 받으면 옛 경로로 간다.
+        """
+        if self.use_roi:
+            return None
+        import cv2
+        kw = dict(erosion_iterations=self.trans_erosion_iterations,
+                  gaussian_sigma=self.trans_gaussian_sigma,
+                  gaussian_truncate=self.trans_gaussian_truncate)
+        m1 = self.apply_erosion_mask(img1_cart, **kw)
+        m2 = self.apply_erosion_mask(img2_cart, **kw)
+        h, w = m1.shape
+        pad = self._calculate_padding_size(m1.shape)
+        p1 = self._apply_cartesian_padding(m1, pad)
+        p2 = self._apply_cartesian_padding(m2, pad)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        u1 = (p1 / p1.max() * 255).astype(np.uint8) if p1.max() > 0 else p1.astype(np.uint8)
+        n1 = clahe.apply(u1).astype(np.float64) / 255.0
+        return {
+            'img1_norm': n1,
+            'f1': _sfft.fft2(n1, workers=-1),
+            'img2_padded': p2,
+            'center': (h - 1 + pad, w // 2 + pad),
+            'clahe': clahe,
+        }
+
     def estimate_translation(self,
                              img1_cart: np.ndarray,
                              img2_cart: np.ndarray,
                              rotation: float = 0.0,
-                             refine: bool = True) -> Dict[str, Any]:
+                             refine: bool = True,
+                             prep: dict = None) -> Dict[str, Any]:
         """
         Estimate translation between two Cartesian sonar images.
 
@@ -967,32 +1005,38 @@ class FFTLocalizer:
         """
         import cv2
 
-        # Apply erosion mask
-        img1_masked = self.apply_erosion_mask(
-            img1_cart,
-            erosion_iterations=self.trans_erosion_iterations,
-            gaussian_sigma=self.trans_gaussian_sigma,
-            gaussian_truncate=self.trans_gaussian_truncate
-        )
-        img2_masked = self.apply_erosion_mask(
-            img2_cart,
-            erosion_iterations=self.trans_erosion_iterations,
-            gaussian_sigma=self.trans_gaussian_sigma,
-            gaussian_truncate=self.trans_gaussian_truncate
-        )
+        if prep is None:
+            # Apply erosion mask
+            img1_masked = self.apply_erosion_mask(
+                img1_cart,
+                erosion_iterations=self.trans_erosion_iterations,
+                gaussian_sigma=self.trans_gaussian_sigma,
+                gaussian_truncate=self.trans_gaussian_truncate
+            )
+            img2_masked = self.apply_erosion_mask(
+                img2_cart,
+                erosion_iterations=self.trans_erosion_iterations,
+                gaussian_sigma=self.trans_gaussian_sigma,
+                gaussian_truncate=self.trans_gaussian_truncate
+            )
 
-        # Calculate padding
-        h, w = img1_masked.shape
-        pad_size = self._calculate_padding_size(img1_masked.shape)
+            # Calculate padding
+            h, w = img1_masked.shape
+            pad_size = self._calculate_padding_size(img1_masked.shape)
 
-        # Apply padding to both images
-        img1_padded = self._apply_cartesian_padding(img1_masked, pad_size)
-        img2_padded = self._apply_cartesian_padding(img2_masked, pad_size)
+            # Apply padding to both images
+            img1_padded = self._apply_cartesian_padding(img1_masked, pad_size)
+            img2_padded = self._apply_cartesian_padding(img2_masked, pad_size)
 
-        # Calculate rotation center (bottom center - sonar position, accounting for padding)
-        # Reference: krit_fft line 928-931
-        center_row_padded = h - 1 + pad_size
-        center_col_padded = w // 2 + pad_size
+            # Calculate rotation center (bottom center - sonar position, accounting for padding)
+            # Reference: krit_fft line 928-931
+            center_row_padded = h - 1 + pad_size
+            center_col_padded = w // 2 + pad_size
+        else:
+            # prepare_translation() 이 이미 해 둔 것들. 회전 후보 사이에서 안 바뀐다.
+            img1_padded = None                      # img1_norm 을 직접 쓴다
+            img2_padded = prep['img2_padded']
+            center_row_padded, center_col_padded = prep['center']
 
         # Apply rotation compensation
         img2_rotated = img2_padded.copy()
@@ -1016,18 +1060,19 @@ class FFTLocalizer:
             img1_roi = img1_padded
             img2_roi = img2_rotated
 
-        # Normalize images to 0~255 uint8 for CLAHE
-        img1_u8 = (img1_roi / img1_roi.max() * 255).astype(np.uint8) if img1_roi.max() > 0 else img1_roi.astype(np.uint8)
+        clahe = prep['clahe'] if prep is not None else cv2.createCLAHE(
+            clipLimit=2.0, tileGridSize=(8, 8))
+
+        # img1 쪽은 회전이 안 걸리므로 prep 이 있으면 이미 만들어져 있다.
+        if prep is not None:
+            img1_norm = prep['img1_norm']
+        else:
+            img1_u8 = (img1_roi / img1_roi.max() * 255).astype(np.uint8) \
+                if img1_roi.max() > 0 else img1_roi.astype(np.uint8)
+            img1_norm = clahe.apply(img1_u8).astype(np.float64) / 255.0
+
         img2_u8 = (img2_roi / img2_roi.max() * 255).astype(np.uint8) if img2_roi.max() > 0 else img2_roi.astype(np.uint8)
-
-        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        img1_clahe = clahe.apply(img1_u8)
-        img2_clahe = clahe.apply(img2_u8)
-
-        # Normalize to 0~1 for FFT
-        img1_norm = img1_clahe.astype(np.float64) / 255.0
-        img2_norm = img2_clahe.astype(np.float64) / 255.0
+        img2_norm = clahe.apply(img2_u8).astype(np.float64) / 255.0
 
         # Phase correlation with DFT refinement
         # NOTE: Disable periodic decomposition for Cartesian images (fan-shaped with large zero regions)
@@ -1035,7 +1080,8 @@ class FFTLocalizer:
         pcm, cross_power = self.compute_phase_correlation(
             img1_norm, img2_norm,
             return_cross_power=True,
-            apply_periodic_decomp=False
+            apply_periodic_decomp=False,
+            f1=prep['f1'] if prep is not None else None
         )
         row_offset, col_offset, peak_value = self.detect_peak(
             pcm, subpixel=refine,
@@ -1142,15 +1188,18 @@ class FFTLocalizer:
             # 점수만 필요한 동안은 서브픽셀 보간을 끈다 — peak_value 는 보간 전에
             # 정해지므로 선택 결과가 같고, 버릴 후보 K-1 개에 100배 업샘플 DFT 를
             # 물리지 않는다. 이긴 후보만 refine=True 로 한 번 더 푼다.
+            # 회전과 무관한 준비 작업(두 이미지의 침식 마스크·패딩, img1 의 CLAHE 와
+            # 2D 변환)을 한 번만 한다. 후보마다 다시 하면 K-1 회가 낭비다.
+            prep = self.prepare_translation(img1_cart, img2_cart)
             best_rot = best_peak = best_var = None
             best_score = -np.inf
             for cand_rot, cand_peak, cand_var in candidates:
                 score = self.estimate_translation(
-                    img1_cart, img2_cart, cand_rot, refine=False)['peak_value']
+                    img1_cart, img2_cart, cand_rot, refine=False, prep=prep)['peak_value']
                 if score > best_score:
                     best_score, best_rot, best_peak, best_var = score, cand_rot, cand_peak, cand_var
             rotation, rot_peak, var_theta = best_rot, best_peak, best_var
-            trans_result = self.estimate_translation(img1_cart, img2_cart, rotation)
+            trans_result = self.estimate_translation(img1_cart, img2_cart, rotation, prep=prep)
             if self.verbose:
                 print(f"[FFT] Rotation {rotation:.2f}° chosen from {len(candidates)} candidates "
                       f"by translation peak {trans_result['peak_value']:.4f} "

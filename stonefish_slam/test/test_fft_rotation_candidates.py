@@ -67,9 +67,12 @@ def _stub(cls, candidates, translations):
     }
 
     f.trans_calls = []
+    # 회전 무관 준비 작업을 후보 사이에 재사용하는 캐시. 스텁은 상관을 안 돌리므로
+    # 내용은 필요 없지만, 생산 경로가 이 값을 만들어 넘기는지는 여기서 확인된다.
+    f.prepare_translation = lambda c1, c2: {'stub': True}
 
-    def _trans(c1, c2, rotation=0.0, refine=True):
-        f.trans_calls.append((round(rotation, 6), refine))
+    def _trans(c1, c2, rotation=0.0, refine=True, prep=None):
+        f.trans_calls.append((round(rotation, 6), refine, prep))
         t, peak = translations[round(rotation, 6)]
         return {'translation': list(t), 'peak_value': peak,
                 'variance_x': 0.1, 'variance_y': 0.2, 'success': True}
@@ -118,7 +121,11 @@ def test_discarded_candidates_skip_the_subpixel_refinement(localizer):
     scoring = [c for c in f.trans_calls if c[1] is False]
     refined = [c for c in f.trans_calls if c[1] is True]
     assert len(scoring) == 3, "후보 셋 다 채점돼야 한다"
-    assert refined == [(-1.5, True)], "보간은 이긴 후보 한 번뿐이어야 한다"
+    assert [(r, ref) for r, ref, _ in refined] == [(-1.5, True)], \
+        "보간은 이긴 후보 한 번뿐이어야 한다"
+    assert all(c[2] == {'stub': True} for c in f.trans_calls), \
+        "후보 채점과 최종 해 모두 같은 prep 캐시를 받아야 한다 — 안 받으면 " \
+        "회전 무관 전처리를 K 번 다시 하게 된다"
 
 
 def test_the_override_still_bypasses_the_search(localizer):
