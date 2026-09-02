@@ -172,6 +172,8 @@ class SLAMNode(Node):
         self.declare_parameter('fft_localization.trans_erosion_iterations', 4)
         self.declare_parameter('fft_localization.trans_gaussian_sigma', 4.0)
         self.declare_parameter('fft_localization.trans_gaussian_truncate', 4.0)
+        # 극좌표 행 평균(= 몸체 고정 거리 띠) 제거. core/localization_fft.py:remove_band_envelope
+        self.declare_parameter('fft_localization.remove_radial_mean', False)
 
         # FFT validation parameters
         self.declare_parameter('fft_localization.validate_with_odom', True)
@@ -483,13 +485,15 @@ class SLAMNode(Node):
                 fft_erosion = self.get_parameter('fft_localization.trans_erosion_iterations').value
                 fft_gaussian_sigma = self.get_parameter('fft_localization.trans_gaussian_sigma').value
                 fft_gaussian_truncate = self.get_parameter('fft_localization.trans_gaussian_truncate').value
+                fft_remove_radial = self.get_parameter('fft_localization.remove_radial_mean').value
                 self.fft_localizer = FFTLocalizer(
                     oculus=self.localization.oculus,
                     range_min=fft_range_min,
                     verbose=fft_verbose,
                     trans_erosion_iterations=fft_erosion,
                     trans_gaussian_sigma=fft_gaussian_sigma,
-                    trans_gaussian_truncate=fft_gaussian_truncate
+                    trans_gaussian_truncate=fft_gaussian_truncate,
+                    remove_radial_mean=fft_remove_radial
                 )
                 self.get_logger().info(f"FFT localization enabled (tilt={sonar_tilt_deg}°)")
 

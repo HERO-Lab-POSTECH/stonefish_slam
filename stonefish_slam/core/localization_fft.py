@@ -39,6 +39,7 @@ class FFTLocalizer:
                  periodic_decomp_enable: bool = True,
                  roi_threshold: float = 10.0,
                  use_roi: bool = False,
+                 remove_radial_mean: bool = False,
                  verbose: bool = False):
         """
         Initialize FFT Localizer.
@@ -91,12 +92,35 @@ class FFTLocalizer:
         self.roi_threshold = roi_threshold
         self.use_roi = use_roi
 
+        # 몸체 고정 거리 띠 제거 (아래 remove_band_envelope 참고)
+        self.remove_radial_mean = remove_radial_mean
+
         # Cache for polar_to_cartesian conversion (performance optimization)
         self.p2c_cache = None
 
         # Cache range_resolution from polar_to_cartesian for consistent translation estimation
         # CRITICAL: Must use same range_resolution for cart conversion and translation
         self.cart_range_resolution = None
+
+    def remove_band_envelope(self, img_polar: np.ndarray) -> np.ndarray:
+        """거리 행마다 방위각 평균을 빼서 몸체 고정 띠 성분을 없앤다.
+
+        하향 틸트 FLS 가 바닥을 보면 반사는 소나 기하가 정하는 좁은 거리 띠 안에서만
+        나온다. 그 띠는 차량과 함께 움직이므로 두 프레임 사이에서 **이동하지 않는다** —
+        위상 상관에서 0 시프트 성분으로 들어가 지형이 만드는 진짜 peak 와 경쟁한다.
+        극좌표에서 한 행은 등거리이므로, 행 평균이 곧 그 띠의 포락선이다.
+
+        평균 이하 화소는 0 으로 자른다: 뒤따르는 정규화·CLAHE·erosion 마스크가 모두
+        비음수 강도를 전제한다.
+
+        Args:
+            img_polar: 극좌표 소나 영상 (거리 × 방위)
+
+        Returns:
+            같은 shape 의 float32 영상.
+        """
+        a = img_polar.astype(np.float32)
+        return np.clip(a - a.mean(axis=1, keepdims=True), 0.0, None)
 
     def apply_range_min_mask(self, img_polar: np.ndarray) -> np.ndarray:
         """
@@ -1031,6 +1055,11 @@ class FFTLocalizer:
         # Apply min range mask
         img1_masked = self.apply_range_min_mask(polar_img1)
         img2_masked = self.apply_range_min_mask(polar_img2)
+
+        # 몸체 고정 띠 제거 (회전·병진 추정 양쪽의 입력에 적용한다)
+        if self.remove_radial_mean:
+            img1_masked = self.remove_band_envelope(img1_masked)
+            img2_masked = self.remove_band_envelope(img2_masked)
 
         # Step 1: Estimate rotation in polar domain (or use override)
         rot_result = self.estimate_rotation(img1_masked, img2_masked)
