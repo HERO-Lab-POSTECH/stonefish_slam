@@ -2,7 +2,7 @@
 
 The criterion existed but never ran: `slam.py` assigns `frame.twist` at line
 824, *after* calling `is_keyframe` at 818, so the guard always read `None`
-and fell through. Measured on the tilt10 bag (2026-09-02) by reviving it —
+and fell through. Measured on the tilt30 bag (2026-09-02) by reviving it —
 assigning `twist` before the call — the guard costs 19% of keyframes and 43%
 of accepted loop closures, and 2D mean trajectory error rises 2.745 -> 6.623 m
 (+141%). NSSM is worth 2.8x on this data, so losing loop closures dominates.
