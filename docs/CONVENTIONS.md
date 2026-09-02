@@ -114,7 +114,7 @@ factor graph·C++ 확장과 얽혀 있어 한 줄 변경의 파급이 넓다.
   - 정리할 거리(P4 잔여): 2D standalone의 품질 결함(콜백 내 `from tf_transformations import ...` 지연 import `:122`, 매 프레임 `logger.info` `:110`, `OccupancyGrid conversion TODO` `:98`)은 동작보존 범위. standalone을 메인에 흡수하려면 메인 콜백에 직접-이미지 입력 분기를 추가해야 하므로 동작 변경(별도 설계 사이클).
 
 ### 2.7 config·상수·단위·좌표계
-- **YAML 기반 config**가 `config/`에 모듈별로(`sonar.yaml`, `slam.yaml`, `factor_graph.yaml`, `localization.yaml`, `mapping.yaml`, `feature.yaml`, `icp.yaml`). 계층 네임스페이스(`ros__parameters`, `sonar.*`, `ssm.*`).
+- **YAML 기반 config** — `slam_node`의 모든 파라미터는 `config/slam.yaml` **한 파일**에 섹션(sonar·CFAR·keyframes·ssm·nssm·fft_localization·mapping_2d·mapping_3d)으로 모여 있다(2026-09-02 `refactor/config-consolidation`에서 모듈별 6파일을 통합). 별도 파일은 정말 별개인 것만: `mapping/method_*.yaml`(3D 갱신법별 값, launch가 선택), `icp*.yaml`(libpointmatcher 체인), `real_bag_overrides.yaml`(실해역 프로파일, `override_config`로 뒤에 로드), `dead_reckoning.yaml`(별도 노드). 계층 네임스페이스(`ros__parameters`, `sonar.*`, `ssm.*`). launch 모드(`mode:=slam|localization|mapping`)는 `slam.launch.py` 하나가 preset으로 처리한다 — 래퍼 launch를 다시 만들지 않는다.
 - 센서 상수는 클래스 속성이나 YAML. (`OculusProperty` 의 하드웨어 상수 표는 2026-09-01 `chore/dead-code-cleanup` 에서 삭제됐다 — 시뮬은 ROS 파라미터로 소나를 구성한다.)
 - ⚠️ frame_id(전역 `'world_ned'`, 로컬 `'odom'`·`'base_link'`)가 노드 코드에 **하드코딩**되어 있다(sim의 `world_ned` 중앙화와 대조). 새 코드는 가능하면 상수/파라미터로 중앙화하는 것을 권장하되, 기존 값과 일관성을 우선한다. (전역 frame_id 통일 경위는 §2.0 좌표계 항목 참조.)
 

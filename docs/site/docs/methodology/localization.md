@@ -20,8 +20,8 @@
 
 SSM은 최근 `target_frames`(`3`)개 키프레임의 점군을 통합한 뒤 현재 피처와 ICP로 정합하고, NSSM은 멀리 떨어진 과거 키프레임을 후보로 `source_frames`(`5`)개를 통합하여 정합한다. NSSM은 루프클로저 특성상 잘못된 정합이 그래프 전체를 오염시킬 수 있으므로 더 strict한 검증(`5.0m`/30°)과 PCM consistency, robust Cauchy를 함께 적용한다.
 
-!!! note "기본값은 비활성"
-    `ssm.enable`, `nssm.enable`, `fft_localization.enable` 모두 기본값이 `false`다(`slam.yaml`). 스캔매칭 기반 위치 추정을 쓰려면 launch에서 `ssm_enable:=true nssm_enable:=true`로 켜야 한다.
+!!! note "기본값은 활성"
+    `ssm.enable`, `nssm.enable`, `fft_localization.enable` 모두 기본값이 `true`다(`config/slam.yaml`, 2026-09-02 복원). 끄려면 yaml을 바꾸거나 `slam.launch.py mode:=mapping`을 쓴다.
 
 ```mermaid
 flowchart TD
@@ -133,4 +133,4 @@ FFT 결과는 odometry로 검증할 수 있다. `validate_with_odom`(기본 `tru
 
 ## 파라미터 출처
 
-이 페이지의 파라미터 기본값은 `localization.yaml`(키프레임·SSM·노이즈), `factor_graph.yaml`(NSSM·PCM), `icp.yaml`(libpointmatcher), `slam.yaml`(FFT 플래그)에서 declare된다(`slam.py:44-154`). 위치 추정 파라미터의 노이즈 모델·키프레임 결정·그래프 연결 전반은 [localization-graph](../parameters/localization-graph.md)에서 확인한다.
+이 페이지의 파라미터 기본값은 `slam.yaml`(키프레임·SSM·노이즈), `slam.yaml`(NSSM·PCM), `icp.yaml`(libpointmatcher), `slam.yaml`(FFT 플래그)에서 declare된다(`slam.py:44-154`). 위치 추정 파라미터의 노이즈 모델·키프레임 결정·그래프 연결 전반은 [localization-graph](../parameters/localization-graph.md)에서 확인한다.
