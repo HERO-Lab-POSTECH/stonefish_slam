@@ -102,7 +102,6 @@ class Localization:
 
         Criteria:
         - First frame is always keyframe
-        - Reject if angular velocity too high (motion blur)
         - Must exceed minimum duration
         - Must exceed translation OR rotation threshold
 
@@ -115,13 +114,6 @@ class Localization:
         # First frame is always a keyframe
         if not self.fg.keyframes:
             return True
-
-        # Reject if angular velocity too high (motion blur prevention)
-        if frame.twist is not None:
-            angular_vel_z = abs(frame.twist.angular.z)
-            max_angular_vel = 0.1  # rad/s (~6°/s)
-            if angular_vel_z > max_angular_vel:
-                return False
 
         # Check time duration (ROS2: Time has sec and nanosec fields)
         frame_time_ns = frame.time.sec * 1e9 + frame.time.nanosec
