@@ -174,6 +174,11 @@ class SLAMNode(Node):
         self.declare_parameter('fft_localization.trans_gaussian_truncate', 4.0)
         # 극좌표 행 평균(= 몸체 고정 거리 띠) 제거. core/localization_fft.py:remove_band_envelope
         self.declare_parameter('fft_localization.remove_radial_mean', False)
+        # E1c — 상관 전에 내용이 있는 사각형으로 두 영상을 함께 자른다. tilt 30° 에서
+        # 바닥 반사는 직교영상 497행 중 약 86행에만 몰리므로 나머지 83% 는 위상 상관에
+        # 0-shift 성분만 보탠다. 크롭 박스가 두 영상에 동일하므로 상대 변위는 불변이다.
+        self.declare_parameter('fft_localization.use_roi', False)
+        self.declare_parameter('fft_localization.roi_threshold', 10.0)  # mono8 강도
 
         # FFT validation parameters
         self.declare_parameter('fft_localization.validate_with_odom', True)
@@ -486,6 +491,8 @@ class SLAMNode(Node):
                 fft_gaussian_sigma = self.get_parameter('fft_localization.trans_gaussian_sigma').value
                 fft_gaussian_truncate = self.get_parameter('fft_localization.trans_gaussian_truncate').value
                 fft_remove_radial = self.get_parameter('fft_localization.remove_radial_mean').value
+                fft_use_roi = self.get_parameter('fft_localization.use_roi').value
+                fft_roi_threshold = self.get_parameter('fft_localization.roi_threshold').value
                 self.fft_localizer = FFTLocalizer(
                     oculus=self.localization.oculus,
                     range_min=fft_range_min,
@@ -493,7 +500,9 @@ class SLAMNode(Node):
                     trans_erosion_iterations=fft_erosion,
                     trans_gaussian_sigma=fft_gaussian_sigma,
                     trans_gaussian_truncate=fft_gaussian_truncate,
-                    remove_radial_mean=fft_remove_radial
+                    remove_radial_mean=fft_remove_radial,
+                    use_roi=fft_use_roi,
+                    roi_threshold=fft_roi_threshold
                 )
                 self.get_logger().info(f"FFT localization enabled (tilt={sonar_tilt_deg}°)")
 

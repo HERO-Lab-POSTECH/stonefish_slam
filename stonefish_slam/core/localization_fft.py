@@ -58,7 +58,7 @@ class FFTLocalizer:
             dft_refinement_enable: Enable DFT subpixel refinement (default: True)
             periodic_decomp_enable: Enable periodic decomposition (Moisan 2011, default: True)
             roi_threshold: Pixel intensity threshold for ROI computation (default: 10.0)
-            use_roi: Enable ROI-based FFT processing (default: True)
+            use_roi: Enable ROI-based FFT processing (default: False)
             verbose: Enable debug output
         """
         self.oculus = oculus
