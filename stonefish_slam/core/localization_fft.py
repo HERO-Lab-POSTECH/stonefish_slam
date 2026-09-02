@@ -38,6 +38,7 @@ class FFTLocalizer:
                  dft_refinement_enable: bool = True,
                  periodic_decomp_enable: bool = True,
                  roi_threshold: float = 10.0,
+                 rotation_candidates: int = 1,
                  use_roi: bool = False,
                  remove_radial_mean: bool = False,
                  verbose: bool = False):
@@ -58,6 +59,10 @@ class FFTLocalizer:
             dft_refinement_enable: Enable DFT subpixel refinement (default: True)
             periodic_decomp_enable: Enable periodic decomposition (Moisan 2011, default: True)
             roi_threshold: Pixel intensity threshold for ROI computation (default: 10.0)
+            rotation_candidates: How many polar-correlation peaks to try as rotation
+                hypotheses. 1 keeps the historical behaviour (global maximum only).
+                >1 hands the choice to estimate_transform, which picks the hypothesis
+                with the strongest translation correlation (default: 1)
             use_roi: Enable ROI-based FFT processing (default: False)
             verbose: Enable debug output
         """
@@ -87,6 +92,11 @@ class FFTLocalizer:
 
         # Periodic decomposition (Moisan 2011)
         self.periodic_decomp_enable = periodic_decomp_enable
+
+        # 회전 후보 개수. tilt 30° 에서 극좌표 상관면의 전역 최대가 정답인 비율은
+        # 43% 뿐이고, 정답은 상위 피크 안에 들어 있다 — 어느 것인지는 병진 상관이
+        # 답한다. 근거는 .hq/community/posts/finding/019.
+        self.rotation_candidates = max(1, int(rotation_candidates))
 
         # ROI-based FFT parameters
         self.roi_threshold = roi_threshold
@@ -788,6 +798,35 @@ class FFTLocalizer:
 
         return rotated
 
+    def _rotation_peaks(self,
+                        pcm: np.ndarray,
+                        deg_per_col: float,
+                        separation: int = 4) -> list:
+        """상관면의 상위 피크들을 회전 가설로 뽑는다.
+
+        각 항목은 (rotation_deg, peak_value, variance_theta). 분산을 여기서 같이
+        계산하는 이유는 선택된 가설의 분산이 공분산에 들어가야 하기 때문이다 —
+        전역 최대의 분산을 쓰면 다른 피크를 골랐을 때 팩터 그래프가 엉뚱한
+        신뢰도를 받는다.
+
+        서브픽셀 보간은 하지 않는다. 오프라인 측정에서 정수 후보만으로 이미
+        이겼고(finding/019), 보간을 더하려면 선택 후 병진을 한 번 더 풀어야 한다.
+        """
+        work = pcm.copy()
+        height, width = work.shape
+        floor = work.min()
+        peaks = []
+        for _ in range(self.rotation_candidates):
+            loc = np.unravel_index(np.argmax(work), work.shape)
+            _, var_col = self.compute_peak_variance(pcm, loc, deg_per_col)
+            peaks.append(((loc[1] - width // 2) * deg_per_col,
+                          float(pcm[loc]),
+                          np.deg2rad(np.sqrt(var_col)) ** 2))
+            r0, r1 = max(0, loc[0] - separation), min(height, loc[0] + separation + 1)
+            c0, c1 = max(0, loc[1] - separation), min(width, loc[1] + separation + 1)
+            work[r0:r1, c0:c1] = floor
+        return peaks
+
     def estimate_rotation(self,
                           img1_polar: np.ndarray,
                           img2_polar: np.ndarray) -> Dict[str, Any]:
@@ -883,12 +922,16 @@ class FFTLocalizer:
             np.save(f"{debug_dir}/rot_img2.npy", img2_norm)
             print(f"  Debug images saved to {debug_dir}", flush=True)
 
-        return {
+        result = {
             'rotation': rotation_deg,
             'peak_value': peak_value,
             'variance_theta': var_theta,
             'success': True
         }
+        if self.rotation_candidates > 1:
+            result['candidates'] = self._rotation_peaks(
+                pcm, np.rad2deg(self.oculus.angular_resolution))
+        return result
 
     def estimate_translation(self,
                              img1_cart: np.ndarray,
@@ -1063,20 +1106,39 @@ class FFTLocalizer:
 
         # Step 1: Estimate rotation in polar domain (or use override)
         rot_result = self.estimate_rotation(img1_masked, img2_masked)
-        if rotation_override is not None:
-            rotation = rotation_override
-            if self.verbose:
-                print(f"[FFT] Using rotation override: {rotation:.2f}° (FFT estimate: {rot_result['rotation']:.2f}°)")
-        else:
-            rotation = rot_result['rotation']
-        rot_peak = rot_result['peak_value']
 
         # Step 2: Convert to Cartesian
         img1_cart = self.polar_to_cartesian(img1_masked)
         img2_cart = self.polar_to_cartesian(img2_masked)
 
-        # Step 3: Estimate translation with rotation compensation
-        trans_result = self.estimate_translation(img1_cart, img2_cart, rotation)
+        # Step 3: Pick a rotation, then estimate translation under it.
+        #
+        # 전역 최대만 쓰면 tilt 30° 에서 57% 의 쌍이 엉뚱한 열을 고른다 — 극좌표
+        # 상관면이 거리 변위와 방위 변위를 동시에 설명해야 해서 피크가 끌려간다.
+        # 후보를 여러 개 두고 병진 상관이 가장 강한 것을 고르면 그 결합을 푼다.
+        candidates = rot_result.get('candidates')
+        if rotation_override is not None:
+            rotation, rot_peak = rotation_override, rot_result['peak_value']
+            var_theta = rot_result['variance_theta']
+            if self.verbose:
+                print(f"[FFT] Using rotation override: {rotation:.2f}° (FFT estimate: {rot_result['rotation']:.2f}°)")
+            trans_result = self.estimate_translation(img1_cart, img2_cart, rotation)
+        elif candidates:
+            best = None
+            for cand_rot, cand_peak, cand_var in candidates:
+                trial = self.estimate_translation(img1_cart, img2_cart, cand_rot)
+                if best is None or trial['peak_value'] > best[3]['peak_value']:
+                    best = (cand_rot, cand_peak, cand_var, trial)
+            rotation, rot_peak, var_theta, trans_result = best
+            if self.verbose:
+                print(f"[FFT] Rotation {rotation:.2f}° chosen from {len(candidates)} candidates "
+                      f"by translation peak {trans_result['peak_value']:.4f} "
+                      f"(global max was {rot_result['rotation']:.2f}°)")
+        else:
+            rotation, rot_peak = rot_result['rotation'], rot_result['peak_value']
+            var_theta = rot_result['variance_theta']
+            trans_result = self.estimate_translation(img1_cart, img2_cart, rotation)
+
         translation = trans_result['translation']
         trans_peak = trans_result['peak_value']
 
@@ -1084,7 +1146,7 @@ class FFTLocalizer:
         covariance = np.diag([
             trans_result['variance_x'],      # var(x) in meters^2
             trans_result['variance_y'],      # var(y) in meters^2
-            rot_result['variance_theta']     # var(theta) in radians^2
+            var_theta                        # var(theta) in radians^2, of the CHOSEN peak
         ])
 
         if self.verbose:

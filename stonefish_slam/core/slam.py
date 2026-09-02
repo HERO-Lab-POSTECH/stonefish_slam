@@ -179,6 +179,9 @@ class SLAMNode(Node):
         # 0-shift 성분만 보탠다. 크롭 박스가 두 영상에 동일하므로 상대 변위는 불변이다.
         self.declare_parameter('fft_localization.use_roi', False)
         self.declare_parameter('fft_localization.roi_threshold', 10.0)  # mono8 강도
+        # 극좌표 상관면에서 시험할 회전 가설 수. 1 이면 전역 최대만 쓰는 옛 동작.
+        # 근거·측정은 .hq/community/posts/finding/019.
+        self.declare_parameter('fft_localization.rotation_candidates', 9)
 
         # FFT validation parameters
         self.declare_parameter('fft_localization.validate_with_odom', True)
@@ -493,6 +496,7 @@ class SLAMNode(Node):
                 fft_remove_radial = self.get_parameter('fft_localization.remove_radial_mean').value
                 fft_use_roi = self.get_parameter('fft_localization.use_roi').value
                 fft_roi_threshold = self.get_parameter('fft_localization.roi_threshold').value
+                fft_rotation_candidates = self.get_parameter('fft_localization.rotation_candidates').value
                 self.fft_localizer = FFTLocalizer(
                     oculus=self.localization.oculus,
                     range_min=fft_range_min,
@@ -502,7 +506,8 @@ class SLAMNode(Node):
                     trans_gaussian_truncate=fft_gaussian_truncate,
                     remove_radial_mean=fft_remove_radial,
                     use_roi=fft_use_roi,
-                    roi_threshold=fft_roi_threshold
+                    roi_threshold=fft_roi_threshold,
+                    rotation_candidates=fft_rotation_candidates
                 )
                 self.get_logger().info(f"FFT localization enabled (tilt={sonar_tilt_deg}°)")
 

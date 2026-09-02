@@ -118,6 +118,10 @@
                                      # tilt 30° 직교영상 497행 중 바닥 반사는 약 86행뿐이고 나머지는
                                      # 0-shift 성분만 보탠다. 박스가 두 영상에 같아 상대 변위는 불변.
       roi_threshold: 10.0            # ROI 판정 강도 하한 (mono8 0-255). mapping_2d 와 같은 기준.
+      rotation_candidates: 9         # 극좌표 상관면에서 시험할 회전 가설 수. 각 가설로 병진을 풀고
+                                     # 병진 상관 피크가 가장 강한 것을 채택한다. 1 이면 전역 최대만
+                                     # 쓰는 옛 동작 — tilt 30° 에서 전역 최대가 정답인 쌍은 43% 뿐이다.
+                                     # 비용은 K 에 선형(병진 상관 K 회). 근거는 finding/019.
       use_dr_rotation: false         # false: FFT estimates rotation too; true: rotation from DR, FFT supplies translation only
 
     # ==================== 2D mapping (occupancy grid) ====================
