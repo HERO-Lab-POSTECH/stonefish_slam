@@ -9,7 +9,7 @@ from tf2_ros import TransformBroadcaster
 import cv_bridge
 from nav_msgs.msg import Odometry
 from message_filters import Subscriber, ApproximateTimeSynchronizer
-from sensor_msgs.msg import PointCloud2, Image, CompressedImage
+from sensor_msgs.msg import PointCloud2, Image, CompressedImage, Range
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from octomap_msgs.msg import Octomap
@@ -69,6 +69,9 @@ class SLAMNode(Node):
         self.declare_parameter('sonar.range_max', 40.0)
         self.declare_parameter('sonar.sonar_position', [0.0, 0.0, 0.0])
         self.declare_parameter('sonar.sonar_tilt_deg', 30.0)
+        # 경사거리 → 수평거리 투영. legacy | inv_cos_tilt | altitude
+        # (core/feature_extraction.py:_project_range 가 규약의 정본)
+        self.declare_parameter('sonar.projection', 'legacy')
 
         # Feature extraction parameters (slam.yaml: feature section)
         self.declare_parameter('CFAR.Ntc', 20)
@@ -218,6 +221,9 @@ class SLAMNode(Node):
             'feat_frames': 0,           # I8 — 피처 추출이 성공한 소나 프레임 수(분모)
             'feat_points_sum': 0,       # I8 — 그 프레임들의 피처 점 수 합(평균의 분자)
         }
+
+        # 고도계 최신값 (sonar.projection == 'altitude' 의 입력). 없으면 None.
+        self.altitude_m = None
 
         # Mapping initialization (configured in init_node)
         self.mapper = None
@@ -542,6 +548,12 @@ class SLAMNode(Node):
         sonar_msg_type = CompressedImage if self.sonar_compressed else Image
         self.sonar_sub = Subscriber(self, sonar_msg_type, sonar_image_topic, qos_profile=qos_sub_profile)
         self.odom_sub = Subscriber(self, Odometry, odom_topic, qos_profile=qos_sub_profile)
+
+        # 고도계 — sonar.projection == 'altitude' 의 입력이자, 다른 모드에서도
+        # 계측 줄에 실려 투영 오차를 사후에 해석할 수 있게 한다. 동기화 대상이
+        # 아니라 최신값만 들고 있으면 된다(4 Hz, 소나 프레임보다 느리다).
+        self.altitude_sub = self.create_subscription(
+            Range, f'/{vehicle_name}/altitude', self._altitude_callback, qos_sub_profile)
 
         # Add debug prints for topic names
         self.get_logger().info(f"Subscribing to sonar image: {sonar_image_topic} (internal feature extraction)")
@@ -1312,6 +1324,14 @@ class SLAMNode(Node):
 
         self._log_instrumentation()
 
+    def _altitude_callback(self, msg: Range) -> None:
+        """고도계 최신값을 보관한다. FFT 는 oculus 를 통해 같은 값을 본다."""
+        if not np.isfinite(msg.range) or msg.range <= 0.0:
+            return
+        self.altitude_m = float(msg.range)
+        if self.localization is not None:
+            self.localization.oculus.altitude_m = self.altitude_m
+
     def _log_instrumentation(self) -> None:
         """계측 카운터 한 줄 요약 (I1~I7).
 
@@ -1335,7 +1355,11 @@ class SLAMNode(Node):
             f"nssm_icp_ok={i['nssm_icp_ok']} "
             f"pcm_accepted={getattr(self.fg, 'pcm_inserted_count', -1)} "
             f"feat_mean={(i['feat_points_sum'] / i['feat_frames']) if i['feat_frames'] else float('nan'):.1f} "
-            f"feat_frames={i['feat_frames']}"
+            f"feat_frames={i['feat_frames']} "
+            f"proj={getattr(self.feature_extractor, 'projection', '?')} "
+            f"alt={self.altitude_m if self.altitude_m is not None else float('nan'):.2f} "
+            f"proj_drop={getattr(self.feature_extractor, 'proj_dropped', -1)} "
+            f"alt_missing={getattr(self.feature_extractor, 'proj_alt_missing', -1)}"
         )
 
     def add_nonsequential_scan_matching(self) -> bool:

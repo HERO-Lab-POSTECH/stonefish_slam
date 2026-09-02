@@ -249,27 +249,48 @@ class FFTLocalizer:
         cols = polar_image.shape[1]  # num_beams
 
         # Build or use cached transformation maps (performance optimization)
-        if self.p2c_cache is None:
+        # 투영 방식(sonar.projection)과 고도계 값. altitude 모드는 고도가 바뀌면
+        # 사상이 달라지므로 0.25 m 격자로 양자화해 캐시 키에 넣는다 — 매 프레임
+        # 재구축하면 remap 맵 생성 비용이 그대로 들어온다.
+        projection = getattr(self.oculus, 'projection', 'legacy')
+        altitude = getattr(self.oculus, 'altitude_m', None)
+        cache_key = (projection,
+                     round(altitude / 0.25) if projection == 'altitude' and altitude else None)
+
+        if self.p2c_cache is None or self.p2c_cache.get('key') != cache_key:
             if self.verbose:
-                print("Building polar-to-cartesian transformation maps (one-time setup)...")
+                print(f"Building polar-to-cartesian transformation maps (key={cache_key})...")
 
             # Calculate range resolution (slant range basis)
             # CRITICAL: Stonefish polar images cover FULL range from 0 to range_max
             # range_min is only used for masking unreliable near-field data
             range_resolution = self.oculus.range_max / rows
 
-            # Calculate horizontal range resolution (for cartesian coordinate calculation)
-            horizontal_range_resolution = range_resolution * np.cos(self.oculus.tilt_angle_rad)
-
             # Cache for translation estimation (horizontal plane)
             # NOTE: Use slant range_resolution for true XY projection
             # Cartesian image represents horizontal plane coordinates
             self.cart_range_resolution = range_resolution
 
-            # Apply tilt correction: project slant range to horizontal range
-            # When sonar is tilted down, measured range is slant range
-            # Horizontal range = slant range * cos(tilt_angle)
-            horizontal_range_max = self.oculus.range_max * np.cos(self.oculus.tilt_angle_rad)
+            # 경사거리 r 을 어떤 좌표 C 로 그릴지가 이 변환의 전부다. 전진 d 에 대해
+            # dC/drho 가 1 이어야 직교영상에서 잰 병진이 실제 병진과 같아진다.
+            #   legacy       C = r*cos(tau)      원본. dC/drho = cos(theta)cos(tau) 로 압축된다
+            #   inv_cos_tilt C = r/cos(tau)      dC/drho = cos(theta)/cos(tau), tau 근처에서 1
+            #   altitude     C = sqrt(r^2-h^2)   평평한 바닥에서 정확히 1
+            # feature_extraction._project_range 와 같은 규약을 쓴다.
+            cos_tilt = float(np.cos(self.oculus.tilt_angle_rad))
+            if projection == 'altitude' and altitude and altitude > 0.0:
+                h_sq = float(altitude) ** 2
+                fwd = lambda r: np.sqrt(np.maximum(np.square(r) - h_sq, 0.0))
+                inv = lambda c: np.sqrt(np.square(c) + h_sq)
+            elif projection == 'inv_cos_tilt' and cos_tilt > 1e-6:
+                fwd = lambda r: r / cos_tilt
+                inv = lambda c: c * cos_tilt
+            else:
+                scale = cos_tilt if cos_tilt > 1e-6 else 1.0
+                fwd = lambda r: r * scale
+                inv = lambda c: c / scale
+
+            horizontal_range_max = float(fwd(self.oculus.range_max))
 
             # Maximum lateral extent based on FOV (use horizontal range)
             horizontal_fov_deg = np.rad2deg(self.oculus.horizontal_fov)
@@ -314,8 +335,7 @@ class FFTLocalizer:
 
             # Convert horizontal range back to slant range for polar image indexing
             # Polar image rows are indexed by slant range, not horizontal range
-            cos_tilt = np.cos(self.oculus.tilt_angle_rad)
-            r_polar = horizontal_range / cos_tilt if cos_tilt > 1e-6 else horizontal_range
+            r_polar = inv(horizontal_range)
 
             # Map polar coordinates to image indices
             # Range to row index (distance in meters to pixel row)
@@ -330,6 +350,7 @@ class FFTLocalizer:
 
             # Cache the transformation maps
             self.p2c_cache = {
+                'key': cache_key,
                 'map_x': map_x,
                 'map_y': map_y,
                 'cart_height': cart_height,

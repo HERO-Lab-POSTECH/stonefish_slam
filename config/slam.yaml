@@ -41,6 +41,12 @@
       # The .scn <origin rpy> roll is measured from nadir instead: tilt = 90° − roll.
       # test_sonar_tilt_matches_sim_scenario.py holds the two repos to the same value.
       sonar_tilt_deg: 30.0
+      # 경사거리 → 수평거리 투영. ICP 점군과 FFT 직교영상이 같은 규약을 쓴다.
+      #   legacy       기존 동작 — 점군은 r 그대로, FFT 는 r·cos(tilt). 병진이 압축된다.
+      #   inv_cos_tilt r / cos(tilt). 틸트 근처에서만 맞는 상수 근사.
+      #   altitude     sqrt(r² − h²), h = /{vehicle}/altitude. 평평한 바닥에서 정확.
+      # 정본 설명은 core/feature_extraction.py:_project_range.
+      projection: legacy
 
     # ==================== Feature extraction (CFAR, internal to slam_node) ====================
     CFAR:

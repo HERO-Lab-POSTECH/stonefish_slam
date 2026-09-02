@@ -97,6 +97,14 @@ class FeatureExtraction:
         self.sonar_tilt_deg = self.node.get_parameter('sonar.sonar_tilt_deg').get_parameter_value().double_value
         self.sonar_tilt_rad = np.radians(self.sonar_tilt_deg)
 
+        # 경사거리 → 수평거리 투영 (sonar.projection). 아래 _project_range 참고.
+        self.projection = (
+            self.node.get_parameter('sonar.projection').get_parameter_value().string_value or 'legacy')
+        cos_tilt = float(np.cos(self.sonar_tilt_rad))
+        self._inv_cos_tilt = 1.0 / cos_tilt if cos_tilt > 1e-6 else 1.0
+        self.proj_dropped = 0       # r <= h 라 수평 성분이 없어 버린 점
+        self.proj_alt_missing = 0   # altitude 모드인데 고도계 값이 아직 없던 프레임
+
         self.node.get_logger().info(f'FLS Parameters: {self.num_bins}x{self.num_beams}, FOV={self.horizontal_fov}°, Range={self.range_min}-{self.range_max}m, Tilt={self.sonar_tilt_deg}°')
 
         # Configure CFAR
@@ -172,8 +180,15 @@ class FeatureExtraction:
             # Polar to Cartesian conversion
             # Based on: bearing = arctan2(y, x) where x=forward, y=lateral
             # Therefore: x = r*cos(bearing), y = r*sin(bearing)
-            x = range_m * np.cos(bearing_rad)  # forward component
-            y = range_m * np.sin(bearing_rad)  # lateral component
+            # 경사거리를 수평거리로 투영한 뒤에 극→직교 변환한다. Bruce SLAM 은
+            # 소나가 수평 장착이라 이 단계가 없었다(φ=0 가정) — 하향 틸트로 바닥을
+            # 보면 그 가정이 깨지고 ICP 병진이 체계적으로 축소된다.
+            proj_m = self._project_range(range_m)
+            if proj_m is None:
+                continue
+
+            x = proj_m * np.cos(bearing_rad)  # forward component
+            y = proj_m * np.sin(bearing_rad)  # lateral component
 
             points_cartesian.append([x, y])
 
@@ -182,3 +197,30 @@ class FeatureExtraction:
         self.node.get_logger().debug(f"Extracted {len(points)} feature points")
 
         return points
+
+    def _project_range(self, range_m):
+        '''경사거리 r 을 수평 평면 좌표로 투영한다.
+
+        바닥의 한 점은 고도 h·수평거리 rho 에 대해 r = sqrt(rho^2 + h^2) 로 재진다.
+        따라서 전진 d 에 대한 r 의 변화는 d·cos(theta) 로 d 보다 작고, r 을 그대로
+        쓰면 ICP 가 병진을 그만큼 적게 본다. theta 는 고도각이며 틸트 tau 근처다.
+
+        - ``legacy``       : r 그대로. Bruce SLAM 원본(수평 장착 가정).
+        - ``inv_cos_tilt`` : r / cos(tau). dC/drho = cos(theta)/cos(tau) 로 상수 근사.
+        - ``altitude``     : sqrt(r^2 - h^2). 평평한 바닥 가정에서 정확하다.
+
+        Returns:
+            투영된 거리(m). 수평 성분이 없는 점(r <= h)이면 None.
+        '''
+        if self.projection == 'altitude':
+            h = getattr(self.node, 'altitude_m', None)
+            if h is None or h <= 0.0:
+                self.proj_alt_missing += 1
+                return range_m * self._inv_cos_tilt
+            if range_m <= h:
+                self.proj_dropped += 1
+                return None
+            return float(np.sqrt(range_m * range_m - h * h))
+        if self.projection == 'inv_cos_tilt':
+            return range_m * self._inv_cos_tilt
+        return range_m
