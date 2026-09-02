@@ -68,7 +68,7 @@ class FeatureExtractionNode(Node):
         self.declare_parameter('sonar.sonar_tilt_deg', 30.0)
         # FeatureExtraction 이 읽는다 (legacy | inv_cos_tilt | altitude).
         # standalone 에는 고도계가 없으므로 altitude 는 상수 근사로 떨어진다.
-        self.declare_parameter('sonar.projection', 'legacy')
+        self.declare_parameter('sonar.projection', 'altitude')
 
         sonar_topic = self.get_parameter('sonar_topic').value
         feature_topic = self.get_parameter('feature_topic').value

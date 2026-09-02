@@ -46,7 +46,9 @@
       #   inv_cos_tilt r / cos(tilt). 틸트 근처에서만 맞는 상수 근사.
       #   altitude     sqrt(r² − h²), h = /{vehicle}/altitude. 평평한 바닥에서 정확.
       # 정본 설명은 core/feature_extraction.py:_project_range.
-      projection: legacy
+      # tilt30 프로그램 확정값 — legacy 대비 bag 재생 2D mean err 19.888 → 2.741 m.
+      # 개선을 만든 두 파라미터 중 하나다(다른 하나는 icp.yaml 의 trim ratio).
+      projection: altitude
 
     # ==================== Feature extraction (CFAR, internal to slam_node) ====================
     CFAR:

@@ -71,7 +71,7 @@ class SLAMNode(Node):
         self.declare_parameter('sonar.sonar_tilt_deg', 30.0)
         # 경사거리 → 수평거리 투영. legacy | inv_cos_tilt | altitude
         # (core/feature_extraction.py:_project_range 가 규약의 정본)
-        self.declare_parameter('sonar.projection', 'legacy')
+        self.declare_parameter('sonar.projection', 'altitude')
 
         # Feature extraction parameters (slam.yaml: feature section)
         self.declare_parameter('CFAR.Ntc', 20)

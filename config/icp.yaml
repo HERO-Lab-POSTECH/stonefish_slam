@@ -11,8 +11,10 @@ matcher:
 outlierFilters:
   - MaxDistOutlierFilter:
       maxDist: 3.0
+  # tilt30 프로그램 확정값. 0.8 → 0.4 로 조인 것이 altitude 투영과 함께 개선을 만든
+  # 두 파라미터의 나머지 하나다. 0.3·0.5·0.6·0.7 은 전부 동률이거나 악화였다.
   - TrimmedDistOutlierFilter:
-      ratio: 0.8
+      ratio: 0.4
 
 errorMinimizer:
   # PointToPlaneErrorMinimizer:
