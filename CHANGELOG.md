@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - **tilt 30° 위치인식 확정값 2건을 config 에 반영** (`exp/tilt30-localization`):
   `sonar.projection` `legacy` → `altitude`, `icp.yaml` 의 `TrimmedDistOutlierFilter.ratio`
-  `0.8` → `0.4`. tilt10 bag 재생에서 2D mean err 19.888 → 2.741 m (7.3배). 8개 축 30여
+  `0.8` → `0.4`. tilt30 bag 재생에서 2D mean err 19.888 → 2.741 m (7.3배). 8개 축 30여
   런 중 개선을 만든 것은 이 둘뿐이고 나머지는 전부 동률이거나 악화였다. 지금까지 이
   값들은 런마다 주입만 됐고 repo 에는 없었다. `slam.py`·`feature_extraction_node.py` 의
   `sonar.projection` 선언 기본값도 함께 옮긴다 — `test_standalone_node_defaults.py` 가
