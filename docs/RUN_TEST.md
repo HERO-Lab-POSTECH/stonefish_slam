@@ -74,6 +74,51 @@ ros2 launch stonefish_slam slam.launch.py rviz:=false
 ros2 launch stonefish_slam slam.launch.py enable_3d_mapping:=false
 ```
 
+## 4b. semantic(검출 라벨) A/B — bag 재생
+
+검출 파이프라인은 시뮬을 다시 띄우지 않고 bag 재생으로 판정한다. 씬에 학습된
+클래스(sofa) 자산이 없으므로 `scripts/fake_detection_publisher.py` 가 소나 프레임
+header 를 그대로 복사한 결정적 검출을 되쏜다 — 검출기 성능은 "검출 결과가 위치
+인식에 쓰였는가"의 전제가 아니다.
+
+```bash
+# --- A: off (기준선) ---
+ros2 launch stonefish_slam slam.launch.py vehicle_name:=bluerov2 \
+    use_sim_time:=true rviz:=false
+ros2 bag play data/bags/2026-09-02-bluerov2-lawnmower-tilt10 --clock
+
+# --- B: on ---
+ros2 launch stonefish_slam slam.launch.py vehicle_name:=bluerov2 \
+    use_sim_time:=true rviz:=false semantic:=true
+python3 scripts/fake_detection_publisher.py --ros-args \
+    -p use_sim_time:=true -p every_n:=5      # filter.skip 과 맞춘다, 아래 참조
+ros2 bag play data/bags/2026-09-02-bluerov2-lawnmower-tilt10 --clock
+```
+
+판정은 `[INSTR] semantic` 한 줄로 한다.
+
+| 지표 | 기대 | 왜 |
+|:--|:--|:--|
+| `landmark_factors_added` | > 0, 그리고 `det_matched` 와 **같다** | "검출이 위치 추정에 쓰였다"의 유일한 증거. bbox 중심을 측정값으로 쓰므로 검출 1건 ⇒ factor 1건이 구성상 보장된다 |
+| `pose_key_mismatch` | 0 | > 0 이면 늦은 검출이 엉뚱한 pose 에 붙을 뻔한 것을 막은 것 |
+| `det_expired` | **크다(정상)** | 주입기는 모든 이미지에 검출을 내지만 SLAM 은 `filter.skip` 을 통과해 키프레임이 된 프레임만 큐에 넣는다. 큐 버그의 신호가 아니다 |
+| `det_missing` | 작을수록 좋다 | 키프레임은 생겼는데 검출이 워터마크까지 안 왔다. 주입기를 `every_n:=1` 로 두면 검출 토픽(depth 10)이 넘쳐 커진다 — `filter.skip` 과 맞추면 줄어든다 |
+| `voxels_labeled` | > 0 | 3D 역투영이 돌았다 |
+| `[FactorGraph] ISAM2 update failed` | 0건 | |
+
+off 런은 semantic 이전과 같아야 한다. 확인 3종:
+
+```bash
+ros2 topic list | grep -E "cloud_3d|sonar_yolo"          # off 면 아무것도 없어야 한다
+ros2 topic echo /stonefish_slam/slam/cloud --once --field fields   # off: 4필드(x,y,z,i)
+grep -c "INSTR. semantic" <slam 로그>                     # off: 0
+```
+
+⚠️ **절대 개수는 런마다 흔들린다.** 소나 구독이 BEST_EFFORT(depth 20)라 재생
+속도와 CPU 부하에 따라 프레임이 떨어진다 — `icp_attempted` 를 off/on 사이에서
+같은 값으로 기대하지 말고 **수렴률(`icp_rate`)**과 위 카운터들로 판정한다.
+`--rate` 를 올리면 이 흔들림이 커진다.
+
 ## 5. 독립 노드 테스트 (이번에 추가한 것 + 기존 standalone)
 
 이들은 **SLAM 파이프라인을 우회**하고 sim의 raw 토픽만으로 각 모듈을 격리 검증한다. sim(터미널 A)이 떠 있어야 한다.

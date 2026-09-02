@@ -177,6 +177,39 @@ All notable changes to this project will be documented in this file.
     선언된 키를 다 담는지 테스트로 고정했다.
   - **NIT**: off 동일성 docstring 의 "파라미터 5개" 를 실제 11개로 정정.
 
+- **bag 재생 A/B 실측** (`data/bags/2026-09-02-bluerov2-lawnmower-tilt10`,
+  `--rate 1.0`, `sonar.sonar_tilt_deg:=10.0` 로 bag 에 맞춤, 주입기
+  `scripts/fake_detection_publisher.py`). 절차는 `docs/RUN_TEST.md` §4b.
+
+  | 지표 | off | on |
+  |:--|:--|:--|
+  | `icp_attempted` / `icp_converged` | 112 / 112 (rate 1.000) | 159 / 159 (rate 1.000) |
+  | `factor_icp` / `factor_odom` | 111 / 1 | 159 / 0 |
+  | `landmark_factors_added` | — | **118** (= `det_matched` 118) |
+  | `landmarks_created` | — | 34 |
+  | `voxels_labeled` | — | 734,942 |
+  | `pose_key_mismatch` · `det_duplicate` · `kf_stamp_collision` | — | 0 · 0 · 0 |
+  | `ISAM2 update failed` · `[ERROR]` | 0 · 0 | 0 · 0 |
+  | 토픽 | 기존 그대로 | `+/sonar_yolo/detections`, `+/mapping/cloud_3d` |
+  | `/slam/cloud` 필드 | `x, y, z, i` (4) | `x, y, z, i, label` (5) |
+  | `[INSTR] semantic` 줄 | 0건 | 매 키프레임 |
+
+  **"검출이 위치 인식에 쓰였다"의 증거는 `landmark_factors_added = 118` 이고,
+  그 값이 `det_matched` 와 정확히 같다** — bbox 중심을 측정값으로 쓰므로 검출
+  1건이 factor 1건이 되는 것이 구성상 보장된다는 설계가 실측으로 확인됐다.
+
+  ⚠️ **절대 개수는 off/on 사이에 비교하면 안 된다.** 소나 구독이
+  BEST_EFFORT(depth 20)라 재생 속도·CPU 부하에 따라 프레임이 떨어져
+  `icp_attempted` 가 런마다 흔들린다(같은 off 설정을 `--rate 2.0` 으로 돌리면
+  60, `--rate 1.0` 이면 112). 회귀 판정은 **수렴률**(양쪽 1.000)과 위 카운터로
+  한다. `det_expired=2178` 도 정상이다 — 주입기는 모든 이미지에 검출을 내지만
+  SLAM 은 `filter.skip` 을 통과해 키프레임이 된 프레임만 큐에 넣는다.
+  `det_missing=47` 은 주입기를 `every_n:=1` 로 돌려 검출 토픽(depth 10)이 넘친
+  탓이며, `every_n:=5` 로 `filter.skip` 과 맞추면 줄어든다.
+
+  진짜 검출(YOLO)로 하는 데모는 별도 마일스톤이다 — 시뮬 씬에 학습된 클래스
+  (sofa) 자산이 없다.
+
 - **`cpp/pcl.py` fallback 의 descriptor 집계를 C++ 과 맞췄다**: 순수 파이썬
   `downsample` 은 descriptor 를 **평균**냈다. 이 채널로 keyframe index 와
   semantic 라벨이 나가므로, 한 복셀에 라벨 1·2 가 섞이면 1.5 가 되고 소비자가

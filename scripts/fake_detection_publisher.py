@@ -53,6 +53,9 @@ class FakeDetectionPublisher(Node):
         self.declare_parameter('class_id', 0)
         self.declare_parameter('score', 0.9)
         self.declare_parameter('box_size', [64, 64])   # [width_px, height_px]
+        # SLAM 은 `filter.skip`(기본 5) 을 통과한 프레임만 처리하므로 1 로 두면
+        # 나머지 검출은 전부 만료되고, 검출 토픽(depth 10)이 넘쳐 `det_missing`
+        # 까지 커진다. 그 값을 낮추려면 `filter.skip` 과 맞춘다.
         self.declare_parameter('every_n', 1)           # N 프레임마다 한 번
 
         self.class_id = int(self.get_parameter('class_id').value)
