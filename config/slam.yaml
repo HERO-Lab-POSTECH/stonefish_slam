@@ -103,8 +103,8 @@
       trans_gaussian_truncate: 3.0
       # Validation against odometry (dead reckoning)
       validate_with_odom: true
-      max_position_error: 0.5        # m
-      max_rotation_error: 0.0872665  # rad (5.000° — the value, not an old "~20°" comment, is the truth)
+      max_position_error: 0.25       # m — tilt30 프로그램 확정값. 거리 분해능 0.08 m/bin 의 약 3 bin
+      max_rotation_error: 0.174533   # rad (10.000° — the value, not an old "~20°" comment, is the truth)
       use_dr_rotation: false         # false: FFT estimates rotation too; true: rotation from DR, FFT supplies translation only
 
     # ==================== 2D mapping (occupancy grid) ====================

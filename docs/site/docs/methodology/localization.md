@@ -114,16 +114,16 @@ flowchart TD
     P --> O["변환 출력 + odom 검증"]
 ```
 
-FFT 결과는 odometry로 검증할 수 있다. `validate_with_odom`(기본 `true`)일 때 `max_position_error`(`0.5m`)·`max_rotation_error`(`0.0872665rad`≈5°)를 넘으면 기각한다. 회전은 dead reckoning 값을 쓸 수 있고(`use_dr_rotation`, `true`), 병진 전처리에는 erosion(`trans_erosion_iterations`, `2`)과 Gaussian smoothing(`trans_gaussian_sigma`, `2.0`; `trans_gaussian_truncate`, `3.0`)을 적용한다.
+FFT 결과는 odometry로 검증할 수 있다. `validate_with_odom`(기본 `true`)일 때 `max_position_error`(`0.25m`)·`max_rotation_error`(`0.174533rad`≈10°)를 넘으면 기각한다. 회전은 dead reckoning 값을 쓸 수 있고(`use_dr_rotation`, 기본 `false` — FFT 가 회전도 추정한다), 병진 전처리에는 erosion(`trans_erosion_iterations`, `2`)과 Gaussian smoothing(`trans_gaussian_sigma`, `2.0`; `trans_gaussian_truncate`, `3.0`)을 적용한다.
 
 | 파라미터 | 기본값 | 의미 |
 |---------|--------|------|
 | `fft_localization.enable` | `false` | FFT 경로 활성 |
 | `range_min` | `0.5` | 최소 range(m) |
 | `validate_with_odom` | `true` | odom 검증 사용 |
-| `max_position_error` | `0.5` | 위치 오차 상한(m) |
-| `max_rotation_error` | `0.0872665` | 회전 오차 상한(rad≈5°) |
-| `use_dr_rotation` | `true` | dead reckoning 회전 사용 |
+| `max_position_error` | `0.25` | 위치 오차 상한(m) |
+| `max_rotation_error` | `0.174533` | 회전 오차 상한(rad≈10°) |
+| `use_dr_rotation` | `false` | dead reckoning 회전 사용(false 면 FFT 가 회전도 추정) |
 | `trans_erosion_iterations` | `2` | 병진 전처리 erosion 횟수 |
 | `trans_gaussian_sigma` | `2.0` | 병진 Gaussian sigma |
 | `trans_gaussian_truncate` | `3.0` | Gaussian truncate |
