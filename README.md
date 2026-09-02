@@ -133,20 +133,23 @@ ros2 launch stonefish_slam slam.launch.py vehicle_name:=bluerov2
 ### Other Modes
 
 ```bash
-# Mapping only (no localization)
-ros2 launch stonefish_slam mapping.launch.py vehicle_name:=bluerov2
+# Mapping only (no scan matching, maps from odometry)
+ros2 launch stonefish_slam slam.launch.py mode:=mapping
 
-# Localization only (no mapping)
-ros2 launch stonefish_slam localization.launch.py vehicle_name:=bluerov2
+# Localization only (ICP on, no loop closure, no maps)
+ros2 launch stonefish_slam slam.launch.py mode:=localization
+
+# Replay a recorded bag instead of the simulator (the bag publishes /clock)
+ros2 launch stonefish_slam slam.launch.py use_sim_time:=true rviz:=false
+ros2 bag play <bag> --clock
 ```
 
 ## Launch Files
 
 | Launch File | Description |
 |-------------|-------------|
-| `slam.launch.py` | Full SLAM with configurable modes |
-| `mapping.launch.py` | Mapping only (SSM/NSSM disabled) |
-| `localization.launch.py` | Localization only (mapping disabled) |
+| `slam.launch.py` | SLAM node — `mode:=slam` (default) / `localization` / `mapping` |
+| `slam_real_bag.launch.py` | `slam.launch.py` + `config/real_bag_overrides.yaml` + odometry→TF bridge for sea-trial bags |
 | `dead_reckoning.launch.py` | Dead reckoning node |
 | `mapping_3d_standalone.launch.py` | Standalone 3D mapping |
 | `mapping_2d_standalone.launch.py` | Standalone 2D mapping |
@@ -157,14 +160,21 @@ ros2 launch stonefish_slam localization.launch.py vehicle_name:=bluerov2
 ```bash
 ros2 launch stonefish_slam slam.launch.py \
     vehicle_name:=bluerov2 \
-    mode:=slam \                    # slam, localization-only, mapping-only
-    enable_2d_mapping:=true \
+    mode:=slam \                    # slam | localization | mapping
+    enable_2d_mapping:=true \       # empty (default) = value from config/slam.yaml
     enable_3d_mapping:=true \
-    update_method:=iwlo \           # log_odds, weighted_avg, iwlo
-    ssm_enable:=true \
-    nssm_enable:=false \
-    rviz:=true
+    update_method:=iwlo \           # log_odds | weighted_avg | iwlo (default from config/slam.yaml)
+    icp_config_file:=icp.yaml \     # or icp_real_bag.yaml
+    override_config:='' \           # optional profile yaml loaded after config/slam.yaml
+    evaluate:=true \                # accuracy monitor + 2D trajectory-error accumulator
+    rviz:=true \
+    use_sim_time:=false             # true only with `ros2 bag play --clock`
 ```
+
+Precedence, last wins: `config/slam.yaml` < `config/mapping/method_<update_method>.yaml`
+< `override_config` < `mode` preset < explicit `enable_*_mapping` / `update_method` arguments.
+Finer switches (`ssm.enable`, `nssm.enable`, `fft_localization.enable`, …) live in
+`config/slam.yaml`.
 
 ## ROS2 Topics
 
@@ -196,14 +206,15 @@ Located in `config/`:
 
 | File | Description |
 |------|-------------|
-| `sonar.yaml` | Sonar hardware parameters (FOV, range, beams) |
-| `feature.yaml` | CFAR feature extraction settings |
-| `mapping.yaml` | 2D/3D mapping parameters |
-| `localization.yaml` | SSM and keyframe settings |
-| `factor_graph.yaml` | NSSM loop closure parameters |
-| `icp.yaml` | ICP (libpointmatcher) configuration |
-| `dead_reckoning.yaml` | Dead-reckoning (DVL/IMU) settings |
-| `slam.yaml` | Global SLAM settings |
+| `slam.yaml` | Every `slam_node` parameter, in sections: data source, module switches, sonar hardware, CFAR feature extraction, keyframes/noise, SSM (ICP), NSSM/PCM loop closure, FFT localization, 2D/3D mapping |
+| `mapping/method_*.yaml` | Per-method 3D probability-update values; `update_method` picks one |
+| `icp.yaml`, `icp_real_bag.yaml` | ICP (libpointmatcher) chains; `icp_config_file` picks one |
+| `real_bag_overrides.yaml` | Real sea-trial profile (bag topics, compressed FLS, relaxed gates); `override_config` |
+| `dead_reckoning.yaml` | Dead-reckoning node (DVL/IMU) settings |
+
+`sonar.sonar_tilt_deg` is the depression angle below the horizontal plane and must equal
+the simulator's FLS mounting (`bluerov2.scn`, where the `rpy` roll is measured from nadir:
+tilt = 90° − roll); `test_sonar_tilt_matches_sim_scenario.py` checks both repos.
 
 ### Update Methods
 

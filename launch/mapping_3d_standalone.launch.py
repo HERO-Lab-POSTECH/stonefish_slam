@@ -16,8 +16,8 @@ def generate_launch_description():
     pkg_share = Path(get_package_share_directory('stonefish_slam'))
     config_dir = pkg_share / 'config'
 
-    # Read update_method from mapping.yaml
-    mapping_yaml_path = config_dir / 'mapping.yaml'
+    # Read update_method from slam.yaml (the single parameter file)
+    mapping_yaml_path = config_dir / 'slam.yaml'
     with open(mapping_yaml_path, 'r') as f:
         mapping_config = yaml.safe_load(f)
     default_update_method = mapping_config.get('slam_node', {}).get('ros__parameters', {}).get('mapping_3d', {}).get('update_method', 'log_odds')
@@ -57,12 +57,10 @@ def generate_launch_description():
         Node(
             package='stonefish_slam',
             executable='mapping_3d_standalone',
-            name='slam_node',  # Must match yaml namespace (slam_node.ros__parameters)
+            name='slam_node',
             output='screen',
             parameters=[
-                str(config_dir / 'sonar.yaml'),    # Sonar parameters
-                str(config_dir / 'mapping.yaml'),  # Mapping parameters
-                str(config_dir / 'slam.yaml'),     # General SLAM params
+                str(config_dir / 'slam.yaml'),     # every slam_node parameter (sonar, mapping_3d, ...)
                 method_config_path,                # Dynamic: method_{log_odds|weighted_avg|iwlo}.yaml
                 {
                     # Standalone-specific settings only
@@ -70,7 +68,7 @@ def generate_launch_description():
                     'frame_interval': 10,
                     'odom_topic': ['/', vehicle_name, '/odometry'],
                     'sonar_topic': ['/', vehicle_name, '/fls/image'],
-                    'update_method': update_method,
+                    'mapping_3d.update_method': update_method,  # bare 'update_method' is not declared
                     'use_sim_time': LaunchConfiguration('use_sim_time'),
                 }
             ],

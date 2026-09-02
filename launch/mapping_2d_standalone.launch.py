@@ -31,12 +31,13 @@ def generate_launch_description():
     mapping_2d_node = Node(
         package='stonefish_slam',
         executable='mapping_2d_standalone',
-        name='slam_node',  # Must match yaml namespace (slam_node.ros__parameters)
+        name='slam_node',
         parameters=[
-            str(config_dir / 'sonar.yaml'),    # Sonar parameters
-            str(config_dir / 'mapping.yaml'),  # Mapping parameters
-            str(config_dir / 'slam.yaml'),     # General SLAM params
+            str(config_dir / 'slam.yaml'),     # every slam_node parameter (sonar, mapping_2d, ...)
             {
+                # slam_node caps the grid at 0.2 m/px for the OccupancyGrid message size;
+                # this dev harness keeps the 0.1 m/px it always had.
+                'mapping_2d.map_2d_resolution': 0.1,
                 'frame_interval': 10,
                 'odom_topic': ['/', vehicle_name, '/odometry'],
                 'sonar_topic': ['/', vehicle_name, '/fls/image'],

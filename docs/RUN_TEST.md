@@ -62,10 +62,10 @@ ros2 launch stonefish_control control.launch.py        # 제어기
 
 ```bash
 # localization-only (맵 안 쌓고 위치추정만)
-ros2 launch stonefish_slam localization.launch.py
+ros2 launch stonefish_slam slam.launch.py mode:=localization
 
 # mapping-only (SSM/NSSM 끄고 매핑만, SLAM 콜백은 거침)
-ros2 launch stonefish_slam mapping.launch.py
+ros2 launch stonefish_slam slam.launch.py mode:=mapping
 
 # RViz 끄고 (헤드리스/원격)
 ros2 launch stonefish_slam slam.launch.py rviz:=false

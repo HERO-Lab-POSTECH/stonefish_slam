@@ -30,7 +30,7 @@ flowchart LR
 
 ## 변수: Pose2 키프레임
 
-각 변수는 평면 포즈 `Pose2` \((x, y, \theta)\)이며, 키프레임이 생성될 때마다 그래프에 추가된다. 키프레임 생성 조건은 `localization.yaml`에 정의되어 있다(`keyframe_duration` 1.0s, `keyframe_translation` 1.0m, `keyframe_rotation` 0.174533rad = 10°). 자세한 키프레임 결정 파라미터는 [localization-graph.md](../parameters/localization-graph.md)를 참조하라.
+각 변수는 평면 포즈 `Pose2` \((x, y, \theta)\)이며, 키프레임이 생성될 때마다 그래프에 추가된다. 키프레임 생성 조건은 `slam.yaml`에 정의되어 있다(`keyframe_duration` 1.0s, `keyframe_translation` 1.0m, `keyframe_rotation` 0.174533rad = 10°). 자세한 키프레임 결정 파라미터는 [localization-graph.md](../parameters/localization-graph.md)를 참조하라.
 
 ## 4종 팩터
 
@@ -103,7 +103,7 @@ NSSM 루프 클로저 후보를 그래프에 넣기 전에, 후보들끼리 서�
 
 PCM은 최근 루프 클로저 후보를 sliding window에 모아 쌍별 consistency를 측정한다:
 
-- sliding window 크기 = `pcm_queue_size`(5, `factor_graph.yaml`)
+- sliding window 크기 = `pcm_queue_size`(5, `slam.yaml`)
 - 쌍 consistency 판정 임계값 = 카이제곱 분포 \(\chi^2_{0.99,\,3} = \texttt{chi2.ppf}(0.99,\,3) = 11.34\)
 - 수용 조건 = 서로 consistent한 후보가 `min_pcm`(3) 개 이상일 때
 
@@ -120,17 +120,17 @@ flowchart TD
 
 | 파라미터 | 기본값 | 의미 | 설정 파일 |
 |---------|-------|------|----------|
-| `nssm.min_st_sep` | `15` | 루프 후보로 볼 최소 키프레임 분리 | `factor_graph.yaml` |
-| `nssm.source_frames` | `5` | NSSM 매칭 시 통합할 최근 키프레임 수 | `factor_graph.yaml` |
-| `pcm_queue_size` | `5` | PCM sliding window 크기 | `factor_graph.yaml` |
-| `min_pcm` | `3` | 수용에 필요한 최소 consistent 루프 수 | `factor_graph.yaml` |
-| `nssm.max_translation` | `5.0` (m) | NSSM 매칭 허용 최대 병진 | `factor_graph.yaml` |
-| `nssm.max_rotation` | `0.5236` (rad, 30°) | NSSM 매칭 허용 최대 회전 | `factor_graph.yaml` |
-| `nssm.min_points` | `150` | NSSM 매칭 최소 점 수 | `factor_graph.yaml` |
-| `nssm.cov_samples` | `30` | 공분산 샘플 수(`0`=비활성) | `factor_graph.yaml` |
+| `nssm.min_st_sep` | `15` | 루프 후보로 볼 최소 키프레임 분리 | `slam.yaml` |
+| `nssm.source_frames` | `5` | NSSM 매칭 시 통합할 최근 키프레임 수 | `slam.yaml` |
+| `pcm_queue_size` | `5` | PCM sliding window 크기 | `slam.yaml` |
+| `min_pcm` | `3` | 수용에 필요한 최소 consistent 루프 수 | `slam.yaml` |
+| `nssm.max_translation` | `5.0` (m) | NSSM 매칭 허용 최대 병진 | `slam.yaml` |
+| `nssm.max_rotation` | `0.5236` (rad, 30°) | NSSM 매칭 허용 최대 회전 | `slam.yaml` |
+| `nssm.min_points` | `150` | NSSM 매칭 최소 점 수 | `slam.yaml` |
+| `nssm.cov_samples` | `30` | 공분산 샘플 수(`0`=비활성) | `slam.yaml` |
 
 !!! warning "min_pcm와 pcm_queue_size 조정 효과"
-    `min_pcm`(기본 `3`)을 키우면 더 많은 상호 일관 후보를 요구해 거짓 루프를 강하게 거르지만 정상 루프도 놓치기 쉽다. `pcm_queue_size`(기본 `5`)를 키우면 더 긴 이력에서 consistency를 보지만 그만큼 판정이 늦어진다. 두 값은 `factor_graph.yaml`에서 함께 조정한다.
+    `min_pcm`(기본 `3`)을 키우면 더 많은 상호 일관 후보를 요구해 거짓 루프를 강하게 거르지만 정상 루프도 놓치기 쉽다. `pcm_queue_size`(기본 `5`)를 키우면 더 긴 이력에서 consistency를 보지만 그만큼 판정이 늦어진다. 두 값은 `slam.yaml`에서 함께 조정한다.
 
 ## NSSM ↔ 팩터 그래프 흐름 정리
 

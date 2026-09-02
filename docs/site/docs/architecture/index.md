@@ -40,8 +40,8 @@ stonefish_slam/
 │   │   └── __init__.py        try/except ImportError로 확장 감쌈
 │   ├── utils/        # topics.py, conversions.py, visualization.py, sonar.py, fusion.py, io.py
 │   └── test/         # test_*.py + static_import_gate.py + test_wildcard_gate.py(AST 게이트)
-├── launch/   # 9개 launch
-├── config/   # 8 + mapping/3 = 11개 YAML
+├── launch/   # 8개 launch (slam.launch.py mode:=slam|localization|mapping)
+├── config/   # slam.yaml(노드 파라미터 전부) + real_bag_overrides + icp×2 + dead_reckoning + mapping/3 = 8개 YAML
 ├── rviz/, CMakeLists.txt, package.xml, README, CHANGELOG, CLAUDE.md, P4_FLAGS.md
 └── docs/CONVENTIONS.md(SSOT), docs/RUN_TEST.md
 ```

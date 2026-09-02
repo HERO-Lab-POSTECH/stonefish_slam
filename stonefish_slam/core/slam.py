@@ -53,7 +53,7 @@ class SLAMNode(Node):
 
         # ===== Declare all parameters from YAML files (BEFORE init_node) =====
 
-        # Sonar parameters (sonar.yaml)
+        # Sonar parameters (slam.yaml: sonar section)
         self.declare_parameter('vehicle_name', 'bluerov2')
         # Note: sonar_image_topic is constructed from vehicle_name unless
         # sonar_topic/odom_topic override it (real-bag replay: e.g.
@@ -70,7 +70,7 @@ class SLAMNode(Node):
         self.declare_parameter('sonar.sonar_position', [0.0, 0.0, 0.0])
         self.declare_parameter('sonar.sonar_tilt_deg', 30.0)
 
-        # Feature extraction parameters (feature.yaml)
+        # Feature extraction parameters (slam.yaml: feature section)
         self.declare_parameter('CFAR.Ntc', 20)
         self.declare_parameter('CFAR.Ngc', 10)
         self.declare_parameter('CFAR.Pfa', 0.01)
@@ -85,7 +85,7 @@ class SLAMNode(Node):
         self.declare_parameter('visualization.radius', 2.0)
         self.declare_parameter('visualization.color', 'green')
 
-        # Localization parameters (localization.yaml)
+        # Localization parameters (slam.yaml: localization section)
         self.declare_parameter('keyframe_duration', 1.0)
         # 0.0 disables the forced-keyframe cadence; >0 forces a keyframe after
         # this many seconds even without motion (steady cadence in slow segments)
@@ -106,7 +106,7 @@ class SLAMNode(Node):
             get_package_share_directory('stonefish_slam'), 'config', 'icp.yaml')
         self.declare_parameter('icp_config', default_icp_config)
 
-        # Factor graph parameters (factor_graph.yaml)
+        # Factor graph parameters (slam.yaml: factor_graph section)
         self.declare_parameter('nssm.enable', False)
         self.declare_parameter('nssm.min_st_sep', 15)
         self.declare_parameter('nssm.min_points', 150)
@@ -120,8 +120,8 @@ class SLAMNode(Node):
         self.declare_parameter('pcm_queue_size', 5)
         self.declare_parameter('min_pcm', 3)
 
-        # Mapping parameters (mapping.yaml)
-        self.declare_parameter('mapping_2d.map_2d_resolution', 0.1)
+        # Mapping parameters (slam.yaml: mapping section)
+        self.declare_parameter('mapping_2d.map_2d_resolution', 0.2)
         self.declare_parameter('mapping_2d.map_size', [4000, 4000])
         self.declare_parameter('mapping_2d.map_update_interval', 1)
         self.declare_parameter('mapping_2d.intensity_threshold', 10)
@@ -238,8 +238,8 @@ class SLAMNode(Node):
         self._finalize_node_config()
 
     def _init_keyframe_and_noise_params(self) -> None:
-        """Configures keyframe criteria and noise models (loaded from localization.yaml)."""
-        # keyframe paramters, how often to add them (loaded from localization.yaml)
+        """Configures keyframe criteria and noise models (loaded from slam.yaml)."""
+        # keyframe paramters, how often to add them (loaded from slam.yaml)
         keyframe_duration_sec = self.get_parameter('keyframe_duration').value
         keyframe_duration = Duration(seconds=keyframe_duration_sec)
         keyframe_duration_max_sec = self.get_parameter('keyframe_duration_max').value
@@ -256,7 +256,7 @@ class SLAMNode(Node):
             self.localization.keyframe_translation = keyframe_translation
             self.localization.keyframe_rotation = keyframe_rotation
 
-        # noise models (loaded from localization.yaml)
+        # noise models (loaded from slam.yaml)
         prior_sigmas = self.get_parameter('slam_prior_noise').value
         odom_sigmas = self.get_parameter('slam_odom_noise').value
         icp_odom_sigmas = self.get_parameter('slam_icp_noise').value
@@ -272,22 +272,22 @@ class SLAMNode(Node):
             self.localization.icp_odom_sigmas = icp_odom_sigmas
 
     def _init_sonar_and_scan_matching_params(self) -> None:
-        """Configures sonar hardware, SSM, NSSM, and PCM parameters (loaded from sonar.yaml/localization.yaml)."""
-        # resultion for map downsampling (loaded from localization.yaml)
+        """Configures sonar hardware, SSM, NSSM, and PCM parameters (loaded from slam.yaml)."""
+        # resultion for map downsampling (loaded from slam.yaml)
         point_resolution = self.get_parameter('point_downsample_resolution').value
         if self.localization is not None:
             self.localization.point_resolution = point_resolution
 
-        # Sonar configuration (loaded from sonar.yaml)
+        # Sonar configuration (loaded from slam.yaml)
         if self.localization is not None:
-            # Configure oculus object with parameters from sonar.yaml
+            # Configure oculus object with parameters from slam.yaml (sonar section)
             # Note: In original code, this was done via oculus.configure(ping) message callback
             # Now we use ROS2 parameters instead
             sonar_range_max = self.get_parameter('sonar.range_max').value
             sonar_range_min = self.get_parameter('sonar.range_min').value
             sonar_horizontal_fov = self.get_parameter('sonar.horizontal_fov').value
             sonar_vertical_fov = self.get_parameter('sonar.vertical_fov').value
-            # Get sonar dimensions from sonar.yaml
+            # Get sonar dimensions from slam.yaml (sonar section)
             sonar_num_bins = self.get_parameter('sonar.num_bins').value
             sonar_num_beams = self.get_parameter('sonar.num_beams').value
 
@@ -304,7 +304,7 @@ class SLAMNode(Node):
                                    f"resolution={self.localization.oculus.range_resolution:.3f}m, "
                                    f"FOV={sonar_horizontal_fov}deg")
 
-        # sequential scan matching parameters (SSM) (loaded from localization.yaml)
+        # sequential scan matching parameters (SSM) (loaded from slam.yaml)
         if self.localization is not None:
             # SSM is disabled in mapping-only mode
             if self.mode == 'mapping-only':
@@ -317,7 +317,7 @@ class SLAMNode(Node):
             self.localization.ssm_params.target_frames = self.get_parameter('ssm.target_frames').value
             self.get_logger().info(f"SSM: {self.localization.ssm_params.enable}")
 
-        # non sequential scan matching parameters (NSSM) aka loop closures (loaded from localization.yaml)
+        # non sequential scan matching parameters (NSSM) aka loop closures (loaded from slam.yaml)
         if self.localization is not None:
             # NSSM is disabled in localization-only and mapping-only modes
             if self.mode in ['localization-only', 'mapping-only']:
@@ -333,16 +333,16 @@ class SLAMNode(Node):
             self.get_logger().info(f"NSSM: {self.localization.nssm_params.enable}")
         self.nssm_try_interval = max(1, self.get_parameter('nssm.try_interval').value)
 
-        # pairwise consistency maximization parameters for loop closure (loaded from localization.yaml)
+        # pairwise consistency maximization parameters for loop closure (loaded from slam.yaml)
         self.fg.pcm_queue_size = self.get_parameter('pcm_queue_size').value
         self.fg.min_pcm = self.get_parameter('min_pcm').value
 
     def _init_mappers(self) -> None:
-        """Configures and creates the 2D and 3D sonar mappers (loaded from sonar.yaml/mapping.yaml/slam.yaml)."""
-        # ===== Sonar Hardware Parameters ===== (loaded from sonar.yaml)
-        # ===== 2D Mapping Parameters ===== (loaded from mapping.yaml)
-        # ===== 3D Mapping Parameters ===== (loaded from mapping.yaml)
-        # ===== Mapping Enable Flags ===== (loaded from slam.yaml)
+        """Configures and creates the 2D and 3D sonar mappers (loaded from slam.yaml)."""
+        # ===== Sonar Hardware Parameters ===== (loaded from slam.yaml)
+        # ===== 2D Mapping Parameters ===== (slam.yaml: mapping_2d)
+        # ===== 3D Mapping Parameters ===== (slam.yaml: mapping_3d)
+        # ===== Mapping Enable Flags ===== (slam.yaml)
 
         self.enable_2d_mapping = self.get_parameter('enable_2d_mapping').value
         self.map_update_interval = self.get_parameter('mapping_2d.map_update_interval').value
@@ -359,10 +359,10 @@ class SLAMNode(Node):
             'sonar_tilt_deg': self.get_parameter('sonar.sonar_tilt_deg').value,
         }
 
-        # Fixed map resolution for DDS message size compatibility
-        # Auto-calculated: sonar_range / sonar_bins = 40/512 = 0.078m → 5120x5120 pixels (26MB)
-        # Fixed: 0.2m → 1000x1000 pixels (1MB) - reduces message size by 26x
-        map_resolution = 0.2  # Fixed resolution for 200x200m map
+        # 0.2 m/px keeps the grid message ~1 MB (sonar_range/sonar_bins ≈ 0.078 m
+        # would be 26x). The yaml key used to advertise 0.1 while this line
+        # hard-coded 0.2; the parameter is the only source now.
+        map_resolution = self.get_parameter('mapping_2d.map_2d_resolution').value
 
         if self.enable_2d_mapping:
             map_size = tuple(self.get_parameter('mapping_2d.map_size').value)
@@ -422,6 +422,8 @@ class SLAMNode(Node):
                 'adaptive_max_ratio': self.get_parameter('mapping_3d.adaptive_max_ratio').value,
                 'use_cpp_backend': self.get_parameter('mapping_3d.use_cpp_backend').value,
                 'enable_propagation': self.get_parameter('mapping_3d.enable_propagation').value,
+                'propagation_radius': self.get_parameter('mapping_3d.propagation_radius').value,
+                'propagation_sigma': self.get_parameter('mapping_3d.propagation_sigma').value,
                 'use_range_weighting': self.get_parameter('mapping_3d.use_range_weighting').value,
                 'lambda_decay': self.get_parameter('mapping_3d.lambda_decay').value,
                 'enable_gaussian_weighting': self.get_parameter('mapping_3d.enable_gaussian_weighting').value,
@@ -430,7 +432,7 @@ class SLAMNode(Node):
 
                 # Update method + its method-specific params. Without these
                 # SonarMapping3D falls back to log_odds regardless of what
-                # config/mapping.yaml and the method_*.yaml file select.
+                # config/slam.yaml and the method_*.yaml file select.
                 'update_method': self.get_parameter('mapping_3d.update_method').value,
                 'sharpness': self.get_parameter('mapping_3d.sharpness').value,
                 'decay_rate': self.get_parameter('mapping_3d.decay_rate').value,
@@ -1104,10 +1106,18 @@ class SLAMNode(Node):
 
             # get the registered point cloud
             transf_points = self.fg.keyframes[key].transf_points
+            if transf_points is None:
+                # mapping-only keyframes are appended but never registered
+                # (no factor-graph update), so they carry no global-frame
+                # points — publishing crashed on len(None) at the first one.
+                continue
 
             # append
             all_points.append(transf_points)
             all_keys.append(key * np.ones((len(transf_points), 1)))
+
+        if not all_keys:
+            return
 
         # 3. Merge point clouds
         all_points = np.concatenate(all_points)

@@ -18,7 +18,7 @@ METHOD_DIR = Path(__file__).resolve().parents[2] / "config" / "mapping"
 def _mapping_3d_block(path):
     with open(path) as fh:
         doc = yaml.safe_load(fh)
-    return doc["slam_node"]["ros__parameters"]["mapping_3d"]
+    return doc["/**"]["ros__parameters"]["mapping_3d"]
 
 
 def _method_files():

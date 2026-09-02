@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **config 6 → 1, launch 10 → 8, launch 인자 17 → 10** (`refactor/config-consolidation`):
+  `sonar.yaml`·`feature.yaml`·`localization.yaml`·`factor_graph.yaml`·`mapping.yaml`·
+  `slam.yaml` 은 전부 `slam_node.ros__parameters` 하나였고 launch 가 항상 여섯을 같이
+  로드했다 — `config/slam.yaml` 한 파일의 섹션으로 합친다(값은 전부 보존, 코드 기본값에만
+  있던 `sonar_topic`·`odom_topic`·`sonar_compressed`·`keyframe_duration_max`·
+  `nssm.try_interval`·`publish_point_cloud` 도 적어 파일이 파라미터 카탈로그가 되게).
+  `localization.launch.py`·`mapping.launch.py` 는 `slam.launch.py` 에 `mode` 와 플래그만
+  넣던 래퍼라 삭제하고 `slam.launch.py mode:=slam|localization|mapping` preset 으로
+  흡수(노드의 `mode` 파라미터는 그대로 — launch 만 바뀐다). `ssm_enable`/`nssm_enable`
+  인자는 preset 과 yaml 이 대신하고, 평가 관측기 인자 6개는 `evaluate:=true|false`
+  하나로, `enable_2d/3d_mapping` 은 빈 값이 yaml 을 뜻하도록(전에는 launch 기본 `true`
+  가 yaml 값을 항상 덮었다). 우선순위는 launch docstring 에 한 줄로 고정: slam.yaml <
+  method_*.yaml < override_config < mode preset < 명시 인자. 래퍼와 동등하게 mapping preset
+  은 2D on/3D off, localization·mapping 모드는 rviz 기본 off(`rviz:=` 빈 값 = 모드별 기본)
+- **yaml 루트 키를 `slam_node:` 에서 `/**:` 로** — combined standalone 이 노드를
+  `/mapping_2d/slam_node`·`/mapping_3d/slam_node` 로 띄우는데 `slam_node:` 선택자는
+  네임스페이스 노드에 **0개** 매칭돼 그 하니스는 지금까지 코드 기본값으로 돌았다
+  (codex 검증). `/**` 는 어느 노드든 자기가 선언한 키만 받으므로 feature/FFT standalone
+  도 같은 파일을 읽을 수 있게 됐다(전엔 노드명이 달라 dict 로만 받았다). 2D standalone 은
+  항상 쓰던 0.1 m/px 를 launch 오버라이드로 유지(slam_node 의 0.2 는 메시지 크기 상한).
+  3D standalone launch 의 bare `update_method` 키(선언 안 돼 조용히 버려짐)도 정정
+- **거짓말하던 설정 두 건을 살린다**: `mapping_2d.map_2d_resolution` 은 yaml 이 0.1 을
+  광고했지만 아무도 읽지 않았고 `slam.py` 가 0.2 를 하드코딩했다 — 이제 파라미터를
+  읽고 yaml 값은 실제 값 0.2(동작 불변). `mapping_3d.propagation_radius/sigma` 는 선언만
+  되고 mapper 로 전달되지 않아 `config.get` 기본값(2·1.5)으로 돌았다 — 전달한다(같은 값,
+  동작 불변). `mapping_3d_standalone` 은 같은 키를 접두사 없이 선언해 yaml 에서 한 번도
+  로드되지 않았다 — `mapping_3d.` 접두사로 정합
+- 자동 계산은 못 넓혔다: `sonar.*` 중 이미지 메시지에서 나오는 것은 `num_beams`·
+  `num_bins`(512×500) 뿐인데 세 모듈이 첫 프레임 전에 각도 테이블을 미리 계산하므로
+  지연 초기화 없이는 못 뺀다(N7 god-method 분해와 같이 볼 것). 틸트·FOV·range 는
+  메시지에도 TF 에도 없다(시뮬은 `world_ned→base_link` 만 발행) — 크로스 repo 가드
+  `test_sonar_tilt_matches_sim_scenario.py` 가 그 자리를 맡는다
+
 ### Added
 
 - **위치 추정 파이프라인 계측 I1~I11** (`feat/loc-instrumentation`): "icp 0%" 도
