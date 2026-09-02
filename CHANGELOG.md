@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **`is_keyframe` 의 모션블러 배제 조건** (`fix/dead-motion-blur-check`):
+  `core/localization.py` 의 각속도 상한(0.1 rad/s)은 **한 번도 실행된 적이 없다** —
+  `slam.py` 가 `frame.twist` 를 818 의 `is_keyframe` 호출보다 뒤인 824 에서 대입하므로
+  조건은 항상 `None` 을 읽고 흘려보냈다. 되살려 측정하니 키프레임 19%·채택된 루프
+  클로저 43% 가 사라지고 tilt30 bag 재생 2D mean err 이 2.745 → 6.623 m (+141%) 로
+  나빠진다. 이 데이터에서 NSSM 은 2.8배 값을 하므로 루프 클로저 손실이 지배한다.
+  따라서 대입 순서를 고치는 것이 아니라 조건을 삭제해 실제 동작을 코드에 명시한다.
+  `Keyframe.twist` 필드 자체는 남는다 — `slam.py:1081` 이 odom 발행에 쓴다.
+  `test_keyframe_no_motion_blur_reject.py` 가 재도입을 막는다(뮤테이션 확인: 조건을
+  되살리면 4건 중 2건 실패).
+
 ### Added
 
 - **위치 추정 파이프라인 계측 I1~I11** (`feat/loc-instrumentation`): "icp 0%" 도
