@@ -91,7 +91,7 @@ class SonarMapping2D:
         sonar_range: float = 20.0,
         sonar_fov: float = 130.0,
         fan_pixel_resolution: float = 0.05,
-        sonar_tilt_deg: float = 10.0,
+        sonar_tilt_deg: float = 30.0,
         range_min: float = 0.5,
         keyframe_sample_threshold: int = 50,
         intensity_threshold: int = 50,
@@ -105,7 +105,7 @@ class SonarMapping2D:
             sonar_range: Maximum sonar range in meters (default: 20.0)
             sonar_fov: Sonar field of view in degrees (default: 130.0)
             fan_pixel_resolution: Fan-shaped image resolution in m/pixel (default: 0.05)
-            sonar_tilt_deg: Sonar tilt angle in degrees (0=vertical down, 30=tilted) (default: 30.0)
+            sonar_tilt_deg: Sonar depression angle below the horizontal plane, degrees (0=horizontal, 90=straight down; the code applies cos(tilt) as the horizontal-range factor) (default: 30.0)
             range_min: Minimum sonar range in meters (default: 0.5, matches Stonefish config)
             keyframe_sample_threshold: Threshold for adaptive sampling (default: 50)
             intensity_threshold: Minimum intensity for pixels to affect map (default: 50)
