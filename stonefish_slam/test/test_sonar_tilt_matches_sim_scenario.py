@@ -72,7 +72,7 @@ def test_sonar_tilt_deg_matches_the_simulator_mounting():
         pytest.skip(f"sibling stonefish_sim checkout not found at {SIM_SCN}")
     yaml = pytest.importorskip("yaml")
     with open(SLAM_YAML) as fh:
-        tilt_cfg = yaml.safe_load(fh)["slam_node"]["ros__parameters"]["sonar"]["sonar_tilt_deg"]
+        tilt_cfg = yaml.safe_load(fh)["/**"]["ros__parameters"]["sonar"]["sonar_tilt_deg"]
 
     roll, pitch, yaw = _fls_origin_rpy(SIM_SCN.read_text())
     x, _, _ = look_vector_body(roll, pitch, yaw)

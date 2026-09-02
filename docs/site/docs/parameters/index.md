@@ -1,6 +1,6 @@
 # 파라미터 개요와 사용법
 
-이 페이지는 stonefish_slam의 파라미터를 **어디서 어떻게 수정하나**를 먼저 설명한다. `slam_node`의 모든 파라미터는 `config/slam.yaml` **한 파일**에 섹션별로 정의되어 있고(2026-09-02 통합 — 이전의 `sonar/feature/localization/factor_graph/mapping.yaml` 6개는 이 파일의 섹션이 됐다), 노드는 `slam.py:44-154`의 `declare_parameter`(총 82회)로 이를 선언한 뒤 YAML 또는 launch 인자로 오버라이드한다.
+이 페이지는 stonefish_slam의 파라미터를 **어디서 어떻게 수정하나**를 먼저 설명한다. `slam_node`의 모든 파라미터는 `config/slam.yaml` **한 파일**에 섹션별로 정의되어 있고(2026-09-02 통합 — 이전의 `sonar/feature/localization/factor_graph/mapping.yaml` 6개는 이 파일의 섹션이 됐다), 노드는 `slam.py`의 `declare_parameter`로 이를 선언한 뒤 YAML 또는 launch 인자로 오버라이드한다.
 
 ## 수정 위치: config/slam.yaml 의 섹션
 
@@ -51,12 +51,9 @@ ros2 launch stonefish_slam slam.launch.py vehicle_name:=x500 rviz:=false
 !!! warning "수정 후 재실행 필요"
     파라미터는 노드 시작 시 `declare_parameter`로 한 번 읽힌다. YAML을 수정해도 실행 중인 노드에는 반영되지 않으므로, 값을 바꾼 뒤에는 노드를 다시 실행해야 한다.
 
-## icp_config 절대경로 하드코딩 주의
+## icp_config 는 yaml 이 아니라 launch 가 정한다
 
-`slam.yaml`의 `icp_config`는 libpointmatcher ICP 설정 파일(`icp.yaml`)을 가리키는데, **절대경로가 하드코딩**되어 있다. 이는 P4 단계에서 플래그로 식별된 항목으로, 환경마다 경로가 달라 그대로 두면 동작하지 않을 수 있다.
-
-!!! warning "icp_config 절대경로 (P4 flag)"
-    `icp_config`는 절대경로가 하드코딩되어 있다. 다른 환경에서는 launch 인자로 오버라이드해 자신의 `config/icp.yaml` 경로를 지정해야 한다. 절대경로를 그대로 쓰면 ICP 설정 파일을 찾지 못한다.
+`icp_config`(libpointmatcher 체인 파일 경로)는 `config/slam.yaml`에 없다. `slam.launch.py`가 `icp_config_file` 인자(기본 `icp.yaml`, 실해역은 `icp_real_bag.yaml`)를 패키지 share 경로에 붙여 노드에 넘긴다. 예전 `localization.yaml`의 절대경로 하드코딩(P4 flag)은 2026-09-01에 제거됐다.
 
 ## 상세 페이지
 

@@ -57,7 +57,7 @@ def _sonar_defaults(node_filename):
 def sonar_yaml():
     yaml = pytest.importorskip("yaml")
     with open(SLAM_YAML) as fh:
-        return yaml.safe_load(fh)["slam_node"]["ros__parameters"]["sonar"]
+        return yaml.safe_load(fh)["/**"]["ros__parameters"]["sonar"]
 
 
 @pytest.mark.parametrize("node_filename", NODES)

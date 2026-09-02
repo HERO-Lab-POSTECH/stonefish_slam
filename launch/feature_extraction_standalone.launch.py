@@ -4,17 +4,17 @@
 Feature extraction is internal to slam_node by default; this launch provides
 the optional standalone variant that only publishes feature points.
 
-Parameters are passed directly as a dict because the node name
-('feature_extraction_node') does not match the config YAML namespace
-('slam_node'). The node's declare_parameter defaults already mirror
-config/slam.yaml (CFAR.*, filter.*, sonar.*), so these values keep the
-launch self-documenting and parameterized by vehicle_name.
+config/slam.yaml is loaded first (its '/**' selector matches this node too), so
+CFAR.*, filter.* and sonar.* come from the same file as slam_node; the dict
+after it only sets the topics derived from vehicle_name.
 """
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+import os
 
 
 def generate_launch_description():
@@ -38,6 +38,7 @@ def generate_launch_description():
         executable='feature_extraction_node',
         name='feature_extraction_node',
         parameters=[
+            os.path.join(get_package_share_directory('stonefish_slam'), 'config', 'slam.yaml'),
             {
                 'sonar_topic': ['/', vehicle_name, '/fls/image'],
                 'feature_topic': '/feature_extraction/points',

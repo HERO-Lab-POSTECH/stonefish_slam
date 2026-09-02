@@ -33,7 +33,7 @@ class Mapping2DStandaloneNode(Node):
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
 
         # Mapping 2D parameters (must match slam.yaml: mapping_2d.*)
-        self.declare_parameter('mapping_2d.map_2d_resolution', 0.2)
+        self.declare_parameter('mapping_2d.map_2d_resolution', 0.1)  # launch passes 0.1 too; slam_node uses 0.2
         self.declare_parameter('mapping_2d.map_size', [4000, 4000])
         self.declare_parameter('mapping_2d.intensity_threshold', 50)
 

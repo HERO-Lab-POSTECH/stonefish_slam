@@ -1,7 +1,7 @@
 """The main slam_node must actually forward the 3D update-method parameters.
 
-`config/slam.yaml:34` sets `update_method: 'iwlo'` and
-`launch/slam.launch.py:45` loads `config/mapping/method_{update_method}.yaml`
+`config/slam.yaml` (mapping_3d.update_method) sets `'iwlo'` and
+`launch/slam.launch.py` loads `config/mapping/method_{update_method}.yaml`
 accordingly, but `SonarMapping3D` reads the method from the config DICT that
 `core/slam.py` builds (`config.get('update_method', 'log_odds')` at
 mapping_3d.py:161). If slam.py never puts the key there, every main-pipeline
@@ -28,6 +28,9 @@ SLAM_PY = REPO_ROOT / "stonefish_slam" / "core" / "slam.py"
 # (mapping_3d.py:161 update_method, :199-205 set_iwlo_params, :251-255
 # ray_config IWLO fields, :116 intensity_threshold).
 METHOD_KEYS = ("update_method", "sharpness", "decay_rate", "min_alpha")
+# Not method-specific, but they fell to `config.get` defaults for months because
+# slam.py declared them without forwarding — hold the forwarding too.
+FORWARDED_KEYS = METHOD_KEYS + ("propagation_radius", "propagation_sigma")
 
 
 def _slam_tree():
@@ -77,7 +80,7 @@ def _get_parameter_name(value_node):
     return None
 
 
-@pytest.mark.parametrize("key", METHOD_KEYS)
+@pytest.mark.parametrize("key", FORWARDED_KEYS)
 def test_method_parameter_is_declared(key):
     """A parameter the launch file supplies must be declared, or ROS drops it."""
     declared = _declared_parameters(_slam_tree())
@@ -87,7 +90,7 @@ def test_method_parameter_is_declared(key):
     )
 
 
-@pytest.mark.parametrize("key", METHOD_KEYS)
+@pytest.mark.parametrize("key", FORWARDED_KEYS)
 def test_method_parameter_reaches_the_mapper(key):
     """The declared parameter must also be put into mapping_3d_config."""
     config = _mapping_3d_config_dict(_slam_tree())
@@ -130,7 +133,7 @@ def test_launch_default_method_comes_from_mapping_yaml():
     mapping_yaml = REPO_ROOT / "config" / "slam.yaml"
     with open(mapping_yaml) as fh:
         configured = (
-            yaml.safe_load(fh)["slam_node"]["ros__parameters"]["mapping_3d"]
+            yaml.safe_load(fh)["/**"]["ros__parameters"]["mapping_3d"]
         )["update_method"]
 
     source = (REPO_ROOT / "launch" / "slam.launch.py").read_text()
@@ -170,7 +173,7 @@ def test_every_mapping_3d_yaml_key_is_declared():
     missing = []
     for path in yaml_files:
         with open(path) as fh:
-            params = yaml.safe_load(fh)["slam_node"]["ros__parameters"]
+            params = yaml.safe_load(fh)["/**"]["ros__parameters"]
         for key in params.get("mapping_3d", {}):
             if f"mapping_3d.{key}" not in declared:
                 missing.append(f"{path.name}: mapping_3d.{key}")

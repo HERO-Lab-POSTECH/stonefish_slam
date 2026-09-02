@@ -3,7 +3,7 @@
 # argument (slam.launch.py / slam_real_bag.launch.py), so every value here
 # beats the sim-tuned defaults; explicit launch arguments still win.
 # Values validated on the girona500 sea-trial bag (compressed FLS + LIG nav).
-slam_node:
+/**:
   ros__parameters:
     # ---- Data source: bag topics instead of simulator topics ----
     sonar_topic: '/vehicle_synced/image/fls2/image/compressed'

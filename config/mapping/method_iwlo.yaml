@@ -1,7 +1,7 @@
 # IWLO (Intensity-Weighted Log-Odds) Method Configuration
 # Combines Log-Odds Bayesian with intensity weighting
 # Formula: L_new = L_old + ΔL × w(I) × α(n)
-slam_node:
+/**:
   ros__parameters:
     mapping_3d:
       # Base log-odds parameters (override slam.yaml mapping_3d)

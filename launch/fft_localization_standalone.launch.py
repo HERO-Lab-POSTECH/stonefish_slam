@@ -16,6 +16,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+import os
 
 
 def generate_launch_description():
@@ -39,6 +41,7 @@ def generate_launch_description():
         executable='fft_localization_node',
         name='fft_localization_node',
         parameters=[
+            os.path.join(get_package_share_directory('stonefish_slam'), 'config', 'slam.yaml'),
             {
                 'sonar_topic': ['/', vehicle_name, '/fls/image'],
                 'pose_topic': '/fft_localization/transform',

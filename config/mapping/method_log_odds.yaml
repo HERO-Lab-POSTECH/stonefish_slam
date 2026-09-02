@@ -1,6 +1,6 @@
 # Log-Odds Method Configuration
 # Standard Bayesian log-odds occupancy update
-slam_node:
+/**:
   ros__parameters:
     mapping_3d:
       # Log-odds parameters (override slam.yaml mapping_3d)

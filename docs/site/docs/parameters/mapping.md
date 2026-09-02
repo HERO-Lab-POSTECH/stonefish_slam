@@ -24,13 +24,13 @@ flowchart TD
 
 | 파라미터 | 기본값 | 정의 위치 | 의미 | 수정 효과 |
 |---|---|---|---|---|
-| `map_2d_resolution` | `0.1` | `slam.yaml` | 점유그리드 해상도(meters/pixel) | 작게 하면 더 세밀한 지도지만 같은 영역에 더 많은 픽셀이 필요해 메모리·연산 비용이 커진다 |
-| `map_size` | `[4000, 4000]` | `slam.yaml` | `[width, height]` 픽셀 수. `0.1` 해상도에서 400×400m 영역 | 크게 하면 더 넓은 영역을 담지만 메모리가 픽셀 수에 비례해 증가 |
+| `map_2d_resolution` | `0.2` | `slam.yaml` | 점유그리드 해상도(meters/pixel) | 작게 하면 더 세밀한 지도지만 같은 영역에 더 많은 픽셀이 필요해 메모리·연산 비용이 커진다 |
+| `map_size` | `[4000, 4000]` | `slam.yaml` | `[width, height]` 픽셀 수. `0.2` 해상도에서 800×800m 영역 | 크게 하면 더 넓은 영역을 담지만 메모리가 픽셀 수에 비례해 증가 |
 | `map_update_interval` | `1` | `slam.yaml` | N keyframe마다 지도 갱신 | 크게 하면 갱신 빈도가 줄어 연산은 가볍지만 지도 반영이 늦어진다 |
 | `intensity_threshold` | `10` | `slam.yaml` | 픽셀로 채택할 최소 intensity(0-255) | 높이면 약한 반사를 걸러 잡음이 줄지만 희미한 구조가 누락될 수 있다 |
 
 !!! tip "해상도와 영역의 트레이드오프"
-    `map_2d_resolution`(미터/픽셀)과 `map_size`(픽셀)는 함께 커버 영역을 결정한다. 기본값은 `0.1 m/px × 4000 px = 400 m`로 한 변 400m 영역이다. 더 넓은 영역이 필요하면 `map_size`를 키우고, 더 세밀한 디테일이 필요하면 `map_2d_resolution`을 줄이되, 둘 다 메모리는 픽셀 수에 비례해 늘어난다.
+    `map_2d_resolution`(미터/픽셀)과 `map_size`(픽셀)는 함께 커버 영역을 결정한다. 기본값은 `0.2 m/px × 4000 px = 800 m`로 한 변 800m 영역이다(0.2는 OccupancyGrid 메시지 크기 상한 — 2026-09-02까지 yaml은 0.1을 광고했지만 노드는 0.2를 하드코딩했다; 2D standalone은 launch 오버라이드로 0.1을 유지한다). 더 넓은 영역이 필요하면 `map_size`를 키우고, 더 세밀한 디테일이 필요하면 `map_2d_resolution`을 줄이되, 둘 다 메모리는 픽셀 수에 비례해 늘어난다.
 
 ## 3D 매핑 공통 — `slam.yaml`의 `mapping_3d`
 

@@ -57,7 +57,7 @@ def generate_launch_description():
         Node(
             package='stonefish_slam',
             executable='mapping_3d_standalone',
-            name='slam_node',  # Must match yaml namespace (slam_node.ros__parameters)
+            name='slam_node',
             output='screen',
             parameters=[
                 str(config_dir / 'slam.yaml'),     # every slam_node parameter (sonar, mapping_3d, ...)
@@ -68,7 +68,7 @@ def generate_launch_description():
                     'frame_interval': 10,
                     'odom_topic': ['/', vehicle_name, '/odometry'],
                     'sonar_topic': ['/', vehicle_name, '/fls/image'],
-                    'update_method': update_method,
+                    'mapping_3d.update_method': update_method,  # bare 'update_method' is not declared
                     'use_sim_time': LaunchConfiguration('use_sim_time'),
                 }
             ],

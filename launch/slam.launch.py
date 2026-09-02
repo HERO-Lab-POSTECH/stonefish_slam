@@ -11,6 +11,9 @@ Parameter precedence, last wins:
     < override_config:=<profile.yaml>              (e.g. config/real_bag_overrides.yaml)
     < mode preset < explicit launch arguments (enable_2d_mapping, enable_3d_mapping, update_method)
 
+mode:=localization → ICP on, loop closure off, no maps; mode:=mapping → no scan matching,
+2D map on / 3D map off (what the deleted wrappers passed). Both default to rviz:=false.
+
 Two read-only evaluation observers (SLAM-vs-ground-truth accuracy monitor and the
 2D trajectory-error accumulator) start alongside the node unless evaluate:=false.
 """
@@ -45,6 +48,8 @@ MODE_PRESETS = {
         'mode': 'mapping-only',
         'ssm.enable': False,
         'nssm.enable': False,
+        'enable_2d_mapping': True,
+        'enable_3d_mapping': False,
     },
 }
 
@@ -52,7 +57,7 @@ MODE_PRESETS = {
 def _yaml_default_update_method():
     """config/slam.yaml is the single source of truth for the 3D update method."""
     with open(SLAM_YAML) as fh:
-        params = yaml.safe_load(fh)['slam_node']['ros__parameters']
+        params = yaml.safe_load(fh)['/**']['ros__parameters']
     return params['mapping_3d']['update_method']
 
 
@@ -66,6 +71,9 @@ def launch_setup(context, *args, **kwargs):
     mode = LaunchConfiguration('mode').perform(context)
     if mode not in MODE_PRESETS:
         raise ValueError(f"mode:={mode!r} — expected one of {sorted(MODE_PRESETS)}")
+    # The deleted localization/mapping wrappers defaulted to no RViz; keep that.
+    rviz_arg = LaunchConfiguration('rviz').perform(context)
+    rviz_on = _as_bool(rviz_arg) if rviz_arg else mode == 'slam'
     update_method = LaunchConfiguration('update_method').perform(context)
     override_config = LaunchConfiguration('override_config').perform(context)
     icp_config = os.path.join(
@@ -134,7 +142,7 @@ def launch_setup(context, *args, **kwargs):
         output='screen',
         arguments=['-d', rviz_config],
         parameters=[{'use_sim_time': use_sim_time}],
-        condition=IfCondition(LaunchConfiguration('rviz')),
+        condition=IfCondition(str(rviz_on).lower()),
     )
 
     # Evaluation observers — read-only, never feed back into SLAM.
@@ -169,7 +177,9 @@ def generate_launch_description():
             description='true only when something publishes /clock (ros2 bag play --clock); '
                         'the Stonefish simulator does not'),
         DeclareLaunchArgument(
-            'rviz', default_value='true', description='Start RViz with rviz/stonefish_slam.rviz'),
+            'rviz', default_value='',
+            description='true/false; empty = true for mode:=slam, false for localization/mapping '
+                        '(what the old wrapper launches did)'),
         DeclareLaunchArgument(
             'mode', default_value='slam',
             description='slam | localization (ICP only, no loop closure, no maps) | '

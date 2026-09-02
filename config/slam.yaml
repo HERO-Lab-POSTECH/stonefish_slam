@@ -9,7 +9,11 @@
 #   config/dead_reckoning.yaml                   dead_reckoning_node (its own node, not started by slam.launch.py)
 #
 # Angles are radians unless the key says _deg. Frames: world_ned (NED) / base_link (FRD).
-slam_node:
+#
+# '/**' = any node in any namespace: slam_node, the standalone mapping/feature/FFT nodes
+# and the namespaced /mapping_2d/slam_node, /mapping_3d/slam_node of the combined launch
+# all read this file (a node only takes the keys it declares).
+/**:
   ros__parameters:
     # ==================== Data source ====================
     vehicle_name: 'bluerov2'
