@@ -18,7 +18,7 @@ from itertools import combinations
 from collections import defaultdict
 
 from stonefish_slam.core.types import Keyframe, ICPResult
-from stonefish_slam.utils.conversions import X
+from stonefish_slam.utils.conversions import L, X
 
 
 class FactorGraph:
@@ -51,6 +51,24 @@ class FactorGraph:
         # Robust cost parameter for loop closure (NSSM) factors only.
         # Cauchy kernel: c=3.0 means "down-weight at ~3σ" (conservative).
         self.robust_loop_c: float = 3.0
+
+        # ---- Semantic landmarks (object detections as BearingRange factors) ----
+        # Committed landmarks: j -> {'cls', 'pos' (world x,y), 'n_obs'}. Only
+        # written after ISAM2 accepts the update that introduced them, so a
+        # failed tick cannot leave a landmark id that no variable backs.
+        self.landmarks: dict = {}
+        # Landmarks introduced in the current, not-yet-pushed batch.
+        self.pending_landmarks: dict = {}
+        self.next_landmark_id: int = 0
+        # Same class within this radius (m) is taken to be the same object.
+        self.landmark_assoc_radius: float = 3.0
+        # [bearing_sigma_rad, range_sigma_m] — the order BearingRange2D expects.
+        # Deliberately loose: the landmark is meant to record that a detection
+        # was used, not to pull the trajectory.
+        self.landmark_sigmas: np.ndarray = np.array([np.radians(10.0), 1.0])
+        # Cauchy c for landmark factors. Independent of robust_loop_c: a false
+        # detection and a false loop closure are different failure rates.
+        self.robust_landmark_c: float = 3.0
 
     @property
     def current_key(self) -> int:
@@ -148,6 +166,85 @@ class FactorGraph:
         )
         self.graph.add(factor)
 
+    def create_landmark_noise_model(self) -> gtsam.noiseModel.Robust:
+        """Robust noise model for a semantic landmark observation.
+
+        `create_robust_full_noise_model` cannot be reused: it takes a
+        covariance matrix and hardcodes `self.robust_loop_c`, while a landmark
+        measurement is a (bearing, range) pair with its own sigmas and its own
+        robust parameter.
+
+        Returns:
+            gtsam.noiseModel.Robust: Cauchy(robust_landmark_c) over a diagonal
+            model with `self.landmark_sigmas`.
+        """
+        model = gtsam.noiseModel.Diagonal.Sigmas(self.landmark_sigmas)
+        robust = gtsam.noiseModel.mEstimator.Cauchy.Create(self.robust_landmark_c)
+        return gtsam.noiseModel.Robust.Create(robust, model)
+
+    def _associate_landmark(self, cls: int, world_guess: np.ndarray):
+        """Nearest committed-or-pending landmark of the same class, if close.
+
+        Args:
+            cls (int): detection class index.
+            world_guess (np.ndarray): (2,) world position the observation implies.
+
+        Returns:
+            int | None: the landmark id to reuse, or None to mint a new one.
+        """
+        best_id, best_d = None, self.landmark_assoc_radius
+        for j, meta in list(self.landmarks.items()) + list(self.pending_landmarks.items()):
+            if meta['cls'] != cls:
+                continue
+            d = float(np.linalg.norm(np.asarray(meta['pos']) - world_guess))
+            if d <= best_d:
+                best_id, best_d = j, d
+        return best_id
+
+    def add_landmark_factor(self, pose_key: int, cls: int, bearing: float,
+                            rng: float, world_guess: np.ndarray) -> tuple:
+        """Constrain a pose by an object detection.
+
+        This is where the detection result actually enters the estimator: the
+        factor sits in the same graph as the ICP and odometry factors and is
+        optimized with them.
+
+        Args:
+            pose_key (int): index of the keyframe the detection belongs to
+                (the X symbol it will be attached to).
+            cls (int): detection class index; only same-class landmarks associate.
+            bearing (float): measured bearing, radians in the sonar/base frame.
+            rng (float): measured range, metres.
+            world_guess (np.ndarray): (2,) initial world position for a new
+                landmark — ignored when an existing one is reused.
+
+        Returns:
+            tuple: `(landmark_id, is_new)`.
+        """
+        world_guess = np.asarray(world_guess, dtype=np.float64).reshape(2)
+
+        j = self._associate_landmark(cls, world_guess)
+        is_new = j is None
+        if is_new:
+            j = self.next_landmark_id
+            self.next_landmark_id += 1
+            self.pending_landmarks[j] = {'cls': int(cls), 'pos': world_guess, 'n_obs': 0}
+
+        # Insert the variable only once. A second insert of the same key raises,
+        # and two detections in one tick can associate to the same new landmark.
+        if not self.values.exists(L(j)) and not self.isam.calculateEstimate().exists(L(j)):
+            self.values.insert(L(j), world_guess)
+
+        self.graph.add(gtsam.BearingRangeFactor2D(
+            X(pose_key), L(j), gtsam.Rot2(float(bearing)), float(rng),
+            self.create_landmark_noise_model()))
+
+        meta = self.pending_landmarks.get(j) or self.landmarks.get(j)
+        # Counts factors built, ISAM2 failures included; the authoritative
+        # "was it used" number is slam.py's landmark_factors_added counter.
+        meta['n_obs'] += 1
+        return j, is_new
+
     def _trim_nssm_queue(self, current_key: int) -> None:
         """Drop loop-closure candidates older than the PCM window.
 
@@ -201,10 +298,20 @@ class FactorGraph:
             # loop closure the frame takes part in.
             if self.keyframes and self.keyframes[-1].cov is None:
                 self.keyframes[-1].cov = self._default_covariance()
+            # The values that would have introduced them are dropped below, so
+            # a landmark id whose variable never existed must not be recorded —
+            # otherwise the next observation associates to a phantom and the
+            # factor references a key ISAM2 has never seen.
+            self.pending_landmarks.clear()
             return
         finally:
             self.graph.resize(0)
             self.values.clear()
+
+        # The update took, so the landmarks it introduced are real now.
+        if self.pending_landmarks:
+            self.landmarks.update(self.pending_landmarks)
+            self.pending_landmarks.clear()
 
         # Drop loop-closure candidates that have aged out of the PCM window.
         # Trimming used to happen only when a NEW candidate arrived, so once the
@@ -220,12 +327,24 @@ class FactorGraph:
         # without loop closures. ponytail: fixed window of 10, parameterize if
         # a consumer needs always-fresh full history.
         values = self.isam.calculateEstimate()
-        n = values.size()
+        # Keyframe count, NOT values.size(): landmarks share the Values, so
+        # size() overshoots the pose count the moment a detection is used and
+        # atPose2(X(size-1)) then asks for a key that does not exist.
+        n = len(self.keyframes)
         update_window = 10
         start_idx = max(0, n - update_window) if not self.nssm_queue else 0
         for x in range(start_idx, n):
-            pose = values.atPose2(X(x))
-            self.keyframes[x].update(pose)
+            if not values.exists(X(x)):
+                # A keyframe whose update was dropped (see the except above)
+                # has no variable. Skipping keeps its dead-reckoning pose.
+                continue
+            self.keyframes[x].update(values.atPose2(X(x)))
+
+        # Refresh landmark positions from the optimized estimate so the
+        # association radius is measured against current values.
+        for j, meta in self.landmarks.items():
+            if values.exists(L(j)):
+                meta['pos'] = np.asarray(values.atPoint2(L(j)), dtype=np.float64)
 
         # Update latest covariance. A marginal can be indeterminate even when
         # the update above succeeded; leaving cov as None then crashes
@@ -241,7 +360,8 @@ class FactorGraph:
             cov = self._default_covariance()
             logging.warning("[FactorGraph] marginalCovariance(X(%d)) failed, using the "
                             "odometry noise model instead: %s", n - 1, e)
-        self.keyframes[-1].update(pose, cov)
+        if values.exists(X(n - 1)):
+            self.keyframes[-1].update(values.atPose2(X(n - 1)), cov)
 
         # Update poses in pending loop closures for PCM
         for ret in self.nssm_queue:

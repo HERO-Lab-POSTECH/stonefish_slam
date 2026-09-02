@@ -81,6 +81,41 @@ All notable changes to this project will be documented in this file.
   (상대 PR 상호 링크는 본 PR 본문 — `CONTRIBUTING.md` §5).
   `package.xml` 에 `vision_msgs` 를 `exec_depend` 로 추가했다.
 
+- **검출을 pose graph 가 소비한다 — 랜드마크 factor (Stage 4)**: 검출 하나마다
+  `BearingRangeFactor2D(X(k), L(j))` 를 ICP·odometry factor 와 **같은 그래프**에
+  넣는다. 이것이 "검출 결과가 위치 인식에 사용된다"의 실제 코드 경로이고, 증거는
+  `[INSTR] semantic` 의 `landmark_factors_added` 다.
+
+  측정값은 **bbox 중심 픽셀**이다(라벨이 붙은 CFAR 점의 centroid 가 아니라).
+  centroid 를 쓰면 bbox 안에 CFAR 피크가 하나도 없는 프레임에서 factor 가 아예
+  안 생겨, "검출이 쓰였는가"의 답이 검출기 성능에 의존한다. bbox 중심이면
+  **검출 1건 ⇒ factor 1건이 구성상 보장**되고 factor 가 0 이 되는 원인은 검출
+  부재·stamp 불일치·ISAM2 실패 셋뿐이라 카운터로 갈린다.
+
+  - `utils/conversions.py` 에 `L(j)` 심볼 추가.
+  - `FactorGraph.add_landmark_factor()` — 같은 클래스가 `assoc_radius` 안이면
+    재사용, 아니면 새 변수. 한 tick 에 두 검출이 같은 새 랜드마크로 연관돼도
+    `values.insert` 는 한 번만 한다(두 번이면 gtsam 이 죽는다).
+  - `create_landmark_noise_model()` 신설 — `create_robust_full_noise_model` 은
+    covariance 를 받고 `robust_loop_c` 를 고정으로 쓰므로 재사용할 수 없다.
+    시그마는 `[bearing_rad, range_m]` 순서(BearingRange2D 의 측정 순서)이고,
+    Cauchy c 는 loop closure 와 **독립 파라미터**다 — 오검출률과 오루프율은
+    다른 값이다.
+  - **원자성**: 새 랜드마크 메타데이터는 `pending_landmarks` 에 두었다가
+    `isam.update` 가 성공한 뒤에만 `landmarks` 로 옮긴다. 실패한 tick 의
+    id 가 남으면 다음 관측이 존재하지 않는 변수에 연관된다. id 는 재사용하지
+    않는다.
+  - **`update_graph` 의 키프레임 개수**: `values.size()` → `len(self.keyframes)`.
+    랜드마크가 pose 와 같은 `Values` 에 들어가므로 `size()` 는 더 이상 키프레임
+    수가 아니고, 검출이 **한 번이라도** 쓰이는 순간
+    `atPose2(X(size-1))` 이 존재하지 않는 키를 물어 노드가 죽는다. 포즈 갱신
+    루프에는 `values.exists(X(x))` 가드를 둬서, 실패한 tick 때문에 변수가 없는
+    키프레임은 dead-reckoning pose 를 유지하고 넘어간다.
+  - 랜드마크 위치는 매 tick 최적화 결과로 갱신해 연관 반경이 현재 추정치를
+    기준으로 재도록 한다.
+  - `semantic.landmark.enable: false` 면 라벨 채널만 돌고 factor 는 안 생긴다.
+    `mapping-only` 모드에서도 안 생긴다(factor graph 자체가 안 돈다).
+
 - **위치 추정 파이프라인 계측 I1~I11** (`feat/loc-instrumentation`): "icp 0%" 도
   "DR seed 17%" 도 **분모가 없는 보고**였다 — 어느 경로를 몇 번 탔는지 세는 곳이
   하나도 없었다. 판정은 그대로 두고 세기만 한다. `Localization.ssm_disabled_count`

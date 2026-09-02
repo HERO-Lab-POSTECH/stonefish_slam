@@ -27,7 +27,8 @@ from stonefish_slam.core.mapping_3d import SonarMapping3D
 from stonefish_slam.core.feature_extraction import FeatureExtraction
 from stonefish_slam.core.localization_fft import FFTLocalizer
 from stonefish_slam.core.semantic import (
-    PendingSemantic, detection_rows, labels_from_detections)
+    PendingSemantic, detection_rows, labels_from_detections,
+    pixel_to_bearing_range)
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import (
     LOCALIZATION_ODOM_TOPIC, SLAM_CLOUD_TOPIC, SLAM_CONSTRAINT_TOPIC,
@@ -202,6 +203,14 @@ class SLAMNode(Node):
         self.declare_parameter('semantic.max_stamp_delta', 0.05)  # s
         self.declare_parameter('semantic.pending_timeout', 3.0)   # s
         self.declare_parameter('semantic.min_conf', 0.25)
+        # Landmark factors: the path by which a detection actually constrains
+        # the pose graph. Sigmas are deliberately loose — the point is that the
+        # detection is used, not that it dominates ICP and odometry.
+        self.declare_parameter('semantic.landmark.enable', True)
+        self.declare_parameter('semantic.landmark.assoc_radius', 3.0)      # m
+        self.declare_parameter('semantic.landmark.range_sigma', 1.0)       # m
+        self.declare_parameter('semantic.landmark.bearing_sigma_deg', 10.0)
+        self.declare_parameter('semantic.landmark.robust_c', 3.0)
 
         # Initialize SLAM modules (composition instead of inheritance)
         self.fg = FactorGraph()
@@ -642,6 +651,15 @@ class SLAMNode(Node):
         from vision_msgs.msg import Detection2DArray
 
         self.semantic_min_conf = float(self.get_parameter('semantic.min_conf').value)
+        self.landmark_enable = self.get_parameter('semantic.landmark.enable').value
+        if self.landmark_enable:
+            self.fg.landmark_assoc_radius = float(
+                self.get_parameter('semantic.landmark.assoc_radius').value)
+            self.fg.landmark_sigmas = np.array([
+                np.radians(float(self.get_parameter('semantic.landmark.bearing_sigma_deg').value)),
+                float(self.get_parameter('semantic.landmark.range_sigma').value)])
+            self.fg.robust_landmark_c = float(
+                self.get_parameter('semantic.landmark.robust_c').value)
         max_delta_s = float(self.get_parameter('semantic.max_stamp_delta').value)
         timeout_s = float(self.get_parameter('semantic.pending_timeout').value)
         self.pending_semantic = PendingSemantic(
@@ -659,6 +677,8 @@ class SLAMNode(Node):
             'det_expired': 0,           # 짝지을 키프레임 없이 만료된 검출 수
             'det_matched': 0,           # 키프레임과 짝지어진 검출 메시지 수
             'det_no_labeled_peaks': 0,  # 짝은 맞았으나 bbox 안 CFAR 피크가 0
+            'landmark_factors_added': 0,  # ★ "검출이 위치 추정에 쓰였다"의 유일한 증거
+            'landmarks_created': 0,     # 새로 만들어진 랜드마크 변수 수
         }
 
         topic = self.get_parameter('semantic.detection_topic').value or '/sonar_yolo/detections'
@@ -667,7 +687,7 @@ class SLAMNode(Node):
         self.get_logger().info(
             f"Semantic labelling enabled: subscribing to {topic} "
             f"(max_stamp_delta={max_delta_s}s, pending_timeout={timeout_s}s, "
-            f"min_conf={self.semantic_min_conf})")
+            f"min_conf={self.semantic_min_conf}, landmark={self.landmark_enable})")
 
     def _detections_from_msg(self, msg) -> np.ndarray:
         """Detection2DArray → Kx6 `[class, conf, x1, y1, x2, y2]` 픽셀 배열.
@@ -713,15 +733,16 @@ class SLAMNode(Node):
             self.semantic_instr['det_duplicate'] += 1
         pending = self.pending_semantic.offer_detection(stamp_ns, dets)
         if pending is not None:
-            frame, peak_locs = pending
-            self._apply_semantic(frame, peak_locs, dets)
+            frame, peak_locs, pose_key = pending
+            self._apply_semantic(frame, peak_locs, pose_key, dets)
 
-    def _apply_semantic(self, frame: Keyframe, peak_locs, dets) -> None:
-        """검출을 키프레임의 점 라벨로 굳힌다.
+    def _apply_semantic(self, frame: Keyframe, peak_locs, pose_key: int, dets) -> None:
+        """검출을 키프레임의 점 라벨과 랜드마크 factor 로 굳힌다.
 
         Args:
             frame (Keyframe): 짝이 맞은 키프레임.
             peak_locs: 그 키프레임의 CFAR 피크 픽셀 (N, 2) `[row, col]`.
+            pose_key (int): 그 키프레임이 factor graph 에서 갖는 X 인덱스.
             dets: `_detections_from_msg` 의 (K, 6) 배열.
         """
         self.semantic_instr['det_matched'] += 1
@@ -731,6 +752,45 @@ class SLAMNode(Node):
             # bbox 는 왔는데 그 안에 CFAR 피크가 하나도 없다 — 3D 라벨이
             # 비는 원인이라 따로 센다(랜드마크 factor 와는 무관하다).
             self.semantic_instr['det_no_labeled_peaks'] += 1
+        if self.landmark_enable and self.mode != 'mapping-only':
+            self._add_landmark_factors(frame, pose_key, dets)
+
+    def _add_landmark_factors(self, frame: Keyframe, pose_key: int, dets) -> None:
+        """검출 하나마다 BearingRange factor 하나를 factor graph 에 넣는다.
+
+        측정값은 **bbox 중심 픽셀**이다. 라벨이 붙은 CFAR 점의 centroid 를 쓰면
+        bbox 안에 피크가 하나도 없는 프레임에서 factor 가 아예 안 생기는데, 그러면
+        "검출이 위치 추정에 쓰였는가"의 답이 검출기 성능에 의존해 버린다. bbox
+        중심을 쓰면 검출 1건 ⇒ factor 1건이 구성상 보장되고, factor 가 0 이 되는
+        원인은 검출 부재·stamp 불일치·ISAM2 실패 셋뿐이라 카운터로 갈린다.
+
+        Args:
+            frame (Keyframe): 짝이 맞은 키프레임.
+            pose_key (int): 그 키프레임의 X 인덱스.
+            dets: (K, 6) `[class, conf, x1, y1, x2, y2]`.
+        """
+        for cls, _conf, x1, y1, x2, y2 in dets:
+            col_c, row_c = 0.5 * (x1 + x2), 0.5 * (y1 + y2)
+            bearing, rng = pixel_to_bearing_range(
+                row_c, col_c,
+                num_bins=self.feature_extractor.num_bins,
+                num_beams=self.feature_extractor.num_beams,
+                range_min=self.feature_extractor.range_min,
+                range_max=self.feature_extractor.range_max,
+                horizontal_fov_deg=self.feature_extractor.horizontal_fov)
+            world_guess = frame.pose.transformFrom(
+                np.array([rng * np.cos(bearing), rng * np.sin(bearing)]))
+            try:
+                _j, is_new = self.fg.add_landmark_factor(
+                    pose_key, int(cls), float(bearing), float(rng), world_guess)
+            except Exception as e:  # noqa: BLE001 — 계측이 붙은 부가 경로다
+                # A landmark factor must never take the node down: it is the
+                # formal "detection was used" path, not the estimator itself.
+                self.get_logger().error(f"landmark factor failed: {e}")
+                continue
+            self.semantic_instr['landmark_factors_added'] += 1
+            if is_new:
+                self.semantic_instr['landmarks_created'] += 1
 
     def _offer_keyframe_semantic(self, frame: Keyframe, peak_locs, stamp_ns: int) -> None:
         """키프레임을 미결 큐에 넣고, 워터마크를 넘긴 항목을 정리한다.
@@ -740,9 +800,14 @@ class SLAMNode(Node):
             peak_locs: 그 키프레임의 CFAR 피크 픽셀 (N, 2).
             stamp_ns (int): 그 소나 프레임의 stamp(ns).
         """
-        dets = self.pending_semantic.offer_keyframe(stamp_ns, (frame, peak_locs))
+        # The keyframe is offered before update_graph() appends it, so the X
+        # index it will get is the current length. Carrying it in the payload
+        # keeps the key stable for a detection that arrives several frames later.
+        pose_key = len(self.fg.keyframes)
+        dets = self.pending_semantic.offer_keyframe(
+            stamp_ns, (frame, peak_locs, pose_key))
         if dets is not None:
-            self._apply_semantic(frame, peak_locs, dets)
+            self._apply_semantic(frame, peak_locs, pose_key, dets)
 
         stale_kfs, stale_dets = self.pending_semantic.expire(stamp_ns)
         self.semantic_instr['det_missing'] += len(stale_kfs)

@@ -10,6 +10,7 @@ import struct
 
 __all__ = [
     'X',
+    'L',
     'pose322',
     'n2g',
     'g2n',
@@ -38,6 +39,22 @@ def X(x:int) -> gtsam.symbol:
     """
 
     return gtsam.symbol("x", x)
+
+
+def L(j: int) -> gtsam.symbol:
+    """convert an integer to a gtsam landmark symbol
+
+    Landmarks live in the same Values as the poses, so they need their own
+    character; 'l' is GTSAM's own convention for a landmark variable.
+
+    Args:
+        j (int): the index of the landmark
+
+    Returns:
+        gtsam.symbol: gtsam symbol l_j
+    """
+
+    return gtsam.symbol("l", j)
 
 def pose322(pose:gtsam.Pose3) -> gtsam.Pose2:
     """Convert a gtsam.Pose3 to a gtsam.Pose2

@@ -116,6 +116,12 @@
       max_stamp_delta: 0.05    # s, 검출↔소나 프레임을 같은 프레임으로 볼 stamp 오차 상한
       pending_timeout: 3.0     # s, 이 시간까지 검출이 안 오면 det_missing 확정 (키프레임 1 s × 3)
       min_conf: 0.25           # 이 미만 신뢰도의 탐지는 버린다
+      landmark:
+        enable: true           # 검출을 BearingRange factor 로 pose graph 에 넣는다
+        assoc_radius: 3.0      # m, 같은 클래스를 같은 물체로 볼 반경
+        range_sigma: 1.0       # m   — 형식적 사용: 크게 잡아 궤적을 거의 안 끈다
+        bearing_sigma_deg: 10.0
+        robust_c: 3.0          # Cauchy c (loop closure 의 slam_loop_robust_c 와 독립)
 
     # ==================== 2D mapping (occupancy grid) ====================
     mapping_2d:
