@@ -107,6 +107,16 @@
       max_rotation_error: 0.0872665  # rad (5.000° — the value, not an old "~20°" comment, is the truth)
       use_dr_rotation: false         # false: FFT estimates rotation too; true: rotation from DR, FFT supplies translation only
 
+    # ==================== Semantic labels (object detection → SLAM) ====================
+    # off = 오늘과 동일한 동작: 구독도 발행자도 카운터도 생기지 않고
+    # /slam/cloud 는 4필드(XYZI) 스키마를 그대로 유지한다. A/B 의 기준선이다.
+    semantic:
+      enable: false
+      detection_topic: ''      # '' = /sonar_yolo/detections (vision_msgs/Detection2DArray)
+      max_stamp_delta: 0.05    # s, 검출↔소나 프레임을 같은 프레임으로 볼 stamp 오차 상한
+      pending_timeout: 3.0     # s, 이 시간까지 검출이 안 오면 det_missing 확정 (키프레임 1 s × 3)
+      min_conf: 0.25           # 이 미만 신뢰도의 탐지는 버린다
+
     # ==================== 2D mapping (occupancy grid) ====================
     mapping_2d:
       map_2d_resolution: 0.2    # m/pixel. 0.2 keeps the grid message ~1 MB; 0.1 would be 4x (this key was

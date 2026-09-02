@@ -114,11 +114,32 @@ class FeatureExtraction:
             numpy array: Nx2 array of [x, y] points in cartesian coordinates (meters)
                          Returns empty array (0, 2) if no features detected
         '''
+        points, _peak_locs = self.extract_features_with_pixels(sonar_msg)
+        return points
+
+    def extract_features_with_pixels(self, sonar_msg):
+        '''Same as `extract_features`, but also returns the source pixels.
+
+        The pixel each point came from is what a detection bounding box is drawn
+        in, so a consumer that wants to label points by detection needs it. The
+        two arrays are index-aligned: `points[i]` is the cartesian position of
+        the pixel `peak_locs[i]`.
+
+        Args:
+            sonar_msg: Image message in polar coordinates (range × bearing)
+
+        Returns:
+            tuple: `(points, peak_locs)` — points is the Nx2 float array
+            `extract_features` returns; peak_locs is the Nx2 int array of
+            `[row, col]` (`np.argwhere` order). Both are empty on a skipped or
+            featureless frame.
+        '''
+        empty = (np.zeros((0, 2), dtype=np.float32), np.zeros((0, 2), dtype=np.int64))
 
         # Skip frames
         self.frame_count += 1
         if self.frame_count % self.skip != 0:
-            return np.zeros((0, 2), dtype=np.float32)
+            return empty
 
         # Decode the image (supports both Image and CompressedImage; sensor_msgs
         # is imported lazily to keep this module path-loadable without ROS)
@@ -149,7 +170,7 @@ class FeatureExtraction:
 
         if len(peak_locs) == 0:
             self.node.get_logger().debug("No features detected")
-            return np.zeros((0, 2), dtype=np.float32)
+            return empty
 
         # Convert polar coordinates to cartesian
         # peak_locs: [[row, col], ...] where row=range_bin, col=beam
@@ -181,4 +202,4 @@ class FeatureExtraction:
 
         self.node.get_logger().debug(f"Extracted {len(points)} feature points")
 
-        return points
+        return points, peak_locs

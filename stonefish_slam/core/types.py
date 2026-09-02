@@ -140,6 +140,15 @@ class Keyframe(object):
         self.points = points.astype(np.float32)  # points in local frame (always 2d)
         self.transf_points = None  # transformed points in global frame based on pose
 
+        # Semantic labels, index-aligned with `points` (0 = unlabeled, else
+        # detection class + 1). Filled only when the semantic pipeline is on;
+        # `update()` transforms points but never reorders them, so the
+        # alignment survives a SLAM update.
+        self.labels = np.zeros(len(points), np.uint8)
+        # Detections that produced those labels: Kx6 [class, conf, x1, y1, x2, y2]
+        # in sonar image pixels (x = col = bearing, y = row = range bin).
+        self.detections = np.zeros((0, 6), np.float32)
+
         self.points3D = points.astype(
             np.float32
         )  # 3D point cloud from orthoganal sensor fusion

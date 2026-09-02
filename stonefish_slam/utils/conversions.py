@@ -329,6 +329,21 @@ def n2r(numpy_arr:np.array, msg:any) -> any:
             PointField(name="i", offset=12, datatype=PointField.FLOAT32, count=1),
         ]
         return pc2.create_cloud(header, fields, np.array(numpy_arr))
+    elif msg == "PointCloudXYZIL":
+        # XYZI plus a semantic label column. A separate type rather than a
+        # 5th field on PointCloudXYZI: consumers of /slam/cloud key off the
+        # exact field list, so the schema must not move when the semantic
+        # pipeline is off.
+        from sensor_msgs.msg import PointField
+        header = Header()
+        fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+            PointField(name="i", offset=12, datatype=PointField.FLOAT32, count=1),
+            PointField(name="label", offset=16, datatype=PointField.FLOAT32, count=1),
+        ]
+        return pc2.create_cloud(header, fields, np.array(numpy_arr))
     elif msg == "PointCloudXYZRGB":
         return build_rgb_cloud(numpy_arr)
     else:

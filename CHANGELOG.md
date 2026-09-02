@@ -41,6 +41,46 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **목표물 검출 라벨 채널 (`feat/semantic-labels`, Stage 2/4)**: sim 의
+  `stonefish_sonar_yolo` 가 내는 `vision_msgs/Detection2DArray` 를 구독해
+  CFAR 피크 픽셀마다 라벨(=클래스 인덱스+1)을 붙이고, 그 라벨을 `/slam/cloud`
+  에 다섯 번째 필드로 실어 보낸다(요청의 "PCL XYZI 처럼 3D 좌표에 index 를
+  추가"에 해당). 새 ROS-free 모듈 `core/semantic.py` 가 순수 로직을 갖는다 —
+  `labels_from_detections`(bbox 안 픽셀에 라벨, 겹치면 나중 것이 이김),
+  `detection_rows`(중심+크기 → 모서리, 신뢰도·비정수 class_id 필터),
+  `pixel_to_bearing_range`/`sonar_to_pixel`/`slant_range_bearing`(좌표 변환),
+  `PendingSemantic`(검출↔키프레임 stamp 짝짓기 큐).
+  `feature_extraction` 안에 두지 않은 이유는 그 모듈이 상단에서 `cv_bridge`·
+  `cfar` 를 끌어와 `load_module` 로 못 열기 때문이다 — ROS 없는 CI 에서 테스트가
+  통째로 빠진다. 대신 `extract_features_with_pixels()` 를 더해 점과 그 점이 나온
+  픽셀을 같이 돌려준다(`extract_features` 는 이를 호출하는 얇은 껍데기).
+
+  **검출은 그 키프레임보다 늦게 온다.** YOLO 는 추론 중 프레임을 드랍하므로
+  `ApproximateTimeSynchronizer` 로는 멈춘다. 대신 stamp 로 색인한 미결 큐를 두고
+  검출 콜백·slam 콜백 **양쪽에서** 짝을 찾아 정확히 한 번 소비한다. 짝을 못 찾은
+  항목은 `semantic.pending_timeout`(기본 3 s = 키프레임 간격 × 3) 워터마크를
+  넘길 때 만료되며, 그 전까지는 "아직 안 옴"이지 유실이 아니다.
+
+  계측은 `[INSTR] semantic` 한 줄로 따로 나간다(카운터 9종:
+  `det_received`·`det_empty`·`det_below_conf`·`det_bad_class`·`det_duplicate`·
+  `det_missing`·`det_expired`·`det_matched`·`det_no_labeled_peaks`).
+
+  **`semantic.enable: false` 는 오늘과 동일하다** — 구독도, 새 토픽도, 새
+  `[INSTR]` 줄도 생기지 않고 `/slam/cloud` 는 4필드(XYZI) 스키마를 유지한다.
+  `vision_msgs` import 조차 `_init_semantic()` 의 조기 return 뒤에 있어, 그
+  패키지가 없는 머신에서도 off 런은 그대로 뜬다. 이 동일성이 A/B 검증의 기준선
+  이므로 `test_semantic_off_identity.py` 가 AST 로 못 박는다(PointField 골든
+  표·`PointCloudXYZIL` 게이트·`[INSTR] semantic` 게이트·구독 위치·기본값).
+
+  검증용 주입기 `scripts/fake_detection_publisher.py` 를 함께 둔다 — 시뮬 씬에
+  학습된 클래스(sofa) 자산이 없어 진짜 YOLO 로는 소비 경로를 검증할 수 없다.
+  이미지 header 를 그대로 복사해 되쏘므로 `det_missing`/`det_expired` 가 0 이
+  아니면 그건 타이밍이 아니라 큐 버그다.
+
+  크로스 repo: 발행자는 `stonefish_sim` 의 `feat/sonar-yolo-detection2d`
+  (상대 PR 상호 링크는 본 PR 본문 — `CONTRIBUTING.md` §5).
+  `package.xml` 에 `vision_msgs` 를 `exec_depend` 로 추가했다.
+
 - **위치 추정 파이프라인 계측 I1~I11** (`feat/loc-instrumentation`): "icp 0%" 도
   "DR seed 17%" 도 **분모가 없는 보고**였다 — 어느 경로를 몇 번 탔는지 세는 곳이
   하나도 없었다. 판정은 그대로 두고 세기만 한다. `Localization.ssm_disabled_count`

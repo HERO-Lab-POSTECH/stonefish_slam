@@ -76,6 +76,32 @@ def test_every_declared_counter_is_incremented_somewhere():
     assert not unknown, f"선언에 없는 카운터를 건드린다(오타 의심): {sorted(unknown)}"
 
 
+def test_every_declared_semantic_counter_is_incremented_somewhere():
+    """semantic 카운터도 같은 규칙을 받는다.
+
+    "검출 결과가 위치 인식에 쓰였다"의 유일한 증거가 이 카운터들이므로, 선언만
+    되고 아무도 올리지 않는 키가 있으면 증거가 통째로 0 으로 남는다.
+    """
+    tree = _tree("slam.py")
+
+    declared = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Attribute)
+                and node.targets[0].attr == "semantic_instr"
+                and isinstance(node.value, ast.Dict)):
+            declared = {k.value for k in node.value.keys}
+            break
+    assert declared is not None, "self.semantic_instr 선언을 찾지 못했다"
+
+    incremented = _self_attr_keys(tree, "semantic_instr", incremented_only=True)
+    missing = declared - incremented
+    assert not missing, f"선언만 되고 아무도 증가시키지 않는 카운터: {sorted(missing)}"
+
+    unknown = _self_attr_keys(tree, "semantic_instr") - declared
+    assert not unknown, f"선언에 없는 카운터를 건드린다(오타 의심): {sorted(unknown)}"
+
+
 def test_dr_fallback_flag_is_read_not_only_written():
     """I4 — `fft_is_dr_fallback` 에 읽기 접근이 있어야 한다.
 
