@@ -298,10 +298,13 @@ class FactorGraph:
             # loop closure the frame takes part in.
             if self.keyframes and self.keyframes[-1].cov is None:
                 self.keyframes[-1].cov = self._default_covariance()
-            # The values that would have introduced them are dropped below, so
-            # a landmark id whose variable never existed must not be recorded —
-            # otherwise the next observation associates to a phantom and the
-            # factor references a key ISAM2 has never seen.
+            # Drop the metadata for landmarks this tick introduced. Measured
+            # 2026-09-02: a failed update still leaves the variable in the
+            # estimate (and re-inserting the same key then raises "key already
+            # exists"), so the id must never be reused — which is why
+            # next_landmark_id only ever moves forward and add_landmark_factor
+            # checks exists() before inserting. What is left behind is an
+            # orphan variable with no metadata and no further factors.
             self.pending_landmarks.clear()
             return
         finally:

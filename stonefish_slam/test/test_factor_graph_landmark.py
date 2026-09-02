@@ -223,3 +223,39 @@ def test_the_next_observation_recovers_after_a_failed_update(load_factor_graph):
     (committed_id,) = fg.landmarks
     assert committed_id != 0, "실패한 tick 의 id 를 그대로 되썼다"
     assert fg.isam.calculateEstimate().exists(load_factor_graph.L(committed_id))
+
+
+def test_a_real_indeterminate_update_leaves_no_landmark_metadata(load_factor_graph):
+    """가짜 프록시가 아니라 **실제 gtsam 실패**로 확인한다.
+
+    `_FlakyIsam` 은 진짜 `update()` 를 부르기 전에 던지므로 GTSAM 내부 상태가
+    어떻게 되는지는 증명하지 못한다. 여기서는 prior 없는 그래프(gauge 자유도)로
+    실제 `Indeterminant linear system` 을 일으킨다.
+
+    프로브 실측(2026-09-02): 실패한 update 뒤에도 변수는 estimate 에 남고, 같은
+    키를 다시 `insert` 하면 "key already exists" 로 죽는다. 그러니 메타데이터를
+    버리는 것만으로는 부족하고 — id 를 재사용하지 않는 것과 insert 전
+    `exists()` 확인이 같이 있어야 다음 관측이 복구된다.
+    """
+    X, L = load_factor_graph.X, load_factor_graph.L
+    fg = _fg(load_factor_graph)
+
+    kf0 = _keyframe(load_factor_graph, 0.0)
+    kf1 = _keyframe(load_factor_graph, 1.0)
+    # prior 를 일부러 넣지 않는다 — 이것이 불확정의 원인이다.
+    fg.keyframes.append(kf0)
+    fg.values.insert(X(0), kf0.pose)
+    fg.add_odometry_factor(kf1)
+    fg.add_landmark_factor(0, cls=1, bearing=0.0, rng=5.0,
+                           world_guess=np.array([5.0, 0.0]))
+
+    fg.update_graph(kf1)          # 예외가 밖으로 새지 않아야 한다
+
+    assert fg.landmarks == {} and fg.pending_landmarks == {}
+    # 실측: 변수는 남는다. 그래서 id 재사용이 금지된다.
+    assert fg.isam.calculateEstimate().exists(L(0))
+
+    # 다음 관측은 새 id 를 받아 "key already exists" 없이 진행돼야 한다.
+    j, is_new = fg.add_landmark_factor(0, cls=1, bearing=0.0, rng=5.0,
+                                       world_guess=np.array([5.0, 0.0]))
+    assert (j, is_new) == (1, True), "실패한 tick 의 id 를 되썼다"
