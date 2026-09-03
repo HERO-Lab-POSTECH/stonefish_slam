@@ -48,6 +48,10 @@ class FactorGraph:
         self.pcm_queue_size = 5
         self.min_pcm = 3
 
+        # How many trailing keyframes get their pose refreshed from ISAM2 each
+        # tick. <= 0 refreshes the whole history (O(N) per update).
+        self.pose_refresh_window = 10
+
         # 계측 (I7) — PCM 이 실제로 그래프에 넣은 루프 팩터 수. 판정에 쓰이지 않는다.
         self.pcm_inserted_count = 0
 
@@ -220,12 +224,12 @@ class FactorGraph:
         # a pending loop closure (nssm_queue) may have moved older poses.
         # Full-history refresh is O(N) per update and was measured dominating
         # the callback on long real-data runs; ISAM2 rarely moves old poses
-        # without loop closures. ponytail: fixed window of 10, parameterize if
-        # a consumer needs always-fresh full history.
+        # without loop closures. pose_refresh_window <= 0 restores the
+        # full-history refresh for consumers that need always-fresh poses.
         values = self.isam.calculateEstimate()
         n = values.size()
-        update_window = 10
-        start_idx = max(0, n - update_window) if not self.nssm_queue else 0
+        window = self.pose_refresh_window
+        start_idx = 0 if (window <= 0 or self.nssm_queue) else max(0, n - window)
         for x in range(start_idx, n):
             pose = values.atPose2(X(x))
             self.keyframes[x].update(pose)
