@@ -40,8 +40,13 @@ class FFTLocalizer:
                  periodic_decomp_enable: bool = True,
                  roi_threshold: float = 10.0,
                  rotation_candidates: int = 1,
+                 rotation_tilt_compensation: bool = False,
+                 rotation_tilt_var_compensation: bool = True,
                  use_roi: bool = False,
                  remove_radial_mean: bool = False,
+                 trans_lowpass: float = 0.0,
+                 trans_clahe: bool = True,
+                 trans_window: str = '',
                  verbose: bool = False):
         """
         Initialize FFT Localizer.
@@ -99,12 +104,25 @@ class FFTLocalizer:
         # 답한다. 근거는 .hq/community/posts/finding/019.
         self.rotation_candidates = max(1, int(rotation_candidates))
 
+        # 방위 컬럼 이동을 요각으로 바꿀 때 하향 틸트를 나눌지. 상수 cos τ 는
+        # 보어사이트에서만 정확하다 — 시야 가장자리의 잔차 약 1% 는 남는다.
+        self.rotation_tilt_compensation = bool(rotation_tilt_compensation)
+        self.rotation_tilt_var_compensation = bool(rotation_tilt_var_compensation)
+
         # ROI-based FFT parameters
         self.roi_threshold = roi_threshold
         self.use_roi = use_roi
 
         # 몸체 고정 거리 띠 제거 (아래 remove_band_envelope 참고)
         self.remove_radial_mean = remove_radial_mean
+        # 병진 상관 전처리 3종 (회전 경로에는 걸지 않는다 — 측정된 적이 없다).
+        # tilt 30° 오프라인 188 쌍: 대조군 83.0%/0.152 m/척도 0.912 →
+        # 0.50+clahe off+hann 이 89.9%/0.127 m/0.929 (finding/024).
+        self.trans_lowpass = float(trans_lowpass)
+        self.trans_clahe = bool(trans_clahe)
+        self.trans_window = str(trans_window or '')
+        self._lp_cache = {}
+        self._win_cache = {}
 
         # Cache for polar_to_cartesian conversion (performance optimization)
         self.p2c_cache = None
@@ -455,7 +473,8 @@ class FFTLocalizer:
                                   img2: np.ndarray,
                                   return_cross_power: bool = False,
                                   apply_periodic_decomp: bool = None,
-                                  f1: np.ndarray = None):
+                                  f1: np.ndarray = None,
+                                  lowpass: bool = False):
         """
         Compute phase correlation between two images.
 
@@ -487,6 +506,10 @@ class FFTLocalizer:
 
         # Compute cross power spectrum
         cross_power = F1 * np.conj(F2)
+        # 고주파(스페클) 억제. 병진 경로에서만 호출자가 켠다 — 회전 경로에
+        # 거는 것은 측정된 적이 없다.
+        if lowpass and self.trans_lowpass > 0.0:
+            cross_power = cross_power * self._lowpass_mask(cross_power.shape)
 
         # Normalize (phase correlation)
         eps = 1e-10
@@ -805,6 +828,68 @@ class FFTLocalizer:
 
         return rotated
 
+    @property
+    def deg_per_col(self) -> float:
+        """방위 컬럼 1 칸이 소나 방위 몇 도인가. 이미지가 실제로 도는 각이다."""
+        return float(np.rad2deg(self.oculus.angular_resolution))
+
+    @property
+    def _cos_tilt(self) -> float:
+        """요각↔방위 환산 계수. 보정이 꺼져 있으면 1 이라 모든 환산이 항등이다."""
+        if not self.rotation_tilt_compensation:
+            return 1.0
+        c = float(np.cos(self.oculus.tilt_angle_rad))
+        return c if c > 1e-6 else 1.0
+
+    def yaw_from_bearing(self, deg: float) -> float:
+        """상관면이 준 방위 시프트를 차량 요각으로 되돌린다.
+
+        하향 틸트 τ 인 소나에서 요잉 Δψ 는 방위축을 cos τ·Δψ 만 움직인다. 이미지
+        정렬에는 방위 각을 그대로 써야 하고, 팩터그래프에 넣는 측정치만 이 환산을
+        거친다 — 둘을 같이 건드리면 정렬 워프가 과회전한다.
+        """
+        return deg / self._cos_tilt
+
+    def bearing_from_yaw(self, deg: float) -> float:
+        """차량 요각을 이미지가 실제로 도는 각(방위 시프트)으로 바꾼다."""
+        return deg * self._cos_tilt
+
+    def polar_warp(self,
+                   polar_img: np.ndarray,
+                   tx: float, ty: float, dyaw_deg: float) -> np.ndarray:
+        """프레임2 극좌표 영상을 프레임1 의 극좌표 격자로 리샘플한다.
+
+        1 패스 추정 (tx, ty, dyaw) 을 되감아 두 영상을 대략 겹쳐 놓는다. 남은
+        불일치를 다시 상관하면 1 패스에서 크게 틀린 쌍이 구제된다 — 이미 맞은
+        쌍에는 잡음만 더하므로 **게이트가 기각한 쌍에만** 쓴다(finding/023).
+
+        행=경사거리(row 0 이 far), 열=방위. 지면거리 rho=sqrt(r^2-h^2) 로 평탄
+        해저를 가정한다 — `sonar.projection: altitude` 와 같은 가정이다.
+        프레임1 의 (rho,theta) 에 보이는 점은 프레임2 에서 R(-dyaw)(p1 - t) 에 있다.
+        """
+        import cv2
+        alt = float(getattr(self.oculus, 'altitude_m', 0.0) or 0.0)
+        rows, cols = polar_img.shape
+        res = self.oculus.range_resolution
+        fov = self.oculus.horizontal_fov
+        th = np.linspace(-fov / 2, fov / 2, cols)[None, :]
+        r = ((rows - np.arange(rows, dtype=np.float64)) * res)[:, None]
+        rho = np.sqrt(np.maximum(r ** 2 - alt ** 2, 0.0))
+
+        x1, y1 = rho * np.cos(th), rho * np.sin(th)
+        dx, dy = x1 - tx, y1 - ty
+        c, s = np.cos(np.radians(-dyaw_deg)), np.sin(np.radians(-dyaw_deg))
+        x2, y2 = c * dx - s * dy, s * dx + c * dy
+
+        rho2 = np.hypot(x2, y2)
+        th2 = np.arctan2(y2, x2)
+        r2 = np.sqrt(rho2 ** 2 + alt ** 2)
+        map_y = (rows - r2 / res).astype(np.float32)
+        map_x = ((th2 + fov / 2) / fov * (cols - 1)).astype(np.float32)
+        return cv2.remap(polar_img.astype(np.float32), map_x, map_y,
+                         cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
+                         borderValue=0.0)
+
     def _rotation_peaks(self,
                         pcm: np.ndarray,
                         deg_per_col: float,
@@ -896,14 +981,14 @@ class FFTLocalizer:
         # Convert column offset to rotation angle
         # Phase correlation: col_offset > 0 means CW rotation (positive angle)
         # Reference: krit_fft line 873
-        rotation_deg = col_offset * np.rad2deg(self.oculus.angular_resolution)
+        rotation_deg = col_offset * self.deg_per_col
 
         # Compute rotation variance
         peak_loc = np.unravel_index(np.argmax(pcm), pcm.shape)
         _, var_col = self.compute_peak_variance(
             pcm,
             peak_loc,
-            np.rad2deg(self.oculus.angular_resolution)
+            self.deg_per_col
         )
         # Convert from degrees^2 to radians^2
         var_theta = np.deg2rad(np.sqrt(var_col)) ** 2
@@ -915,7 +1000,7 @@ class FFTLocalizer:
             print(f"  Peak loc: row={peak_loc[0]}, col={peak_loc[1]}", flush=True)
             print(f"  Peak value: {peak_value:.4f}", flush=True)
             print(f"  col_offset: {col_offset:.2f} pixels", flush=True)
-            print(f"  angular_resolution: {np.rad2deg(self.oculus.angular_resolution):.4f}°/pixel", flush=True)
+            print(f"  deg_per_col: {self.deg_per_col:.4f}°/pixel", flush=True)
             print(f"  rotation_deg: {rotation_deg:.2f}°", flush=True)
             # Save debug images
             debug_dir = "/tmp/fft_debug"
@@ -937,8 +1022,41 @@ class FFTLocalizer:
         }
         if self.rotation_candidates > 1:
             result['candidates'] = self._rotation_peaks(
-                pcm, np.rad2deg(self.oculus.angular_resolution))
+                pcm, self.deg_per_col)
         return result
+
+    def _lowpass_mask(self, shape):
+        """정규화 반경 <= trans_lowpass 만 남기는 이진 마스크(fftshift 안 된 배치).
+
+        이진이라 F1·M 과 conj(F2·M) 의 곱이 F1·conj(F2)·M 과 같다 — 그래서
+        두 영상을 각각 역FFT 로 필터하는 대신 교차스펙트럼에 한 번만 곱한다.
+        FFT 왕복이 후보당 4 회 늘지 않으므로 처리량을 깎지 않는다.
+        """
+        m = self._lp_cache.get(shape)
+        if m is None:
+            h, w = shape
+            fy = np.fft.fftfreq(h)[:, None]
+            fx = np.fft.fftfreq(w)[None, :]
+            r = np.sqrt(fy ** 2 + fx ** 2) / 0.5          # 0 .. ~1.41
+            m = (r <= self.trans_lowpass).astype(np.float64)
+            self._lp_cache[shape] = m
+        return m
+
+    def _trans_prep(self, padded):
+        """병진 상관 직전 전처리 — 정규화 + (선택) CLAHE + (선택) 창함수."""
+        import cv2                                    # 이 파일 관행: 메서드 안 지역 import
+        u8 = (padded / padded.max() * 255).astype(np.uint8) \
+            if padded.max() > 0 else padded.astype(np.uint8)
+        if self.trans_clahe:
+            u8 = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(u8)
+        n = u8.astype(np.float64) / 255.0
+        if self.trans_window == 'hann':
+            win = self._win_cache.get(n.shape)
+            if win is None:
+                win = np.outer(np.hanning(n.shape[0]), np.hanning(n.shape[1]))
+                self._win_cache[n.shape] = win
+            n = n * win
+        return n
 
     def prepare_translation(self, img1_cart: np.ndarray, img2_cart: np.ndarray) -> dict:
         """회전 후보 사이에서 바뀌지 않는 준비 작업을 한 번만 해 둔다.
@@ -964,8 +1082,7 @@ class FFTLocalizer:
         p1 = self._apply_cartesian_padding(m1, pad)
         p2 = self._apply_cartesian_padding(m2, pad)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        u1 = (p1 / p1.max() * 255).astype(np.uint8) if p1.max() > 0 else p1.astype(np.uint8)
-        n1 = clahe.apply(u1).astype(np.float64) / 255.0
+        n1 = self._trans_prep(p1)
         return {
             'img1_norm': n1,
             'f1': _sfft.fft2(n1, workers=-1),
@@ -1067,12 +1184,9 @@ class FFTLocalizer:
         if prep is not None:
             img1_norm = prep['img1_norm']
         else:
-            img1_u8 = (img1_roi / img1_roi.max() * 255).astype(np.uint8) \
-                if img1_roi.max() > 0 else img1_roi.astype(np.uint8)
-            img1_norm = clahe.apply(img1_u8).astype(np.float64) / 255.0
+            img1_norm = self._trans_prep(img1_roi)
 
-        img2_u8 = (img2_roi / img2_roi.max() * 255).astype(np.uint8) if img2_roi.max() > 0 else img2_roi.astype(np.uint8)
-        img2_norm = clahe.apply(img2_u8).astype(np.float64) / 255.0
+        img2_norm = self._trans_prep(img2_roi)
 
         # Phase correlation with DFT refinement
         # NOTE: Disable periodic decomposition for Cartesian images (fan-shaped with large zero regions)
@@ -1081,7 +1195,8 @@ class FFTLocalizer:
             img1_norm, img2_norm,
             return_cross_power=True,
             apply_periodic_decomp=False,
-            f1=prep['f1'] if prep is not None else None
+            f1=prep['f1'] if prep is not None else None,
+            lowpass=True
         )
         row_offset, col_offset, peak_value = self.detect_peak(
             pcm, subpixel=refine,
@@ -1183,7 +1298,8 @@ class FFTLocalizer:
             var_theta = rot_result['variance_theta']
             if self.verbose:
                 print(f"[FFT] Using rotation override: {rotation:.2f}° (FFT estimate: {rot_result['rotation']:.2f}°)")
-            trans_result = self.estimate_translation(img1_cart, img2_cart, rotation)
+            trans_result = self.estimate_translation(
+                img1_cart, img2_cart, self.bearing_from_yaw(rotation))
         elif candidates:
             # 점수만 필요한 동안은 서브픽셀 보간을 끈다 — peak_value 는 보간 전에
             # 정해지므로 선택 결과가 같고, 버릴 후보 K-1 개에 100배 업샘플 DFT 를
@@ -1198,16 +1314,25 @@ class FFTLocalizer:
                     img1_cart, img2_cart, cand_rot, refine=False, prep=prep)['peak_value']
                 if score > best_score:
                     best_score, best_rot, best_peak, best_var = score, cand_rot, cand_peak, cand_var
-            rotation, rot_peak, var_theta = best_rot, best_peak, best_var
-            trans_result = self.estimate_translation(img1_cart, img2_cart, rotation, prep=prep)
+            rot_peak, var_theta = best_peak, best_var
+            trans_result = self.estimate_translation(img1_cart, img2_cart, best_rot, prep=prep)
+            rotation = self.yaw_from_bearing(best_rot)
             if self.verbose:
                 print(f"[FFT] Rotation {rotation:.2f}° chosen from {len(candidates)} candidates "
                       f"by translation peak {trans_result['peak_value']:.4f} "
                       f"(global max was {rot_result['rotation']:.2f}°)")
         else:
-            rotation, rot_peak = rot_result['rotation'], rot_result['peak_value']
+            rot_peak = rot_result['peak_value']
             var_theta = rot_result['variance_theta']
-            trans_result = self.estimate_translation(img1_cart, img2_cart, rotation)
+            trans_result = self.estimate_translation(
+                img1_cart, img2_cart, rot_result['rotation'])
+            rotation = self.yaw_from_bearing(rot_result['rotation'])
+
+        # 분산도 요각 공간으로 옮긴다(각이 1/cos τ 배면 분산은 1/cos²τ 배).
+        # 이게 옳은 전파지만 팩터를 33% 약화시킨다 — 이득 보정과 잡음 팽창을
+        # 갈라 보려면 rotation_tilt_var_compensation 을 끈다(진단 전용).
+        if self.rotation_tilt_var_compensation:
+            var_theta = var_theta / self._cos_tilt ** 2
 
         translation = trans_result['translation']
         trans_peak = trans_result['peak_value']
@@ -1227,7 +1352,7 @@ class FFTLocalizer:
 
         return {
             'rotation': rotation,
-            'rotation_fft': rot_result['rotation'],
+            'rotation_fft': self.yaw_from_bearing(rot_result['rotation']),
             'rotation_override_used': rotation_override is not None,
             'translation': translation,
             'covariance': covariance,

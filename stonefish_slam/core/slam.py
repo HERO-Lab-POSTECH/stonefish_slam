@@ -122,6 +122,7 @@ class SLAMNode(Node):
         self.declare_parameter('nssm.try_interval', 1)
         self.declare_parameter('pcm_queue_size', 5)
         self.declare_parameter('min_pcm', 3)
+        self.declare_parameter('pose_refresh_window', 10)
 
         # Mapping parameters (slam.yaml: mapping section)
         self.declare_parameter('mapping_2d.map_2d_resolution', 0.2)
@@ -182,10 +183,18 @@ class SLAMNode(Node):
         # 극좌표 상관면에서 시험할 회전 가설 수. 1 이면 전역 최대만 쓰는 옛 동작.
         # 근거·측정은 .hq/community/posts/finding/019.
         self.declare_parameter('fft_localization.rotation_candidates', 9)
+        self.declare_parameter('fft_localization.trans_lowpass', 0.0)
+        self.declare_parameter('fft_localization.trans_clahe', True)
+        self.declare_parameter('fft_localization.trans_window', '')
+        self.declare_parameter('fft_localization.rotation_tilt_compensation', False)
+        self.declare_parameter('fft_localization.rotation_tilt_var_compensation', True)
 
         # FFT validation parameters
         self.declare_parameter('fft_localization.validate_with_odom', True)
         self.declare_parameter('fft_localization.max_position_error', 2.0)  # meters
+        # 게이트가 기각한 쌍에만 역워프 1패스를 주고 재검증한다(finding/023).
+        # 기본 false — 켜면 기각쌍 한정으로 쌍당 비용이 약 5% 늘고 DR 폴백이 줄어든다.
+        self.declare_parameter('fft_localization.warp_retry', False)
         self.declare_parameter('fft_localization.max_rotation_error', 0.35)  # radians (~20 deg)
         self.declare_parameter('fft_localization.use_dr_rotation', False)
 
@@ -231,6 +240,8 @@ class SLAMNode(Node):
             'feat_frames': 0,           # I8 — 피처 추출이 성공한 소나 프레임 수(분모)
             'feat_points_sum': 0,       # I8 — 그 프레임들의 피처 점 수 합(평균의 분자)
             'icp_inert': 0,             # I12 — ICP 가 시드에서 1 cm 미만 움직인 횟수
+            'warp_attempted': 0,        # I13 — 게이트 기각 후 역워프 재시도를 돌린 횟수(분모)
+            'warp_rescued': 0,          # I13 — 그 재시도가 게이트를 통과시켜 DR 폴백을 막은 횟수
         }
 
         # 고도계 최신값 (sonar.projection == 'altitude' 의 입력). 없으면 None.
@@ -358,6 +369,7 @@ class SLAMNode(Node):
         # pairwise consistency maximization parameters for loop closure (loaded from slam.yaml)
         self.fg.pcm_queue_size = self.get_parameter('pcm_queue_size').value
         self.fg.min_pcm = self.get_parameter('min_pcm').value
+        self.fg.pose_refresh_window = self.get_parameter('pose_refresh_window').value
 
     def _init_mappers(self) -> None:
         """Configures and creates the 2D and 3D sonar mappers (loaded from slam.yaml)."""
@@ -497,6 +509,11 @@ class SLAMNode(Node):
                 fft_use_roi = self.get_parameter('fft_localization.use_roi').value
                 fft_roi_threshold = self.get_parameter('fft_localization.roi_threshold').value
                 fft_rotation_candidates = self.get_parameter('fft_localization.rotation_candidates').value
+                fft_trans_lowpass = self.get_parameter('fft_localization.trans_lowpass').value
+                fft_trans_clahe = self.get_parameter('fft_localization.trans_clahe').value
+                fft_trans_window = self.get_parameter('fft_localization.trans_window').value
+                fft_rot_tilt_comp = self.get_parameter('fft_localization.rotation_tilt_compensation').value
+                fft_rot_tilt_var = self.get_parameter('fft_localization.rotation_tilt_var_compensation').value
                 self.fft_localizer = FFTLocalizer(
                     oculus=self.localization.oculus,
                     range_min=fft_range_min,
@@ -507,13 +524,19 @@ class SLAMNode(Node):
                     remove_radial_mean=fft_remove_radial,
                     use_roi=fft_use_roi,
                     roi_threshold=fft_roi_threshold,
-                    rotation_candidates=fft_rotation_candidates
+                    rotation_candidates=fft_rotation_candidates,
+                    rotation_tilt_compensation=fft_rot_tilt_comp,
+                    rotation_tilt_var_compensation=fft_rot_tilt_var,
+                    trans_lowpass=fft_trans_lowpass,
+                    trans_clahe=fft_trans_clahe,
+                    trans_window=fft_trans_window
                 )
                 self.get_logger().info(f"FFT localization enabled (tilt={sonar_tilt_deg}°)")
 
                 # FFT validation parameters
                 self.fft_validate = self.get_parameter('fft_localization.validate_with_odom').value
                 self.fft_max_pos_error = self.get_parameter('fft_localization.max_position_error').value
+                self.fft_warp_retry = self.get_parameter('fft_localization.warp_retry').value
                 self.fft_max_rot_error = self.get_parameter('fft_localization.max_rotation_error').value
                 self.fft_use_dr_rotation = self.get_parameter('fft_localization.use_dr_rotation').value
 
@@ -672,7 +695,39 @@ class SLAMNode(Node):
         self.fg.set_noise_models(prior_model, odom_model, icp_odom_model)
         self.fg.robust_loop_c = self.get_parameter('slam_loop_robust_c').value
 
-    def validate_fft_with_odom(self, fft_result: dict, dr_transform):
+    def _fft_warp_retry(self, polar_prev, polar_curr, fft_result):
+        """게이트가 기각한 쌍에 역워프 1 패스를 주고 재추정한다.
+
+        1 패스 추정 (tx, ty, dyaw) 로 프레임2 를 프레임1 격자에 되감으면 두 영상이
+        대략 겹친다. 남은 회전을 다시 풀어 누적하고, **병진은 원본 직교영상에서**
+        그 회전으로 다시 푼다 — 워프된 영상에서 잰 병진을 합성하면 오차가 쌓인다.
+
+        오프라인 188 쌍 실측: 게이트 기각 32 쌍 중 12 (38%) 가 통과로 바뀌고,
+        통과 156 쌍 중 4 (2.6%) 만 반대로 간다. 그래서 기각쌍에만 쓴다.
+
+        Returns:
+            새 estimate_transform 결과 dict, 또는 재추정이 실패하면 None.
+        """
+        self.instr['warp_attempted'] += 1
+        try:
+            warped = self.fft_localizer.polar_warp(
+                polar_curr,
+                fft_result['translation'][0],
+                fft_result['translation'][1],
+                fft_result['rotation'])
+            res2 = self.fft_localizer.estimate_transform(polar_prev, warped)
+            if not res2['success']:
+                return None
+            rot2 = fft_result['rotation'] + res2['rotation']
+            retried = self.fft_localizer.estimate_transform(
+                polar_prev, polar_curr, rotation_override=rot2)
+            return retried if retried['success'] else None
+        except Exception as e:
+            self.get_logger().warn(f"FFT warp retry failed: {e}",
+                                   throttle_duration_sec=2.0)
+            return None
+
+    def validate_fft_with_odom(self, fft_result: dict, dr_transform, count: bool = True):
         """
         Validate FFT result against dead reckoning odometry.
 
@@ -722,9 +777,11 @@ class SLAMNode(Node):
         # 그게 실측되면 17% 기각의 분모와 사유가 확정된다.
         # 키를 f-string 으로 만들지 않는 이유는 두 가지다 — 선언에 없는 사유가
         # 추가되면 KeyError 로 죽고, 정적 검증(테스트)이 닿지 않는다.
-        if 'pos' in info['reasons']:
+        # count=False 는 역워프 재시도의 재검증이다 — 기각 카운터는 1 패스 기준을
+        # 유지해야 `warp_rescued` 의 분모(reject_*)가 과거 런과 비교 가능하다.
+        if count and 'pos' in info['reasons']:
             self.instr['reject_pos'] += 1
-        if 'rot' in info['reasons']:
+        if count and 'rot' in info['reasons']:
             self.instr['reject_rot'] += 1
 
         # I7~I10 — 판정에 쓰지 않고 기록만 하는 값들. FFT 가 이미 계산해 반환
@@ -870,6 +927,20 @@ class SLAMNode(Node):
                             # Get DR transform between keyframes
                             dr_transform = self.fg.current_keyframe.dr_pose.between(frame.dr_pose)
                             fft_valid, val_info = self.validate_fft_with_odom(fft_result, dr_transform)
+
+                            # 게이트가 기각했다. DR 로 버리기 전에 역워프 1 패스를 준다 —
+                            # 1 패스 추정을 되감아 두 영상을 겹친 뒤 남은 회전을 다시 풀고,
+                            # 그 회전으로 원본에서 병진을 재추정한다. 오프라인 188 쌍에서
+                            # 기각쌍의 38% 가 구제됐고 통과쌍은 건드리지 않는다(finding/023).
+                            if not fft_valid and self.fft_warp_retry:
+                                retried = self._fft_warp_retry(
+                                    polar_prev, polar_curr, fft_result)
+                                if retried is not None:
+                                    ok2, info2 = self.validate_fft_with_odom(
+                                        retried, dr_transform, count=False)
+                                    if ok2:
+                                        fft_result, fft_valid, val_info = retried, True, info2
+                                        self.instr['warp_rescued'] += 1
 
                         if fft_valid:
                             # FFT valid - use FFT result
@@ -1382,6 +1453,7 @@ class SLAMNode(Node):
             f"ssm_init_failed={i['ssm_init_failed']} "
             f"seed_fft={i['seed_fft']} seed_dr={i['seed_dr_fallback']} "
             f"reject_pos={i['reject_pos']} reject_rot={i['reject_rot']} "
+            f"warp={i['warp_rescued']}/{i['warp_attempted']} "
             f"nssm_attempted={i['nssm_attempted']} nssm_init_ok={i['nssm_init_ok']} "
             f"nssm_icp_ok={i['nssm_icp_ok']} "
             f"pcm_accepted={getattr(self.fg, 'pcm_inserted_count', -1)} "

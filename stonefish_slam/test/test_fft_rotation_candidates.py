@@ -48,7 +48,7 @@ def localizer(load_module):
             del sys.modules[name]
 
 
-def _stub(cls, candidates, translations):
+def _stub(cls, candidates, translations, tilt_deg=None):
     """estimate_rotation·estimate_translation 을 대체한 최소 인스턴스.
 
     translations 는 회전각 -> (병진, 병진피크) 표. 실제 상관 대신 이 표를 읽으므로
@@ -56,6 +56,9 @@ def _stub(cls, candidates, translations):
     """
     f = cls.__new__(cls)
     f.rotation_candidates = len(candidates)
+    f.rotation_tilt_compensation = tilt_deg is not None
+    f.rotation_tilt_var_compensation = True
+    f.oculus = types.SimpleNamespace(tilt_angle_rad=np.radians(tilt_deg or 0.0))
     f.verbose = False
     f.remove_radial_mean = False
     f.apply_range_min_mask = lambda img: img
@@ -188,3 +191,75 @@ def test_the_yaml_turns_it_on():
     cfg = yaml.safe_load((ROOT.parent / "config/slam.yaml").read_text(encoding="utf-8"))
     node = next(iter(cfg.values()))["ros__parameters"]
     assert node["fft_localization"]["rotation_candidates"] > 1
+
+
+# ─────────────────── 회전 틸트 보정 (컬럼→요각 환산, 2026-09-03) ───────────────────
+
+def _with_tilt(cls, tilt_deg, compensate):
+    """각 환산만 보는 최소 인스턴스. oculus 는 각분해능·틸트만 있으면 된다."""
+    f = cls.__new__(cls)
+    f.oculus = types.SimpleNamespace(
+        angular_resolution=np.radians(130.0) / 512,
+        tilt_angle_rad=np.radians(tilt_deg),
+    )
+    f.rotation_tilt_compensation = compensate
+    f.rotation_tilt_var_compensation = True
+    return f
+
+
+def test_compensation_never_changes_the_warp_angle(localizer):
+    """이미지 정렬용 각은 보정과 무관해야 한다.
+
+    2026-09-03 첫 패치가 정확히 여기서 틀렸다 — deg_per_col 자체를 1/cos τ 배 하면
+    img2 를 15.5% 과회전시켜 정렬이 깨지고(mean_err 3.89→4.31) 후보 선택까지 흔들렸다.
+    이미지는 방위 시프트만큼 돌지, 차량 요각만큼 돌지 않는다.
+    """
+    base = _with_tilt(localizer, 30.0, False)
+    comp = _with_tilt(localizer, 30.0, True)
+    assert comp.deg_per_col == pytest.approx(base.deg_per_col, rel=1e-12)
+    assert base.deg_per_col == pytest.approx(np.degrees(np.radians(130.0) / 512), rel=1e-12)
+
+
+def test_yaw_from_bearing_divides_by_cos_tilt(localizer):
+    """틸트 30° 에서 1/cos30 = 1.1547 배. 실측 회전 기울기 0.87 을 되돌리는 방향이다."""
+    comp = _with_tilt(localizer, 30.0, True)
+    assert comp.yaw_from_bearing(1.0) == pytest.approx(1.0 / np.cos(np.radians(30.0)), rel=1e-12)
+
+
+def test_bearing_from_yaw_inverts_it(localizer):
+    """DR 요각 override 는 워프 전에 방위로 되돌아가야 한다 — 왕복이 항등이어야 성립한다."""
+    comp = _with_tilt(localizer, 30.0, True)
+    assert comp.bearing_from_yaw(comp.yaw_from_bearing(7.3)) == pytest.approx(7.3, rel=1e-12)
+
+
+def test_both_conversions_are_identity_when_off(localizer):
+    """기본값은 종전 동작이어야 한다 — 아니면 기존 런과의 비교가 전부 무효가 된다."""
+    f = _with_tilt(localizer, 30.0, False)
+    assert f.yaw_from_bearing(3.0) == pytest.approx(3.0, rel=1e-12)
+    assert f.bearing_from_yaw(3.0) == pytest.approx(3.0, rel=1e-12)
+
+
+def test_compensation_is_identity_at_zero_tilt(localizer):
+    """하향이 없으면 방위축이 요각 그대로라 보정도 항등이어야 한다."""
+    comp = _with_tilt(localizer, 0.0, True)
+    assert comp.yaw_from_bearing(3.0) == pytest.approx(3.0, rel=1e-12)
+
+
+def test_the_warp_gets_bearing_while_the_graph_gets_yaw(localizer):
+    """보정이 켜져도 워프 각은 방위 그대로, 반환값만 요각이어야 한다.
+
+    두 축을 한꺼번에 환산했던 것이 2026-09-03 첫 패치의 결함이다. 스텁이 기록한
+    trans_calls 의 각이 후보 각과 같은지로 워프 쪽을 직접 확인한다.
+    """
+    f = _stub(localizer, [(3.0, 0.9, 0.04)], {3.0: ((1.0, 2.0), 0.5)}, tilt_deg=30.0)
+    out = f.estimate_transform(IMG, IMG)
+    assert [c[0] for c in f.trans_calls] == [3.0]
+    assert out['rotation'] == pytest.approx(3.0 / np.cos(np.radians(30.0)))
+
+
+def test_a_dr_override_is_converted_back_before_warping(localizer):
+    """override 는 DR 요각이라 워프 전에 cos τ 를 곱해 방위로 되돌려야 한다."""
+    bearing = round(5.0 * np.cos(np.radians(30.0)), 6)
+    f = _stub(localizer, [(3.0, 0.9, 0.04)], {bearing: ((1.0, 2.0), 0.5)}, tilt_deg=30.0)
+    out = f.estimate_transform(IMG, IMG, rotation_override=5.0)
+    assert out['rotation'] == pytest.approx(5.0)

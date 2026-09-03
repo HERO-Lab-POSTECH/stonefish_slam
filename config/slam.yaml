@@ -100,6 +100,7 @@
       try_interval: 1        # try a loop closure every N keyframes
     pcm_queue_size: 5        # PCM sliding window
     min_pcm: 3               # min pairwise-consistent loop closures to accept
+    pose_refresh_window: 10  # trailing keyframes refreshed from ISAM2 per tick; <=0 = full history
 
     # ==================== FFT localization (rotation/translation seed for ICP) ====================
     fft_localization:
@@ -118,6 +119,20 @@
                                      # tilt 30° 직교영상 497행 중 바닥 반사는 약 86행뿐이고 나머지는
                                      # 0-shift 성분만 보탠다. 박스가 두 영상에 같아 상대 변위는 불변.
       roi_threshold: 10.0            # ROI 판정 강도 하한 (mono8 0-255). mapping_2d 와 같은 기준.
+      warp_retry: true               # 게이트가 기각한 쌍에만 역워프 1패스를 주고 재검증.
+                                     # 오프라인 188쌍에서 기각쌍의 38% 가 구제됐고 통과쌍은
+                                     # 건드리지 않는다(finding/023). 켜면 기각쌍 한정으로
+                                     # 쌍당 비용 약 5% 증가.
+      rotation_tilt_compensation: false   # 컬럼→요각 환산에서 cos(tilt) 를 되돌릴지
+      rotation_tilt_var_compensation: true # 위 보정을 켤 때 분산도 1/cos²τ 배 할지(진단용 off)
+      trans_lowpass: 0.5             # 병진 위상상관의 교차스펙트럼에 거는 저역통과.
+                                     # 정규화 반경(0..~1.41) 이 이 값 이하만 남긴다. 0=끔.
+                                     # 고주파 스페클을 죽인다 — tilt 30° 오프라인 188쌍에서
+                                     # 0.50 이 게이트 83.0→89.9%, 중앙 0.152→0.132 m.
+                                     # 대역통과의 저주파 쪽(lo)은 효과 0 이라 노출하지 않는다.
+      trans_clahe: false             # 병진 상관 전 CLAHE. false 가 오프라인에서 소폭 유리.
+      trans_window: 'hann'           # 병진 상관 전 창함수. '' 또는 'hann'.
+                                     # ⚠️ 위 셋은 병진 경로 전용 — 회전 경로에는 안 걸린다.
       rotation_candidates: 9         # 극좌표 상관면에서 시험할 회전 가설 수. 각 가설로 병진을 풀고
                                      # 병진 상관 피크가 가장 강한 것을 채택한다. 1 이면 전역 최대만
                                      # 쓰는 옛 동작 — tilt 30° 에서 전역 최대가 정답인 쌍은 43% 뿐이다.
