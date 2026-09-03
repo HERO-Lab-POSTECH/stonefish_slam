@@ -186,6 +186,10 @@ class SLAMNode(Node):
         self.declare_parameter('fft_localization.trans_lowpass', 0.0)
         self.declare_parameter('fft_localization.trans_clahe', True)
         self.declare_parameter('fft_localization.trans_window', '')
+        # 위상상관 피크의 upsampled-DFT 서브픽셀 보정(Guizar-Sicairos 2008).
+        # 끄면 포물선 적합까지만 쓴다 — 오프라인 188쌍에서 게이트는 동률인데
+        # 중앙 0.127→0.119 m·p75 0.190→0.159 m 이고 쌍당 시간이 29% 줄었다.
+        self.declare_parameter('fft_localization.dft_refinement_enable', True)
         self.declare_parameter('fft_localization.rotation_tilt_compensation', False)
         self.declare_parameter('fft_localization.rotation_tilt_var_compensation', True)
 
@@ -512,6 +516,7 @@ class SLAMNode(Node):
                 fft_trans_lowpass = self.get_parameter('fft_localization.trans_lowpass').value
                 fft_trans_clahe = self.get_parameter('fft_localization.trans_clahe').value
                 fft_trans_window = self.get_parameter('fft_localization.trans_window').value
+                fft_dft_refine = self.get_parameter('fft_localization.dft_refinement_enable').value
                 fft_rot_tilt_comp = self.get_parameter('fft_localization.rotation_tilt_compensation').value
                 fft_rot_tilt_var = self.get_parameter('fft_localization.rotation_tilt_var_compensation').value
                 self.fft_localizer = FFTLocalizer(
@@ -529,7 +534,8 @@ class SLAMNode(Node):
                     rotation_tilt_var_compensation=fft_rot_tilt_var,
                     trans_lowpass=fft_trans_lowpass,
                     trans_clahe=fft_trans_clahe,
-                    trans_window=fft_trans_window
+                    trans_window=fft_trans_window,
+                    dft_refinement_enable=fft_dft_refine
                 )
                 self.get_logger().info(f"FFT localization enabled (tilt={sonar_tilt_deg}°)")
 
