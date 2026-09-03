@@ -73,6 +73,11 @@
     keyframe_duration_max: 0.0    # s; > 0 forces a keyframe even if the thresholds below never trip (real bags)
     keyframe_translation: 1.0     # m
     keyframe_rotation: 0.174533   # rad (10°)
+    keyframe_max_angular_vel: 0.0 # rad/s. 선회 중 흐린 프레임을 키프레임에서 뺀다. 0 = 끔.
+                                  # 이 조건은 2026-09-02 까지 죽어 있었다 — slam.py 가
+                                  # is_keyframe() 를 부른 뒤에야 frame.twist 를 채워서
+                                  # 항상 None 이었다. 대입 순서를 고쳐 되살렸고, 옛 하드코딩
+                                  # 값 0.1(~5.7°/s)은 검증된 적이 없으므로 기본값은 끔이다.
     slam_prior_noise: [0.1, 0.1, 0.01]  # [x_sigma_m, y_sigma_m, theta_sigma_rad] initial pose
     slam_odom_noise: [0.2, 0.2, 0.02]   # dead-reckoning factor
     slam_icp_noise: [0.1, 0.1, 0.01]    # ICP factor
@@ -133,10 +138,12 @@
       trans_clahe: false             # 병진 상관 전 CLAHE. false 가 오프라인에서 소폭 유리.
       trans_window: 'hann'           # 병진 상관 전 창함수. '' 또는 'hann'.
                                      # ⚠️ 위 셋은 병진 경로 전용 — 회전 경로에는 안 걸린다.
-      dft_refinement_enable: true    # 상관 피크의 upsampled-DFT 서브픽셀 보정. false 면 포물선 적합까지만.
-                                     # 오프라인 188쌍에서 게이트 동률(89.9/89.4%)인데 중앙 0.127→0.119 m·
-                                     # p75 0.190→0.159 m, 쌍당 시간 408→290 s(-29%). 온라인 판정 전이라
-                                     # 기본값은 true 유지.
+      dft_refinement_enable: false   # 상관 피크의 upsampled-DFT 서브픽셀 보정. false 면 포물선 적합까지만.
+                                     # 끄는 쪽이 이긴다 — shallow bag 각 팔 4복제에서 reject_pos 중앙
+                                     # 18→12(완전 분리 p=0.014) · featF 10565→10867(+2.9%, 완전 분리)
+                                     # · DR 폴백 1.22→0.50%(Fisher p=0.030). 궤적 오차는 동률.
+                                     # 기전: 업샘플 DFT 가 피크가 애매한 쌍에서 잡음 봉우리를 따라가
+                                     # 꼬리를 키운다 — 중앙값은 그대로인데 p75 만 움직인 게 그 서명이다.
       rotation_candidates: 9         # 극좌표 상관면에서 시험할 회전 가설 수. 각 가설로 병진을 풀고
                                      # 병진 상관 피크가 가장 강한 것을 채택한다. 1 이면 전역 최대만
                                      # 쓰는 옛 동작 — tilt 30° 에서 전역 최대가 정답인 쌍은 43% 뿐이다.
