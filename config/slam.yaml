@@ -148,6 +148,11 @@
                                      # 병진 상관 피크가 가장 강한 것을 채택한다. 1 이면 전역 최대만
                                      # 쓰는 옛 동작 — tilt 30° 에서 전역 최대가 정답인 쌍은 43% 뿐이다.
                                      # 비용은 K 에 선형(병진 상관 K 회). 근거는 finding/019.
+                                     # ⚠️ K=15 는 오프라인에서 더 좋지만(tilt30 게이트 89.4→92.0%)
+                                     # 온라인에서는 동률이고 featF 만 −15% 다 — 비용이 프레임을
+                                     # 버리게 하고 버려진 프레임이 키프레임 간격을 벌려 이득을
+                                     # 상쇄한다. 오프라인 하네스는 고정 쌍 집합이라 이 되먹임을
+                                     # 못 본다. 근거는 finding/027 — 올리기 전에 그걸 읽을 것.
       use_dr_rotation: false         # false: FFT estimates rotation too; true: rotation from DR, FFT supplies translation only
 
     # ==================== 2D mapping (occupancy grid) ====================
