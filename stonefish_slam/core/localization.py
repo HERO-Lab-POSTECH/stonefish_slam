@@ -54,6 +54,10 @@ class Localization:
         self.keyframe_duration_max = None  # None = no forced-keyframe cadence
         self.keyframe_translation = None
         self.keyframe_rotation = None
+        # 모션블러 배제 임계 [rad/s]. 0 = 끔.
+        # 2026-09-02 까지 이 조건은 죽어 있었다 — slam.py 가 is_keyframe() 를 부른 뒤에야
+        # frame.twist 를 대입해서 항상 None 이었다(PLAN-PHASE2 §하네스 구축 중 나온 결함).
+        self.keyframe_max_angular_vel = 0.0
 
         # Current (non-key) frame
         self.current_frame: Keyframe = None
@@ -117,10 +121,8 @@ class Localization:
             return True
 
         # Reject if angular velocity too high (motion blur prevention)
-        if frame.twist is not None:
-            angular_vel_z = abs(frame.twist.angular.z)
-            max_angular_vel = 0.1  # rad/s (~6°/s)
-            if angular_vel_z > max_angular_vel:
+        if frame.twist is not None and self.keyframe_max_angular_vel > 0.0:
+            if abs(frame.twist.angular.z) > self.keyframe_max_angular_vel:
                 return False
 
         # Check time duration (ROS2: Time has sec and nanosec fields)

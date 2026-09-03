@@ -95,6 +95,8 @@ class SLAMNode(Node):
         self.declare_parameter('keyframe_duration_max', 0.0)
         self.declare_parameter('keyframe_translation', 3.0)
         self.declare_parameter('keyframe_rotation', 0.5236)
+        # 선회 중 흐린 프레임을 키프레임에서 뺀다. 0 = 끔(기존 동작).
+        self.declare_parameter('keyframe_max_angular_vel', 0.0)  # rad/s
         self.declare_parameter('slam_prior_noise', [0.1, 0.1, 0.01])
         self.declare_parameter('slam_odom_noise', [0.2, 0.2, 0.02])
         self.declare_parameter('slam_icp_noise', [0.1, 0.1, 0.01])
@@ -285,6 +287,7 @@ class SLAMNode(Node):
             if keyframe_duration_max_sec > 0.0 else None)
         keyframe_translation = self.get_parameter('keyframe_translation').value
         keyframe_rotation = self.get_parameter('keyframe_rotation').value
+        keyframe_max_ang_vel = self.get_parameter('keyframe_max_angular_vel').value
 
         # Set keyframe criteria in localization module (skip if mapping-only mode)
         if self.localization is not None:
@@ -292,6 +295,7 @@ class SLAMNode(Node):
             self.localization.keyframe_duration_max = keyframe_duration_max
             self.localization.keyframe_translation = keyframe_translation
             self.localization.keyframe_rotation = keyframe_rotation
+            self.localization.keyframe_max_angular_vel = keyframe_max_ang_vel
 
         # noise models (loaded from slam.yaml)
         prior_sigmas = self.get_parameter('slam_prior_noise').value
@@ -877,6 +881,8 @@ class SLAMNode(Node):
         time = sonar_msg.header.stamp
         dr_pose3 = r2g(odom_msg.pose.pose)
         frame = Keyframe(False, time, dr_pose3)
+        # is_keyframe() 의 모션블러 조건이 twist 를 읽으므로 판정 **전에** 채운다.
+        frame.twist = odom_msg.twist.twist
 
         # Check if valid points (feature extraction may return empty on skip frames)
         if len(points) == 0 or (len(points) > 0 and np.isnan(points[0, 0])):
@@ -887,9 +893,6 @@ class SLAMNode(Node):
             else:
                 # In mapping-only mode, use simple time-based keyframe decision
                 frame.status = True
-
-        # Set frame twist
-        frame.twist = odom_msg.twist.twist
 
         # Update keyframe pose from dead reckoning
         if self.fg.keyframes:
