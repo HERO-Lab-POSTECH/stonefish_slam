@@ -45,6 +45,7 @@ def extractor(load_module):
             fe.projection = projection
             cos_tilt = float(np.cos(np.radians(tilt_deg)))
             fe._inv_cos_tilt = 1.0 / cos_tilt
+            fe.sonar_tilt_rad = float(np.radians(tilt_deg))
             fe.proj_dropped = 0
             fe.proj_alt_missing = 0
             fe.node = types.SimpleNamespace(altitude_m=altitude)
@@ -100,3 +101,41 @@ def test_missing_altitude_falls_back_without_crashing(extractor):
     fe = extractor("altitude", altitude=None)
     assert fe._project_range(10.0) == pytest.approx(10.0 / np.cos(np.radians(30.0)))
     assert fe.proj_alt_missing == 1
+
+
+# --- 빔 방위 -> 수평면 방위 --------------------------------------------------
+# 거리 사상이 맞아도 방위가 틀리면 병진은 여전히 축소된다. 빔은 소나 자신의
+# 기울어진 프레임에서 정의되므로 바닥의 점 (X, Y, h) 은
+#   beta = atan2(Y, X*cos(tau) + h*sin(tau))
+# 로 관측된다. 아래 계약은 _beam_azimuth 가 그 beta 를 참 방위 atan2(Y, X) 로
+# 되돌린다는 것 하나다.
+
+def _true_beam_bearing(x, y, h, tilt_deg):
+    """참 지면 좌표에서 소나가 실제로 보게 되는 빔 방위(순방향 사상)."""
+    tau = np.radians(tilt_deg)
+    return np.arctan2(y, x * np.cos(tau) + h * np.sin(tau))
+
+
+@pytest.mark.parametrize("x,y", [(10.0, 10.0), (14.0, 5.0), (5.0, 12.0),
+                                 (20.0, 0.0), (8.0, -9.0), (30.0, -2.0)])
+def test_beam_azimuth_recovers_the_true_horizontal_bearing(extractor, x, y):
+    h, tilt_deg = 6.4, 30.0
+    fe = extractor("altitude", tilt_deg=tilt_deg, altitude=h)
+    rho = float(np.hypot(x, y))
+    beta = _true_beam_bearing(x, y, h, tilt_deg)
+    assert fe._beam_azimuth(beta, rho) == pytest.approx(np.arctan2(y, x), abs=1e-9)
+
+
+def test_beam_azimuth_is_identity_without_tilt(extractor):
+    """틸트가 0 이면 빔 프레임과 수평면이 같으므로 보정이 없어야 한다."""
+    fe = extractor("altitude", tilt_deg=0.0, altitude=6.4)
+    for beta in np.radians([-65.0, -20.0, 0.0, 33.0, 65.0]):
+        assert fe._beam_azimuth(beta, 15.0) == pytest.approx(beta, abs=1e-12)
+
+
+def test_beam_azimuth_leaves_bearing_alone_without_altitude(extractor):
+    """고도를 모르면 rho 가 참 수평거리가 아니라 보정 근거가 없다."""
+    fe = extractor("altitude", tilt_deg=30.0, altitude=None)
+    assert fe._beam_azimuth(0.5, 12.0) == pytest.approx(0.5)
+    fe_legacy = extractor("legacy", tilt_deg=30.0, altitude=6.4)
+    assert fe_legacy._beam_azimuth(0.5, 12.0) == pytest.approx(0.5)
