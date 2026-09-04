@@ -638,8 +638,14 @@ class FFTLocalizer:
         row_kernel = np.exp(-1j * 2 * np.pi * np.outer(row_positions, row_freq_idx) / h)
         col_kernel = np.exp(-1j * 2 * np.pi * np.outer(col_positions, col_freq_idx) / w)
 
-        # Matrix multiply: upsampled_region[i,j] = sum over all freq of kernel * spectrum
-        upsampled_region = row_kernel @ cross_power_spectrum @ col_kernel.T
+        # 상관 표면은 스펙트럼의 *역* 변환이다. 음지수 커널만 곱하면 순변환이라
+        # 거울상 표면이 나오고, 그 위에서 +offset 근방을 뒤지면 실제 피크가 없는
+        # 자리를 뒤지게 되어 0.55 px 의 덧셈 편향이 생긴다(finding/037 실측
+        # -0.042~-0.049 m). conj(F(conj(x))) = N·F^-1(x) 이므로 입출력을 켤레로
+        # 감싸 역변환으로 되돌린다 — scikit-image 의 _phase_cross_correlation 이
+        # 같은 커널에 같은 켤레를 쓰는 이유가 이것이다.
+        upsampled_region = np.conj(
+            row_kernel @ np.conj(cross_power_spectrum) @ col_kernel.T)
 
         return upsampled_region
 
