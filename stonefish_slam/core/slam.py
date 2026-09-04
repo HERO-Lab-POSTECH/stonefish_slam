@@ -1381,10 +1381,23 @@ class SLAMNode(Node):
                     seed_src = 'dr'        # FFT 가 DR fallback 을 시드로 넘겼다
                 else:
                     seed_src = 'fft'
+                # I13 — 진실 대비 척도. 위의 ratio 는 ICP 를 **자기 시드와** 견주므로
+                # 시드가 이미 짧으면 1.0 근처로 건강해 보인다(실제로 그랬다:
+                # 중앙 0.9949 인데 종단 궤적은 GT 의 0.846). DR 포즈는 시뮬에서
+                # 무노이즈 ground truth 이므로 그 상대병진이 진실 기준이다 —
+                # 이 두 값이 어느 단계가 병진을 먹는지를 가른다.
+                dr_norm = float(np.linalg.norm(
+                    ret.target_pose.between(ret.source_pose).translation()))
+                if dr_norm > 1e-6:
+                    seed_gt = f"{init_norm / dr_norm:.4f}"
+                    icp_gt = f"{est_norm / dr_norm:.4f}"
+                else:
+                    seed_gt = icp_gt = "nan"
                 self.get_logger().info(
                     f"[INSTR] scale init={init_norm:.4f} est={est_norm:.4f} "
                     f"move={move:.4f} "
-                    f"ratio={est_norm / init_norm:.4f} seed={seed_src}"
+                    f"ratio={est_norm / init_norm:.4f} seed={seed_src} "
+                    f"dr={dr_norm:.4f} seed_gt={seed_gt} icp_gt={icp_gt}"
                 )
 
         # ICP validation — verify transform is reasonable
