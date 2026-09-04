@@ -384,7 +384,18 @@ class FFTLocalizer:
 
             # Compute horizontal range and bearing from projected coordinates
             horizontal_range = np.sqrt(np.square(x_proj) + np.square(y_proj))
-            bearing_polar = np.arctan2(y_proj, x_proj)
+            # 빔 방위는 소나 자신의 기울어진 프레임에서 정의된다. 하향 틸트 tau 에서
+            # 바닥의 점 (x, y, h) 은 센서 프레임에서 X_s = x*cos(tau) + h*sin(tau) 이므로
+            # beam bearing = atan2(y, X_s) 다. 수평면 방위 atan2(y, x) 를 그대로 쓰면
+            # 방위가 거리 의존적으로 어긋나 병진이 체계적으로 축소된다 — 방위각이
+            # 클수록 심하고(phi=45° 에서 0.86, 67° 에서 0.77), 부채꼴 평균으로 전진
+            # 병진이 약 15% 짧게 나온다.
+            if projection == 'altitude' and altitude and altitude > 0.0:
+                sin_tilt = float(np.sin(self.oculus.tilt_angle_rad))
+                bearing_polar = np.arctan2(
+                    y_proj, x_proj * cos_tilt + float(altitude) * sin_tilt)
+            else:
+                bearing_polar = np.arctan2(y_proj, x_proj)
 
             # Convert horizontal range back to slant range for polar image indexing
             # Polar image rows are indexed by slant range, not horizontal range

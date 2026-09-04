@@ -187,8 +187,9 @@ class FeatureExtraction:
             if proj_m is None:
                 continue
 
-            x = proj_m * np.cos(bearing_rad)  # forward component
-            y = proj_m * np.sin(bearing_rad)  # lateral component
+            azimuth_rad = self._beam_azimuth(bearing_rad, proj_m)
+            x = proj_m * np.cos(azimuth_rad)  # forward component
+            y = proj_m * np.sin(azimuth_rad)  # lateral component
 
             points_cartesian.append([x, y])
 
@@ -197,6 +198,35 @@ class FeatureExtraction:
         self.node.get_logger().debug(f"Extracted {len(points)} feature points")
 
         return points
+
+    def _beam_azimuth(self, bearing_rad, proj_m):
+        '''빔 방위 beta 를 수평면 방위 phi 로 되돌린다.
+
+        빔은 소나 자신의 기울어진 프레임에서 정의된다. 하향 틸트 tau 에서 바닥의
+        점 (X, Y, h) 은 센서 프레임에서 X_s = X*cos(tau) + h*sin(tau) 이므로
+        beta = atan2(Y, X_s) 이지 atan2(Y, X) 가 아니다. beta 를 그대로 수평 방위로
+        쓰면 방위가 거리 의존적으로 어긋나 ICP 병진이 체계적으로 축소된다.
+
+        X = rho*cos(phi), Y = rho*sin(phi) 를 넣고 정리하면
+
+            sin(phi) - tan(beta)*cos(tau)*cos(phi) = tan(beta)*h*sin(tau)/rho
+
+        이고, a*sin(phi) + b*cos(phi) = c 를 모으면 phi = asin(c/hypot(1,b)) + atan(b).
+        고도를 모르거나 altitude 투영이 아니면 rho 가 참 수평거리가 아니므로 보정하지
+        않고 beta 를 그대로 돌려준다.
+
+        Returns:
+            수평면 방위(rad).
+        '''
+        if self.projection != 'altitude':
+            return bearing_rad
+        h = getattr(self.node, 'altitude_m', None)
+        if not h or h <= 0.0 or proj_m <= 0.0:
+            return bearing_rad
+        t = np.tan(bearing_rad)
+        b = t * np.cos(self.sonar_tilt_rad)
+        c = t * float(h) * np.sin(self.sonar_tilt_rad) / proj_m
+        return float(np.arcsin(np.clip(c / np.hypot(1.0, b), -1.0, 1.0)) + np.arctan(b))
 
     def _project_range(self, range_m):
         '''경사거리 r 을 수평 평면 좌표로 투영한다.
