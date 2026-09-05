@@ -105,6 +105,7 @@ class SLAMNode(Node):
         self.declare_parameter('ssm.enable', False)
         self.declare_parameter('ssm.min_points', 50)
         self.declare_parameter('ssm.max_translation', 3.0)
+        self.declare_parameter('ssm.max_icp_move', 0.0)
         self.declare_parameter('ssm.max_rotation', 0.5236)
         self.declare_parameter('ssm.target_frames', 3)
         default_icp_config = os.path.join(
@@ -246,6 +247,7 @@ class SLAMNode(Node):
             'feat_frames': 0,           # I8 — 피처 추출이 성공한 소나 프레임 수(분모)
             'feat_points_sum': 0,       # I8 — 그 프레임들의 피처 점 수 합(평균의 분자)
             'icp_inert': 0,             # I12 — ICP 가 시드에서 1 cm 미만 움직인 횟수
+            'icp_move_rejected': 0,     # I14 — ssm.max_icp_move 게이트로 시드로 되돌린 횟수
             'warp_attempted': 0,        # I13 — 게이트 기각 후 역워프 재시도를 돌린 횟수(분모)
             'warp_rescued': 0,          # I13 — 그 재시도가 게이트를 통과시켜 DR 폴백을 막은 횟수
         }
@@ -354,6 +356,7 @@ class SLAMNode(Node):
                 self.localization.ssm_params.enable = self.get_parameter('ssm.enable').value
             self.localization.ssm_params.min_points = self.get_parameter('ssm.min_points').value
             self.localization.ssm_params.max_translation = self.get_parameter('ssm.max_translation').value
+            self.localization.ssm_params.max_icp_move = self.get_parameter('ssm.max_icp_move').value
             self.localization.ssm_params.max_rotation = self.get_parameter('ssm.max_rotation').value
             self.localization.ssm_params.target_frames = self.get_parameter('ssm.target_frames').value
             self.get_logger().info(f"SSM: {self.localization.ssm_params.enable}")
@@ -1367,8 +1370,12 @@ class SLAMNode(Node):
             # 대응 필터를 조이면 ICP 가 시드를 그대로 돌려주는 상태로 수렴할 수 있는데,
             # 시드의 대부분이 DR fallback 이라 그 상태의 궤적은 사실상 DR 궤적이다.
             # ratio 만 보면 1.0 에 가까워져 '좋아졌다'로 읽힌다.
-            move = float(np.linalg.norm(
-                ret2.initial_transform.between(ret2.estimated_transform).translation()))
+            ret2.estimated_transform, move, rejected = self.localization.gate_icp_move(
+                ret2.initial_transform, ret2.estimated_transform,
+                self.localization.ssm_params.max_icp_move)
+            if rejected:
+                self.instr['icp_move_rejected'] += 1   # I14
+                est_norm = init_norm
             if move < 0.01:
                 self.instr['icp_inert'] += 1
             if init_norm > 1e-6:
@@ -1386,8 +1393,12 @@ class SLAMNode(Node):
                 # 중앙 0.9949 인데 종단 궤적은 GT 의 0.846). DR 포즈는 시뮬에서
                 # 무노이즈 ground truth 이므로 그 상대병진이 진실 기준이다 —
                 # 이 두 값이 어느 단계가 병진을 먹는지를 가른다.
-                dr_norm = float(np.linalg.norm(
-                    ret.target_pose.between(ret.source_pose).translation()))
+                dr_t = ret.target_pose.between(ret.source_pose).translation()
+                dr_norm = float(np.linalg.norm(dr_t))
+                # I14 — 노름 비(seed_gt/icp_gt)는 방향을 지운다. 벡터 오차를 같이 남겨
+                # ICP 가 시드보다 진실에 가까워졌는지를 스텝 단위로 판정할 수 있게 한다.
+                seed_err = float(np.linalg.norm(dr_t - ret2.initial_transform.translation()))
+                icp_err = float(np.linalg.norm(dr_t - ret2.estimated_transform.translation()))
                 if dr_norm > 1e-6:
                     seed_gt = f"{init_norm / dr_norm:.4f}"
                     icp_gt = f"{est_norm / dr_norm:.4f}"
@@ -1397,7 +1408,10 @@ class SLAMNode(Node):
                     f"[INSTR] scale init={init_norm:.4f} est={est_norm:.4f} "
                     f"move={move:.4f} "
                     f"ratio={est_norm / init_norm:.4f} seed={seed_src} "
-                    f"dr={dr_norm:.4f} seed_gt={seed_gt} icp_gt={icp_gt}"
+                    f"dr={dr_norm:.4f} seed_gt={seed_gt} icp_gt={icp_gt} "
+                    f"seed_err={seed_err:.4f} icp_err={icp_err:.4f} rej={int(rejected)} "
+                    f"ex={float(ret2.estimated_transform.translation()[0] - dr_t[0]):+.4f} "
+                    f"ey={float(ret2.estimated_transform.translation()[1] - dr_t[1]):+.4f}"
                 )
 
         # ICP validation — verify transform is reasonable
@@ -1485,7 +1499,7 @@ class SLAMNode(Node):
             f"alt={self.altitude_m if self.altitude_m is not None else float('nan'):.2f} "
             f"proj_drop={getattr(self.feature_extractor, 'proj_dropped', -1)} "
             f"alt_missing={getattr(self.feature_extractor, 'proj_alt_missing', -1)} "
-            f"icp_inert={i['icp_inert']}"
+            f"icp_inert={i['icp_inert']} icp_move_rej={i['icp_move_rejected']}"
         )
 
     def add_nonsequential_scan_matching(self) -> bool:
@@ -1562,6 +1576,20 @@ class SLAMNode(Node):
         # Add to loop closure queue for PCM verification
         if ret2.status:
             self.instr['nssm_icp_ok'] += 1
+            # I15 — 루프폐합 ICP 의 시드/결과를 DR(시뮬 GT) 상대포즈와 견준다. 순차 ICP 의
+            # 전진 미끄러짐이 루프 인자에도 있으면 그래프 층 압축의 원인이다.
+            skf, tkf = self.fg.keyframes[ret2.source_key], self.fg.keyframes[ret2.target_key]
+            gt_t = tkf.dr_pose.between(skf.dr_pose).translation()
+            it, et = ret2.initial_transform.translation(), ret2.estimated_transform.translation()
+            self.get_logger().info(
+                f"[INSTR] loop src={ret2.source_key} tgt={ret2.target_key} "
+                f"gt={np.linalg.norm(gt_t):.3f} init={np.linalg.norm(it):.3f} est={np.linalg.norm(et):.3f} "
+                f"move={np.linalg.norm(et - it):.3f} seed_err={np.linalg.norm(gt_t - it):.3f} "
+                f"icp_err={np.linalg.norm(gt_t - et):.3f} "
+                f"ex={float(et[0] - gt_t[0]):+.3f} ey={float(et[1] - gt_t[1]):+.3f} "
+                f"sx={float(it[0] - gt_t[0]):+.3f} sy={float(it[1] - gt_t[1]):+.3f} "
+                f"cxx={float(np.sqrt(ret2.cov[0, 0])) if ret2.cov is not None else float('nan'):.3f} "
+                f"cyy={float(np.sqrt(ret2.cov[1, 1])) if ret2.cov is not None else float('nan'):.3f}")
             self.fg.add_loop_closure(ret2)
             return True
 

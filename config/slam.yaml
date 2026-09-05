@@ -91,6 +91,7 @@
       min_points: 50         # min points to attempt SSM
       max_translation: 3.0   # m, rejection gate
       max_rotation: 0.5236   # rad (30°), rejection gate
+      max_icp_move: 0.0      # m; ICP 결과가 FFT 시드에서 이보다 멀면 시드로 되돌림. 0 = off
       target_frames: 3       # previous keyframes the current frame is matched against
 
     # ==================== Loop closure (NSSM) + pairwise consistency (PCM) ====================
