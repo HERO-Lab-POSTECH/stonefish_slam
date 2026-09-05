@@ -81,6 +81,7 @@
     slam_prior_noise: [0.1, 0.1, 0.01]  # [x_sigma_m, y_sigma_m, theta_sigma_rad] initial pose
     slam_odom_noise: [0.2, 0.2, 0.02]   # dead-reckoning factor
     slam_icp_noise: [0.1, 0.1, 0.01]    # ICP factor
+    slam_loop_along_sigma_scale: 1.0    # 루프 인자 공분산의 전진축 표준편차 배율. 1.0 = off
     slam_loop_robust_c: 3.0             # Cauchy robust kernel c, loop-closure (NSSM) factors only
     point_downsample_resolution: 0.5    # voxel leaf size (m) for ICP / publishing
 

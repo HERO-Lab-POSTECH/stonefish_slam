@@ -106,6 +106,7 @@ class SLAMNode(Node):
         self.declare_parameter('ssm.min_points', 50)
         self.declare_parameter('ssm.max_translation', 3.0)
         self.declare_parameter('ssm.max_icp_move', 0.0)
+        self.declare_parameter('slam_loop_along_sigma_scale', 1.0)
         self.declare_parameter('ssm.max_rotation', 0.5236)
         self.declare_parameter('ssm.target_frames', 3)
         default_icp_config = os.path.join(
@@ -707,6 +708,7 @@ class SLAMNode(Node):
         # Set noise models in factor graph
         self.fg.set_noise_models(prior_model, odom_model, icp_odom_model)
         self.fg.robust_loop_c = self.get_parameter('slam_loop_robust_c').value
+        self.fg.loop_along_sigma_scale = self.get_parameter('slam_loop_along_sigma_scale').value
 
     def _fft_warp_retry(self, polar_prev, polar_curr, fft_result):
         """게이트가 기각한 쌍에 역워프 1 패스를 주고 재추정한다.

@@ -58,6 +58,8 @@ class FactorGraph:
         # Robust cost parameter for loop closure (NSSM) factors only.
         # Cauchy kernel: c=3.0 means "down-weight at ~3σ" (conservative).
         self.robust_loop_c: float = 3.0
+        # 루프 인자의 몸체 전진축(x) 표준편차 배율. 1.0 = 끔. inflate_loop_cov 참조.
+        self.loop_along_sigma_scale: float = 1.0
 
     @property
     def current_key(self) -> int:
@@ -257,6 +259,32 @@ class FactorGraph:
             if ret.inserted:
                 ret.estimated_transform = ret.target_pose.between(ret.source_pose)
 
+    @staticmethod
+    def inflate_loop_cov(cov, transform, scale: float):
+        """루프 인자 공분산의 전진축 성분만 키운다.
+
+        tilt 30° 의 바닥 반사 띠는 전진 이동에 거의 불변이라 점군이 전진축을
+        약하게만 구속한다 — 그런데 ICP 표본 공분산은 등방으로 나온다(실측
+        cxx 0.39 / cyy 0.41, i1base 324 후보). 없는 정보를 신뢰하지 않도록
+        전진축 표준편차만 scale 배 한다. scale <= 1 이면 그대로 돌려준다.
+
+        전진축은 인자 자신의 병진 방향으로 잡는다(루프의 두 키프레임을 잇는
+        방향). 병진이 0 에 가까우면 방향이 정의되지 않으므로 건드리지 않는다.
+        """
+        if cov is None or scale <= 1.0:
+            return cov
+        t = transform.translation()
+        n = float(np.linalg.norm(t))
+        if n < 1e-3:
+            return cov
+        c, s = float(t[0]) / n, float(t[1]) / n
+        # 전진축을 x 로 보내는 회전 R 로 옮겨 x 분산만 키우고 되돌린다.
+        R = np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
+        D = np.eye(3)
+        D[0, 0] = scale
+        M = R.T @ D @ R
+        return M @ np.asarray(cov) @ M.T
+
     def add_loop_closure(self, icp_result: ICPResult) -> None:
         """Add loop closure candidate to NSSM queue.
 
@@ -281,7 +309,8 @@ class FactorGraph:
                     ret.source_key,
                     ret.target_key,
                     ret.estimated_transform,
-                    ret.cov,
+                    self.inflate_loop_cov(ret.cov, ret.estimated_transform,
+                                          self.loop_along_sigma_scale),
                     robust=True,
                 )
 
