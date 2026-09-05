@@ -125,7 +125,7 @@ class SLAMNode(Node):
         # NSSM cost grows O(N) with graph size; >1 bounds it on long runs.
         self.declare_parameter('nssm.try_interval', 1)
         self.declare_parameter('pcm_queue_size', 5)
-        self.declare_parameter('min_pcm', 3)
+        self.declare_parameter('min_pcm', 4)
         self.declare_parameter('pose_refresh_window', 10)
 
         # Mapping parameters (slam.yaml: mapping section)

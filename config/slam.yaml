@@ -106,7 +106,7 @@
       cov_samples: 30        # 0 = skip covariance sampling (slow on real data)
       try_interval: 1        # try a loop closure every N keyframes
     pcm_queue_size: 5        # PCM sliding window
-    min_pcm: 3               # min pairwise-consistent loop closures to accept
+    min_pcm: 4               # min pairwise-consistent loop closures to accept (finding/048)
     pose_refresh_window: 10  # trailing keyframes refreshed from ISAM2 per tick; <=0 = full history
 
     # ==================== FFT localization (rotation/translation seed for ICP) ====================

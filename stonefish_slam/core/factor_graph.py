@@ -46,7 +46,7 @@ class FactorGraph:
 
         # PCM parameters
         self.pcm_queue_size = 5
-        self.min_pcm = 3
+        self.min_pcm = 4
 
         # How many trailing keyframes get their pose refreshed from ISAM2 each
         # tick. <= 0 refreshes the whole history (O(N) per update).
