@@ -9,7 +9,7 @@ from tf2_ros import TransformBroadcaster
 import cv_bridge
 from nav_msgs.msg import Odometry
 from message_filters import Subscriber, ApproximateTimeSynchronizer
-from sensor_msgs.msg import PointCloud2, Image, CompressedImage
+from sensor_msgs.msg import PointCloud2, Image, CompressedImage, Range
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from octomap_msgs.msg import Octomap
@@ -69,6 +69,9 @@ class SLAMNode(Node):
         self.declare_parameter('sonar.range_max', 40.0)
         self.declare_parameter('sonar.sonar_position', [0.0, 0.0, 0.0])
         self.declare_parameter('sonar.sonar_tilt_deg', 30.0)
+        # 경사거리 → 수평거리 투영. legacy | inv_cos_tilt | altitude
+        # (core/feature_extraction.py:_project_range 가 규약의 정본)
+        self.declare_parameter('sonar.projection', 'altitude')
 
         # Feature extraction parameters (slam.yaml: feature section)
         self.declare_parameter('CFAR.Ntc', 20)
@@ -92,6 +95,8 @@ class SLAMNode(Node):
         self.declare_parameter('keyframe_duration_max', 0.0)
         self.declare_parameter('keyframe_translation', 3.0)
         self.declare_parameter('keyframe_rotation', 0.5236)
+        # 선회 중 흐린 프레임을 키프레임에서 뺀다. 0 = 끔(기존 동작).
+        self.declare_parameter('keyframe_max_angular_vel', 0.0)  # rad/s
         self.declare_parameter('slam_prior_noise', [0.1, 0.1, 0.01])
         self.declare_parameter('slam_odom_noise', [0.2, 0.2, 0.02])
         self.declare_parameter('slam_icp_noise', [0.1, 0.1, 0.01])
@@ -100,6 +105,8 @@ class SLAMNode(Node):
         self.declare_parameter('ssm.enable', False)
         self.declare_parameter('ssm.min_points', 50)
         self.declare_parameter('ssm.max_translation', 3.0)
+        self.declare_parameter('ssm.max_icp_move', 0.0)
+        self.declare_parameter('slam_loop_along_sigma_scale', 1.0)
         self.declare_parameter('ssm.max_rotation', 0.5236)
         self.declare_parameter('ssm.target_frames', 3)
         default_icp_config = os.path.join(
@@ -118,7 +125,8 @@ class SLAMNode(Node):
         # NSSM cost grows O(N) with graph size; >1 bounds it on long runs.
         self.declare_parameter('nssm.try_interval', 1)
         self.declare_parameter('pcm_queue_size', 5)
-        self.declare_parameter('min_pcm', 3)
+        self.declare_parameter('min_pcm', 4)
+        self.declare_parameter('pose_refresh_window', 10)
 
         # Mapping parameters (slam.yaml: mapping section)
         self.declare_parameter('mapping_2d.map_2d_resolution', 0.2)
@@ -169,10 +177,32 @@ class SLAMNode(Node):
         self.declare_parameter('fft_localization.trans_erosion_iterations', 4)
         self.declare_parameter('fft_localization.trans_gaussian_sigma', 4.0)
         self.declare_parameter('fft_localization.trans_gaussian_truncate', 4.0)
+        # 극좌표 행 평균(= 몸체 고정 거리 띠) 제거. core/localization_fft.py:remove_band_envelope
+        self.declare_parameter('fft_localization.remove_radial_mean', False)
+        # E1c — 상관 전에 내용이 있는 사각형으로 두 영상을 함께 자른다. tilt 30° 에서
+        # 바닥 반사는 직교영상 497행 중 약 86행에만 몰리므로 나머지 83% 는 위상 상관에
+        # 0-shift 성분만 보탠다. 크롭 박스가 두 영상에 동일하므로 상대 변위는 불변이다.
+        self.declare_parameter('fft_localization.use_roi', False)
+        self.declare_parameter('fft_localization.roi_threshold', 10.0)  # mono8 강도
+        # 극좌표 상관면에서 시험할 회전 가설 수. 1 이면 전역 최대만 쓰는 옛 동작.
+        # 근거·측정은 .hq/community/posts/finding/019.
+        self.declare_parameter('fft_localization.rotation_candidates', 9)
+        self.declare_parameter('fft_localization.trans_lowpass', 0.0)
+        self.declare_parameter('fft_localization.trans_clahe', True)
+        self.declare_parameter('fft_localization.trans_window', '')
+        # 위상상관 피크의 upsampled-DFT 서브픽셀 보정(Guizar-Sicairos 2008).
+        # 끄면 포물선 적합까지만 쓴다 — 오프라인 188쌍에서 게이트는 동률인데
+        # 중앙 0.127→0.119 m·p75 0.190→0.159 m 이고 쌍당 시간이 29% 줄었다.
+        self.declare_parameter('fft_localization.dft_refinement_enable', True)
+        self.declare_parameter('fft_localization.rotation_tilt_compensation', False)
+        self.declare_parameter('fft_localization.rotation_tilt_var_compensation', True)
 
         # FFT validation parameters
         self.declare_parameter('fft_localization.validate_with_odom', True)
         self.declare_parameter('fft_localization.max_position_error', 2.0)  # meters
+        # 게이트가 기각한 쌍에만 역워프 1패스를 주고 재검증한다(finding/023).
+        # 기본 false — 켜면 기각쌍 한정으로 쌍당 비용이 약 5% 늘고 DR 폴백이 줄어든다.
+        self.declare_parameter('fft_localization.warp_retry', False)
         self.declare_parameter('fft_localization.max_rotation_error', 0.35)  # radians (~20 deg)
         self.declare_parameter('fft_localization.use_dr_rotation', False)
 
@@ -212,7 +242,19 @@ class SLAMNode(Node):
             'seed_dr_fallback': 0,      # I4 — DR fallback 이 시드로 쓰인 횟수
             'reject_pos': 0,            # I6 — 위치 오차로 기각
             'reject_rot': 0,            # I6 — 회전 오차로 기각
+            'nssm_attempted': 0,        # I7 — 루프 후보 탐색을 실제로 돌린 횟수(분모)
+            'nssm_init_ok': 0,          # I7 — 후보 초기화가 성공한 횟수
+            'nssm_icp_ok': 0,           # I7 — ICP·변환·overlap 검증까지 통과한 횟수
+            'feat_frames': 0,           # I8 — 피처 추출이 성공한 소나 프레임 수(분모)
+            'feat_points_sum': 0,       # I8 — 그 프레임들의 피처 점 수 합(평균의 분자)
+            'icp_inert': 0,             # I12 — ICP 가 시드에서 1 cm 미만 움직인 횟수
+            'icp_move_rejected': 0,     # I14 — ssm.max_icp_move 게이트로 시드로 되돌린 횟수
+            'warp_attempted': 0,        # I13 — 게이트 기각 후 역워프 재시도를 돌린 횟수(분모)
+            'warp_rescued': 0,          # I13 — 그 재시도가 게이트를 통과시켜 DR 폴백을 막은 횟수
         }
+
+        # 고도계 최신값 (sonar.projection == 'altitude' 의 입력). 없으면 None.
+        self.altitude_m = None
 
         # Mapping initialization (configured in init_node)
         self.mapper = None
@@ -248,6 +290,7 @@ class SLAMNode(Node):
             if keyframe_duration_max_sec > 0.0 else None)
         keyframe_translation = self.get_parameter('keyframe_translation').value
         keyframe_rotation = self.get_parameter('keyframe_rotation').value
+        keyframe_max_ang_vel = self.get_parameter('keyframe_max_angular_vel').value
 
         # Set keyframe criteria in localization module (skip if mapping-only mode)
         if self.localization is not None:
@@ -255,6 +298,7 @@ class SLAMNode(Node):
             self.localization.keyframe_duration_max = keyframe_duration_max
             self.localization.keyframe_translation = keyframe_translation
             self.localization.keyframe_rotation = keyframe_rotation
+            self.localization.keyframe_max_angular_vel = keyframe_max_ang_vel
 
         # noise models (loaded from slam.yaml)
         prior_sigmas = self.get_parameter('slam_prior_noise').value
@@ -313,6 +357,7 @@ class SLAMNode(Node):
                 self.localization.ssm_params.enable = self.get_parameter('ssm.enable').value
             self.localization.ssm_params.min_points = self.get_parameter('ssm.min_points').value
             self.localization.ssm_params.max_translation = self.get_parameter('ssm.max_translation').value
+            self.localization.ssm_params.max_icp_move = self.get_parameter('ssm.max_icp_move').value
             self.localization.ssm_params.max_rotation = self.get_parameter('ssm.max_rotation').value
             self.localization.ssm_params.target_frames = self.get_parameter('ssm.target_frames').value
             self.get_logger().info(f"SSM: {self.localization.ssm_params.enable}")
@@ -336,6 +381,7 @@ class SLAMNode(Node):
         # pairwise consistency maximization parameters for loop closure (loaded from slam.yaml)
         self.fg.pcm_queue_size = self.get_parameter('pcm_queue_size').value
         self.fg.min_pcm = self.get_parameter('min_pcm').value
+        self.fg.pose_refresh_window = self.get_parameter('pose_refresh_window').value
 
     def _init_mappers(self) -> None:
         """Configures and creates the 2D and 3D sonar mappers (loaded from slam.yaml)."""
@@ -463,24 +509,48 @@ class SLAMNode(Node):
                 sonar_tilt_deg = self.get_parameter('sonar.sonar_tilt_deg').value
                 self.localization.oculus.tilt_angle_deg = sonar_tilt_deg
                 self.localization.oculus.tilt_angle_rad = np.deg2rad(sonar_tilt_deg)
+                # 투영 규약도 같이 넘긴다. 이게 없으면 점군만 투영되고 FFT 직교영상은
+                # legacy 로 남아 시드와 점군이 서로 다른 좌표계가 된다.
+                self.localization.oculus.projection = self.get_parameter('sonar.projection').value
 
                 fft_verbose = self.get_parameter('fft_localization.verbose').value
                 fft_erosion = self.get_parameter('fft_localization.trans_erosion_iterations').value
                 fft_gaussian_sigma = self.get_parameter('fft_localization.trans_gaussian_sigma').value
                 fft_gaussian_truncate = self.get_parameter('fft_localization.trans_gaussian_truncate').value
+                fft_remove_radial = self.get_parameter('fft_localization.remove_radial_mean').value
+                fft_use_roi = self.get_parameter('fft_localization.use_roi').value
+                fft_roi_threshold = self.get_parameter('fft_localization.roi_threshold').value
+                fft_rotation_candidates = self.get_parameter('fft_localization.rotation_candidates').value
+                fft_trans_lowpass = self.get_parameter('fft_localization.trans_lowpass').value
+                fft_trans_clahe = self.get_parameter('fft_localization.trans_clahe').value
+                fft_trans_window = self.get_parameter('fft_localization.trans_window').value
+                fft_dft_refine = self.get_parameter('fft_localization.dft_refinement_enable').value
+                fft_rot_tilt_comp = self.get_parameter('fft_localization.rotation_tilt_compensation').value
+                fft_rot_tilt_var = self.get_parameter('fft_localization.rotation_tilt_var_compensation').value
                 self.fft_localizer = FFTLocalizer(
                     oculus=self.localization.oculus,
                     range_min=fft_range_min,
                     verbose=fft_verbose,
                     trans_erosion_iterations=fft_erosion,
                     trans_gaussian_sigma=fft_gaussian_sigma,
-                    trans_gaussian_truncate=fft_gaussian_truncate
+                    trans_gaussian_truncate=fft_gaussian_truncate,
+                    remove_radial_mean=fft_remove_radial,
+                    use_roi=fft_use_roi,
+                    roi_threshold=fft_roi_threshold,
+                    rotation_candidates=fft_rotation_candidates,
+                    rotation_tilt_compensation=fft_rot_tilt_comp,
+                    rotation_tilt_var_compensation=fft_rot_tilt_var,
+                    trans_lowpass=fft_trans_lowpass,
+                    trans_clahe=fft_trans_clahe,
+                    trans_window=fft_trans_window,
+                    dft_refinement_enable=fft_dft_refine
                 )
                 self.get_logger().info(f"FFT localization enabled (tilt={sonar_tilt_deg}°)")
 
                 # FFT validation parameters
                 self.fft_validate = self.get_parameter('fft_localization.validate_with_odom').value
                 self.fft_max_pos_error = self.get_parameter('fft_localization.max_position_error').value
+                self.fft_warp_retry = self.get_parameter('fft_localization.warp_retry').value
                 self.fft_max_rot_error = self.get_parameter('fft_localization.max_rotation_error').value
                 self.fft_use_dr_rotation = self.get_parameter('fft_localization.use_dr_rotation').value
 
@@ -537,6 +607,12 @@ class SLAMNode(Node):
         sonar_msg_type = CompressedImage if self.sonar_compressed else Image
         self.sonar_sub = Subscriber(self, sonar_msg_type, sonar_image_topic, qos_profile=qos_sub_profile)
         self.odom_sub = Subscriber(self, Odometry, odom_topic, qos_profile=qos_sub_profile)
+
+        # 고도계 — sonar.projection == 'altitude' 의 입력이자, 다른 모드에서도
+        # 계측 줄에 실려 투영 오차를 사후에 해석할 수 있게 한다. 동기화 대상이
+        # 아니라 최신값만 들고 있으면 된다(4 Hz, 소나 프레임보다 느리다).
+        self.altitude_sub = self.create_subscription(
+            Range, f'/{vehicle_name}/altitude', self._altitude_callback, qos_sub_profile)
 
         # Add debug prints for topic names
         self.get_logger().info(f"Subscribing to sonar image: {sonar_image_topic} (internal feature extraction)")
@@ -632,8 +708,41 @@ class SLAMNode(Node):
         # Set noise models in factor graph
         self.fg.set_noise_models(prior_model, odom_model, icp_odom_model)
         self.fg.robust_loop_c = self.get_parameter('slam_loop_robust_c').value
+        self.fg.loop_along_sigma_scale = self.get_parameter('slam_loop_along_sigma_scale').value
 
-    def validate_fft_with_odom(self, fft_result: dict, dr_transform):
+    def _fft_warp_retry(self, polar_prev, polar_curr, fft_result):
+        """게이트가 기각한 쌍에 역워프 1 패스를 주고 재추정한다.
+
+        1 패스 추정 (tx, ty, dyaw) 로 프레임2 를 프레임1 격자에 되감으면 두 영상이
+        대략 겹친다. 남은 회전을 다시 풀어 누적하고, **병진은 원본 직교영상에서**
+        그 회전으로 다시 푼다 — 워프된 영상에서 잰 병진을 합성하면 오차가 쌓인다.
+
+        오프라인 188 쌍 실측: 게이트 기각 32 쌍 중 12 (38%) 가 통과로 바뀌고,
+        통과 156 쌍 중 4 (2.6%) 만 반대로 간다. 그래서 기각쌍에만 쓴다.
+
+        Returns:
+            새 estimate_transform 결과 dict, 또는 재추정이 실패하면 None.
+        """
+        self.instr['warp_attempted'] += 1
+        try:
+            warped = self.fft_localizer.polar_warp(
+                polar_curr,
+                fft_result['translation'][0],
+                fft_result['translation'][1],
+                fft_result['rotation'])
+            res2 = self.fft_localizer.estimate_transform(polar_prev, warped)
+            if not res2['success']:
+                return None
+            rot2 = fft_result['rotation'] + res2['rotation']
+            retried = self.fft_localizer.estimate_transform(
+                polar_prev, polar_curr, rotation_override=rot2)
+            return retried if retried['success'] else None
+        except Exception as e:
+            self.get_logger().warn(f"FFT warp retry failed: {e}",
+                                   throttle_duration_sec=2.0)
+            return None
+
+    def validate_fft_with_odom(self, fft_result: dict, dr_transform, count: bool = True):
         """
         Validate FFT result against dead reckoning odometry.
 
@@ -683,9 +792,11 @@ class SLAMNode(Node):
         # 그게 실측되면 17% 기각의 분모와 사유가 확정된다.
         # 키를 f-string 으로 만들지 않는 이유는 두 가지다 — 선언에 없는 사유가
         # 추가되면 KeyError 로 죽고, 정적 검증(테스트)이 닿지 않는다.
-        if 'pos' in info['reasons']:
+        # count=False 는 역워프 재시도의 재검증이다 — 기각 카운터는 1 패스 기준을
+        # 유지해야 `warp_rescued` 의 분모(reject_*)가 과거 런과 비교 가능하다.
+        if count and 'pos' in info['reasons']:
             self.instr['reject_pos'] += 1
-        if 'rot' in info['reasons']:
+        if count and 'rot' in info['reasons']:
             self.instr['reject_rot'] += 1
 
         # I7~I10 — 판정에 쓰지 않고 기록만 하는 값들. FFT 가 이미 계산해 반환
@@ -730,6 +841,10 @@ class SLAMNode(Node):
         # (ICP, mapping, keyframe 판단 등에 모두 필요 - 항상 수행)
         try:
             points = self.feature_extractor.extract_features(sonar_msg)
+            # I8 — 프레임당 피처 수의 평균을 카운터 줄에 싣는다. 위의 info 로그는
+            # 1 Hz throttle 이라 CFAR 설정 비교의 분모로 쓸 수 없다.
+            self.instr['feat_frames'] += 1
+            self.instr['feat_points_sum'] += len(points)
             self.get_logger().info(
                 f"Callback: extracted {len(points)} features",
                 throttle_duration_sec=1.0
@@ -771,6 +886,8 @@ class SLAMNode(Node):
         time = sonar_msg.header.stamp
         dr_pose3 = r2g(odom_msg.pose.pose)
         frame = Keyframe(False, time, dr_pose3)
+        # is_keyframe() 의 모션블러 조건이 twist 를 읽으므로 판정 **전에** 채운다.
+        frame.twist = odom_msg.twist.twist
 
         # Check if valid points (feature extraction may return empty on skip frames)
         if len(points) == 0 or (len(points) > 0 and np.isnan(points[0, 0])):
@@ -781,9 +898,6 @@ class SLAMNode(Node):
             else:
                 # In mapping-only mode, use simple time-based keyframe decision
                 frame.status = True
-
-        # Set frame twist
-        frame.twist = odom_msg.twist.twist
 
         # Update keyframe pose from dead reckoning
         if self.fg.keyframes:
@@ -827,6 +941,20 @@ class SLAMNode(Node):
                             # Get DR transform between keyframes
                             dr_transform = self.fg.current_keyframe.dr_pose.between(frame.dr_pose)
                             fft_valid, val_info = self.validate_fft_with_odom(fft_result, dr_transform)
+
+                            # 게이트가 기각했다. DR 로 버리기 전에 역워프 1 패스를 준다 —
+                            # 1 패스 추정을 되감아 두 영상을 겹친 뒤 남은 회전을 다시 풀고,
+                            # 그 회전으로 원본에서 병진을 재추정한다. 오프라인 188 쌍에서
+                            # 기각쌍의 38% 가 구제됐고 통과쌍은 건드리지 않는다(finding/023).
+                            if not fft_valid and self.fft_warp_retry:
+                                retried = self._fft_warp_retry(
+                                    polar_prev, polar_curr, fft_result)
+                                if retried is not None:
+                                    ok2, info2 = self.validate_fft_with_odom(
+                                        retried, dr_transform, count=False)
+                                    if ok2:
+                                        fft_result, fft_valid, val_info = retried, True, info2
+                                        self.instr['warp_rescued'] += 1
 
                         if fft_valid:
                             # FFT valid - use FFT result
@@ -1240,6 +1368,18 @@ class SLAMNode(Node):
         if ret2.status:
             init_norm = float(np.linalg.norm(ret2.initial_transform.translation()))
             est_norm = float(np.linalg.norm(ret2.estimated_transform.translation()))
+            # I12 — ICP 가 시드에서 실제로 얼마나 움직였는가(m). 부정행위 감사용이다:
+            # 대응 필터를 조이면 ICP 가 시드를 그대로 돌려주는 상태로 수렴할 수 있는데,
+            # 시드의 대부분이 DR fallback 이라 그 상태의 궤적은 사실상 DR 궤적이다.
+            # ratio 만 보면 1.0 에 가까워져 '좋아졌다'로 읽힌다.
+            ret2.estimated_transform, move, rejected = self.localization.gate_icp_move(
+                ret2.initial_transform, ret2.estimated_transform,
+                self.localization.ssm_params.max_icp_move)
+            if rejected:
+                self.instr['icp_move_rejected'] += 1   # I14
+                est_norm = init_norm
+            if move < 0.01:
+                self.instr['icp_inert'] += 1
             if init_norm > 1e-6:
                 # 시드 출처는 세 가지다. `fft_seeded` 가드 없이 seed_is_dr 만 보면
                 # FFT 를 아예 안 쓴 경우(`fft_localization.enable: false`, FFT 실패)
@@ -1250,9 +1390,30 @@ class SLAMNode(Node):
                     seed_src = 'dr'        # FFT 가 DR fallback 을 시드로 넘겼다
                 else:
                     seed_src = 'fft'
+                # I13 — 진실 대비 척도. 위의 ratio 는 ICP 를 **자기 시드와** 견주므로
+                # 시드가 이미 짧으면 1.0 근처로 건강해 보인다(실제로 그랬다:
+                # 중앙 0.9949 인데 종단 궤적은 GT 의 0.846). DR 포즈는 시뮬에서
+                # 무노이즈 ground truth 이므로 그 상대병진이 진실 기준이다 —
+                # 이 두 값이 어느 단계가 병진을 먹는지를 가른다.
+                dr_t = ret.target_pose.between(ret.source_pose).translation()
+                dr_norm = float(np.linalg.norm(dr_t))
+                # I14 — 노름 비(seed_gt/icp_gt)는 방향을 지운다. 벡터 오차를 같이 남겨
+                # ICP 가 시드보다 진실에 가까워졌는지를 스텝 단위로 판정할 수 있게 한다.
+                seed_err = float(np.linalg.norm(dr_t - ret2.initial_transform.translation()))
+                icp_err = float(np.linalg.norm(dr_t - ret2.estimated_transform.translation()))
+                if dr_norm > 1e-6:
+                    seed_gt = f"{init_norm / dr_norm:.4f}"
+                    icp_gt = f"{est_norm / dr_norm:.4f}"
+                else:
+                    seed_gt = icp_gt = "nan"
                 self.get_logger().info(
                     f"[INSTR] scale init={init_norm:.4f} est={est_norm:.4f} "
-                    f"ratio={est_norm / init_norm:.4f} seed={seed_src}"
+                    f"move={move:.4f} "
+                    f"ratio={est_norm / init_norm:.4f} seed={seed_src} "
+                    f"dr={dr_norm:.4f} seed_gt={seed_gt} icp_gt={icp_gt} "
+                    f"seed_err={seed_err:.4f} icp_err={icp_err:.4f} rej={int(rejected)} "
+                    f"ex={float(ret2.estimated_transform.translation()[0] - dr_t[0]):+.4f} "
+                    f"ey={float(ret2.estimated_transform.translation()[1] - dr_t[1]):+.4f}"
                 )
 
         # ICP validation — verify transform is reasonable
@@ -1303,8 +1464,16 @@ class SLAMNode(Node):
 
         self._log_instrumentation()
 
+    def _altitude_callback(self, msg: Range) -> None:
+        """고도계 최신값을 보관한다. FFT 는 oculus 를 통해 같은 값을 본다."""
+        if not np.isfinite(msg.range) or msg.range <= 0.0:
+            return
+        self.altitude_m = float(msg.range)
+        if self.localization is not None:
+            self.localization.oculus.altitude_m = self.altitude_m
+
     def _log_instrumentation(self) -> None:
-        """계측 카운터 한 줄 요약 (I1~I6).
+        """계측 카운터 한 줄 요약 (I1~I7).
 
         키프레임마다 나가므로 `grep '\\[INSTR\\] counters'` 로 시계열을 그대로 뽑을
         수 있다. `ssm_disabled` 는 `Localization` 이 세므로 여기서 읽어 온다 — 이
@@ -1321,7 +1490,18 @@ class SLAMNode(Node):
             f"factor_icp={i['icp_factor_added']} factor_odom={i['odom_factor_fallback']} "
             f"ssm_init_failed={i['ssm_init_failed']} "
             f"seed_fft={i['seed_fft']} seed_dr={i['seed_dr_fallback']} "
-            f"reject_pos={i['reject_pos']} reject_rot={i['reject_rot']}"
+            f"reject_pos={i['reject_pos']} reject_rot={i['reject_rot']} "
+            f"warp={i['warp_rescued']}/{i['warp_attempted']} "
+            f"nssm_attempted={i['nssm_attempted']} nssm_init_ok={i['nssm_init_ok']} "
+            f"nssm_icp_ok={i['nssm_icp_ok']} "
+            f"pcm_accepted={getattr(self.fg, 'pcm_inserted_count', -1)} "
+            f"feat_mean={(i['feat_points_sum'] / i['feat_frames']) if i['feat_frames'] else float('nan'):.1f} "
+            f"feat_frames={i['feat_frames']} "
+            f"proj={getattr(self.feature_extractor, 'projection', '?')} "
+            f"alt={self.altitude_m if self.altitude_m is not None else float('nan'):.2f} "
+            f"proj_drop={getattr(self.feature_extractor, 'proj_dropped', -1)} "
+            f"alt_missing={getattr(self.feature_extractor, 'proj_alt_missing', -1)} "
+            f"icp_inert={i['icp_inert']} icp_move_rej={i['icp_move_rejected']}"
         )
 
     def add_nonsequential_scan_matching(self) -> bool:
@@ -1335,10 +1515,12 @@ class SLAMNode(Node):
             return False
 
         # Initialize NSSM
+        self.instr['nssm_attempted'] += 1
         ret = self.localization.initialize_nonsequential_scan_matching()
 
         if not ret.status:
             return False
+        self.instr['nssm_init_ok'] += 1
 
         # Create ICP result
         ret2 = ICPResult(ret, self.localization.nssm_params.cov_samples > 0)
@@ -1395,6 +1577,21 @@ class SLAMNode(Node):
 
         # Add to loop closure queue for PCM verification
         if ret2.status:
+            self.instr['nssm_icp_ok'] += 1
+            # I15 — 루프폐합 ICP 의 시드/결과를 DR(시뮬 GT) 상대포즈와 견준다. 순차 ICP 의
+            # 전진 미끄러짐이 루프 인자에도 있으면 그래프 층 압축의 원인이다.
+            skf, tkf = self.fg.keyframes[ret2.source_key], self.fg.keyframes[ret2.target_key]
+            gt_t = tkf.dr_pose.between(skf.dr_pose).translation()
+            it, et = ret2.initial_transform.translation(), ret2.estimated_transform.translation()
+            self.get_logger().info(
+                f"[INSTR] loop src={ret2.source_key} tgt={ret2.target_key} "
+                f"gt={np.linalg.norm(gt_t):.3f} init={np.linalg.norm(it):.3f} est={np.linalg.norm(et):.3f} "
+                f"move={np.linalg.norm(et - it):.3f} seed_err={np.linalg.norm(gt_t - it):.3f} "
+                f"icp_err={np.linalg.norm(gt_t - et):.3f} "
+                f"ex={float(et[0] - gt_t[0]):+.3f} ey={float(et[1] - gt_t[1]):+.3f} "
+                f"sx={float(it[0] - gt_t[0]):+.3f} sy={float(it[1] - gt_t[1]):+.3f} "
+                f"cxx={float(np.sqrt(ret2.cov[0, 0])) if ret2.cov is not None else float('nan'):.3f} "
+                f"cyy={float(np.sqrt(ret2.cov[1, 1])) if ret2.cov is not None else float('nan'):.3f}")
             self.fg.add_loop_closure(ret2)
             return True
 

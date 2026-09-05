@@ -48,6 +48,13 @@ def umeyama_se2(src_xy: np.ndarray, dst_xy: np.ndarray):
     return R, t
 
 
+def polyline_length_2d(xy: np.ndarray) -> float:
+    """Summed 2D segment length of a polyline. NaN below two points."""
+    if xy is None or xy.shape[0] < 2:
+        return float("nan")
+    return float(np.linalg.norm(np.diff(xy[:, :2], axis=0), axis=1).sum())
+
+
 def point_to_polyline_min_dist_2d(p_xy: np.ndarray, A: np.ndarray, V: np.ndarray, VV: np.ndarray) -> float:
     w = p_xy.reshape(1, 2) - A
     t = (w[:, 0] * V[:, 0] + w[:, 1] * V[:, 1]) / VV
@@ -162,9 +169,17 @@ class TrajPathGtAteMonitor(Node):
         # traveled distance
         self.total_distance = 0.0
         self.last_gt_xy_global: Optional[Tuple[float, float]] = None
+        # SLAM polyline length at the moment GT accumulation started. The two
+        # must span the same stretch of the run: GT starts at the first traj
+        # message whose TF lookup succeeds, and if that happens late (the TF
+        # source joining mid-run, say) the trajectory already has length the
+        # denominator never saw. Measured once: a bridge started 2 min into a
+        # replay reported len_ratio 79.3.
+        self.slam_dist_at_gt_start: Optional[float] = None
 
         # Counters
         self.traj_msgs = 0
+        self.gt_lookup_misses = 0
 
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -212,6 +227,17 @@ class TrajPathGtAteMonitor(Node):
 
         gt_xyz = self._lookup_gt_in_traj_frame(msg, traj_frame)
         if gt_xyz is None:
+            # Say so once. Without this the node simply never logs: every metric
+            # below lives after this return, so a missing GT frame is
+            # indistinguishable from a node that was never launched. A bag
+            # recorded without /tf (remapped away by a top-level launch, say)
+            # lands here for the whole run.
+            self.gt_lookup_misses += 1
+            if self.gt_lookup_misses == 20 and self.gt_samples == 0:
+                self.get_logger().warn(
+                    f"no transform {traj_frame} <- {self.gt_frame} after 20 trajectory "
+                    "messages — accuracy metrics will stay silent for this run"
+                )
             return
 
         # ---- (A) GT instant error + Acc@r_gt ----
@@ -240,6 +266,28 @@ class TrajPathGtAteMonitor(Node):
         # ---- (C) Path metric ----
         mean_err_path, acc_path = self._compute_path_metric(traj_frame, msg, pts_xyz)
 
+        # ---- (D) Estimated path length vs GT ----
+        # Nothing else in the pipeline measures the length of the SLAM
+        # trajectory itself: `scale ratio` in slam.py is ICP-vs-seed, and
+        # total_distance above accumulates GT. Inter-keyframe translation
+        # coming out short is therefore invisible in the logs even though it
+        # is visible in RViz. A stride > 1 skips trajectory points and would
+        # undercount the polyline, so only report it at stride 1.
+        if self.keyframe_stride == 1:
+            slam_dist = polyline_length_2d(pts_xyz)
+        else:
+            slam_dist = float("nan")
+        if self.slam_dist_at_gt_start is None:
+            # 0.0 when the trajectory is still a single point: GT starts
+            # accumulating on THIS sample, so the offset has to be taken on it
+            # too. Waiting for a non-NaN length takes it one sample late and
+            # biases the ratio low by that first segment for the rest of the run.
+            self.slam_dist_at_gt_start = 0.0 if math.isnan(slam_dist) else slam_dist
+        if self.total_distance > self.distance_epsilon and self.slam_dist_at_gt_start is not None:
+            len_ratio = (slam_dist - self.slam_dist_at_gt_start) / self.total_distance
+        else:
+            len_ratio = float("nan")
+
         if self.log_every_n and (self.traj_msgs % self.log_every_n == 0):
             self.get_logger().info(
                 f"err_gt={err_gt:.3f}m | "
@@ -247,6 +295,7 @@ class TrajPathGtAteMonitor(Node):
                 f"Acc_gt@{self.r_gt_024:.3f}m={acc_gt_024:.2f}% | "
                 f"ATE_RMSE={ate_rmse:.3f}m | drift_window={drift_window:.3f}% | "
                 f"acc_window={acc_window:.3f}% | dist_total={self.total_distance:.1f}m | "
+                f"dist_slam={slam_dist:.1f}m | len_ratio={len_ratio:.4f} | "
                 f"mean_err_path={mean_err_path:.3f}m | Acc_path@{self.r_path:.3f}m={acc_path:.2f}%"
             )
 
@@ -313,8 +362,10 @@ class TrajPathGtAteMonitor(Node):
         # the opposite of what a sea-trial evaluation needs. Use the GT path
         # length over the window instead. With ate_window_size == 0 the deques
         # are unbounded and this equals the whole-run distance.
-        gt_path_length = float(np.linalg.norm(np.diff(dst, axis=0), axis=1).sum())
-        if gt_path_length <= self.distance_epsilon:
+        gt_path_length = polyline_length_2d(dst)
+        # `not (x > eps)` rather than `x <= eps` so a NaN length (fewer than two
+        # samples) also takes the undefined branch instead of poisoning clamp().
+        if not (gt_path_length > self.distance_epsilon):
             # Drift-per-distance is undefined when the window covers no motion
             # (station keeping). The old cumulative denominator hid this because
             # it never shrank; clamping instead would report a confident 0%

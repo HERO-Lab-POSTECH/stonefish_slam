@@ -41,6 +41,14 @@
       # The .scn <origin rpy> roll is measured from nadir instead: tilt = 90° − roll.
       # test_sonar_tilt_matches_sim_scenario.py holds the two repos to the same value.
       sonar_tilt_deg: 30.0
+      # 경사거리 → 수평거리 투영. ICP 점군과 FFT 직교영상이 같은 규약을 쓴다.
+      #   legacy       기존 동작 — 점군은 r 그대로, FFT 는 r·cos(tilt). 병진이 압축된다.
+      #   inv_cos_tilt r / cos(tilt). 틸트 근처에서만 맞는 상수 근사.
+      #   altitude     sqrt(r² − h²), h = /{vehicle}/altitude. 평평한 바닥에서 정확.
+      # 정본 설명은 core/feature_extraction.py:_project_range.
+      # tilt30 프로그램 확정값 — legacy 대비 bag 재생 2D mean err 19.888 → 2.741 m.
+      # 개선을 만든 두 파라미터 중 하나다(다른 하나는 icp.yaml 의 trim ratio).
+      projection: altitude
 
     # ==================== Feature extraction (CFAR, internal to slam_node) ====================
     CFAR:
@@ -65,9 +73,15 @@
     keyframe_duration_max: 0.0    # s; > 0 forces a keyframe even if the thresholds below never trip (real bags)
     keyframe_translation: 1.0     # m
     keyframe_rotation: 0.174533   # rad (10°)
+    keyframe_max_angular_vel: 0.0 # rad/s. 선회 중 흐린 프레임을 키프레임에서 뺀다. 0 = 끔.
+                                  # 이 조건은 2026-09-02 까지 죽어 있었다 — slam.py 가
+                                  # is_keyframe() 를 부른 뒤에야 frame.twist 를 채워서
+                                  # 항상 None 이었다. 대입 순서를 고쳐 되살렸고, 옛 하드코딩
+                                  # 값 0.1(~5.7°/s)은 검증된 적이 없으므로 기본값은 끔이다.
     slam_prior_noise: [0.1, 0.1, 0.01]  # [x_sigma_m, y_sigma_m, theta_sigma_rad] initial pose
     slam_odom_noise: [0.2, 0.2, 0.02]   # dead-reckoning factor
     slam_icp_noise: [0.1, 0.1, 0.01]    # ICP factor
+    slam_loop_along_sigma_scale: 1.0    # 루프 인자 공분산의 전진축 표준편차 배율. 1.0 = off
     slam_loop_robust_c: 3.0             # Cauchy robust kernel c, loop-closure (NSSM) factors only
     point_downsample_resolution: 0.5    # voxel leaf size (m) for ICP / publishing
 
@@ -78,6 +92,7 @@
       min_points: 50         # min points to attempt SSM
       max_translation: 3.0   # m, rejection gate
       max_rotation: 0.5236   # rad (30°), rejection gate
+      max_icp_move: 0.0      # m; ICP 결과가 FFT 시드에서 이보다 멀면 시드로 되돌림. 0 = off
       target_frames: 3       # previous keyframes the current frame is matched against
 
     # ==================== Loop closure (NSSM) + pairwise consistency (PCM) ====================
@@ -91,7 +106,8 @@
       cov_samples: 30        # 0 = skip covariance sampling (slow on real data)
       try_interval: 1        # try a loop closure every N keyframes
     pcm_queue_size: 5        # PCM sliding window
-    min_pcm: 3               # min pairwise-consistent loop closures to accept
+    min_pcm: 4               # min pairwise-consistent loop closures to accept (finding/048)
+    pose_refresh_window: 10  # trailing keyframes refreshed from ISAM2 per tick; <=0 = full history
 
     # ==================== FFT localization (rotation/translation seed for ICP) ====================
     fft_localization:
@@ -103,8 +119,42 @@
       trans_gaussian_truncate: 3.0
       # Validation against odometry (dead reckoning)
       validate_with_odom: true
-      max_position_error: 0.5        # m
-      max_rotation_error: 0.0872665  # rad (5.000° — the value, not an old "~20°" comment, is the truth)
+      max_position_error: 0.25       # m — tilt30 프로그램 확정값. 거리 분해능 0.08 m/bin 의 약 3 bin
+      max_rotation_error: 0.174533   # rad (10.000° — the value, not an old "~20°" comment, is the truth)
+      remove_radial_mean: false      # true: 극좌표 행 평균(몸체 고정 거리 띠)을 빼고 상관한다
+      use_roi: false                 # true: 상관 전에 내용이 있는 사각형으로 두 영상을 함께 자른다.
+                                     # tilt 30° 직교영상 497행 중 바닥 반사는 약 86행뿐이고 나머지는
+                                     # 0-shift 성분만 보탠다. 박스가 두 영상에 같아 상대 변위는 불변.
+      roi_threshold: 10.0            # ROI 판정 강도 하한 (mono8 0-255). mapping_2d 와 같은 기준.
+      warp_retry: true               # 게이트가 기각한 쌍에만 역워프 1패스를 주고 재검증.
+                                     # 오프라인 188쌍에서 기각쌍의 38% 가 구제됐고 통과쌍은
+                                     # 건드리지 않는다(finding/023). 켜면 기각쌍 한정으로
+                                     # 쌍당 비용 약 5% 증가.
+      rotation_tilt_compensation: false   # 컬럼→요각 환산에서 cos(tilt) 를 되돌릴지
+      rotation_tilt_var_compensation: true # 위 보정을 켤 때 분산도 1/cos²τ 배 할지(진단용 off)
+      trans_lowpass: 0.5             # 병진 위상상관의 교차스펙트럼에 거는 저역통과.
+                                     # 정규화 반경(0..~1.41) 이 이 값 이하만 남긴다. 0=끔.
+                                     # 고주파 스페클을 죽인다 — tilt 30° 오프라인 188쌍에서
+                                     # 0.50 이 게이트 83.0→89.9%, 중앙 0.152→0.132 m.
+                                     # 대역통과의 저주파 쪽(lo)은 효과 0 이라 노출하지 않는다.
+      trans_clahe: false             # 병진 상관 전 CLAHE. false 가 오프라인에서 소폭 유리.
+      trans_window: 'hann'           # 병진 상관 전 창함수. '' 또는 'hann'.
+                                     # ⚠️ 위 셋은 병진 경로 전용 — 회전 경로에는 안 걸린다.
+      dft_refinement_enable: false   # 상관 피크의 upsampled-DFT 서브픽셀 보정. false 면 포물선 적합까지만.
+                                     # 끄는 쪽이 이긴다 — shallow bag 각 팔 4복제에서 reject_pos 중앙
+                                     # 18→12(완전 분리 p=0.014) · featF 10565→10867(+2.9%, 완전 분리)
+                                     # · DR 폴백 1.22→0.50%(Fisher p=0.030). 궤적 오차는 동률.
+                                     # 기전: 업샘플 DFT 가 피크가 애매한 쌍에서 잡음 봉우리를 따라가
+                                     # 꼬리를 키운다 — 중앙값은 그대로인데 p75 만 움직인 게 그 서명이다.
+      rotation_candidates: 9         # 극좌표 상관면에서 시험할 회전 가설 수. 각 가설로 병진을 풀고
+                                     # 병진 상관 피크가 가장 강한 것을 채택한다. 1 이면 전역 최대만
+                                     # 쓰는 옛 동작 — tilt 30° 에서 전역 최대가 정답인 쌍은 43% 뿐이다.
+                                     # 비용은 K 에 선형(병진 상관 K 회). 근거는 finding/019.
+                                     # ⚠️ K=15 는 오프라인에서 더 좋지만(tilt30 게이트 89.4→92.0%)
+                                     # 온라인에서는 동률이고 featF 만 −15% 다 — 비용이 프레임을
+                                     # 버리게 하고 버려진 프레임이 키프레임 간격을 벌려 이득을
+                                     # 상쇄한다. 오프라인 하네스는 고정 쌍 집합이라 이 되먹임을
+                                     # 못 본다. 근거는 finding/027 — 올리기 전에 그걸 읽을 것.
       use_dr_rotation: false         # false: FFT estimates rotation too; true: rotation from DR, FFT supplies translation only
 
     # ==================== 2D mapping (occupancy grid) ====================

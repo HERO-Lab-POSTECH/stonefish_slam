@@ -11,8 +11,10 @@ matcher:
 outlierFilters:
   - MaxDistOutlierFilter:
       maxDist: 3.0
+  # tilt30 프로그램 확정값. 0.8 → 0.4 로 조인 것이 altitude 투영과 함께 개선을 만든
+  # 두 파라미터의 나머지 하나다. 0.3·0.5·0.6·0.7 은 전부 동률이거나 악화였다.
   - TrimmedDistOutlierFilter:
-      ratio: 0.8
+      ratio: 0.4
 
 errorMinimizer:
   # PointToPlaneErrorMinimizer:
@@ -24,7 +26,12 @@ transformationCheckers:
       maxIterationCount: 40
   - DifferentialTransformationChecker:
       minDiffRotErr: 0.01
-      minDiffTransErr: 0.1
+      # 2026-09-04: 0.1 -> 0.01. 0.1 m 는 ICP 가 FFT 씨앗에서 거의 못 움직이고
+      # 조기 종료하게 만들었다 — 임계값을 낮추자 icp_move q3 가 0.052 -> 0.129 m
+      # (2.5 배) 로 늘었다. shallow bag 복제 2 런에서 ATE 2.33 / 2.67, 2D mean
+      # 2.32 / 2.82 로 직전 기준선 (ATE 3.07 / 3.08, 2D 2.95 / 2.88) 과 겹치지
+      # 않게 개선됐고 DR 폴백은 0.28 % 로 악화 없음.
+      minDiffTransErr: 0.01
       smoothLength: 4   
 
 inspector:
