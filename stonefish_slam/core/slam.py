@@ -1593,6 +1593,12 @@ class SLAMNode(Node):
                 f"cxx={float(np.sqrt(ret2.cov[0, 0])) if ret2.cov is not None else float('nan'):.3f} "
                 f"cyy={float(np.sqrt(ret2.cov[1, 1])) if ret2.cov is not None else float('nan'):.3f}")
             self.fg.add_loop_closure(ret2)
+            # I16 (proposal L1) — PCM **이후** 시점. `[INSTR] loop` 는 검증 전이라
+            # 어느 후보가 살아남았는지 알 수 없다. (src, tgt) 로 두 줄을 이어 붙인다.
+            for s_k, t_k, clq, acc, ins in getattr(self.fg, 'last_pcm_rows', []):
+                self.get_logger().info(
+                    f"[INSTR] pcm src={s_k} tgt={t_k} clique={clq} "
+                    f"accepted={acc} inserted={ins}")
             return True
 
         return False

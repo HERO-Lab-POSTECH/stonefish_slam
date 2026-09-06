@@ -54,6 +54,11 @@ class FactorGraph:
 
         # 계측 (I7) — PCM 이 실제로 그래프에 넣은 루프 팩터 수. 판정에 쓰이지 않는다.
         self.pcm_inserted_count = 0
+        # I16 (proposal L1) — verify_pcm 이 채운다. 큐 인덱스 → 그 후보를 담은 가장 큰
+        # 극대 클리크의 크기. -1 은 "그래프를 안 만들었다"(큐가 min_pcm 미만이라 조기
+        # 반환). 로깅 전용이며 판정에 쓰이지 않는다.
+        self.last_clique_size = []
+        self.last_pcm_rows = []
 
         # Robust cost parameter for loop closure (NSSM) factors only.
         # Cauchy kernel: c=3.0 means "down-weight at ~3σ" (conservative).
@@ -300,6 +305,18 @@ class FactorGraph:
         # Verify PCM
         pcm_indices = self.verify_pcm(self.nssm_queue, self.min_pcm)
 
+        # I16 (proposal L1) — 이 호출에서 큐에 있던 후보 전부의 (src, tgt, clique,
+        # accepted, inserted). accepted 는 최대 클리크에 들었다는 뜻이고 inserted 는
+        # 이번 호출에서 실제로 인자가 들어갔다는 뜻이다(이미 들어간 것은 0).
+        # 방출은 slam.py 가 한다 — core 층에는 로거가 없다.
+        accepted = set(pcm_indices)
+        self.last_pcm_rows = [
+            (r.source_key, r.target_key,
+             self.last_clique_size[k] if k < len(self.last_clique_size) else -1,
+             int(k in accepted), int(k in accepted and not r.inserted))
+            for k, r in enumerate(self.nssm_queue)
+        ]
+
         # Add verified loop closures to graph
         for idx in pcm_indices:
             ret = self.nssm_queue[idx]
@@ -334,6 +351,9 @@ class FactorGraph:
         Returns:
             List of indices in queue that form maximum clique
         """
+        # I16 — 후보별 클리크 크기 기록을 초기화한다(로깅 전용).
+        self.last_clique_size = [-1] * len(queue)
+
         if len(queue) < min_pcm_value:
             return []
 
@@ -376,6 +396,14 @@ class FactorGraph:
 
         # Find maximal cliques
         maximal_cliques = list(self.find_cliques(G))
+
+        # I16 — 각 후보가 속한 가장 큰 극대 클리크의 크기. 어느 클리크에도 없으면 0.
+        # min_pcm 이 개수를 줄이는지 부류를 거르는지 가르는 유일한 관측이다.
+        self.last_clique_size = [0] * len(queue)
+        for clq in maximal_cliques:
+            for idx in clq:
+                if idx < len(self.last_clique_size):
+                    self.last_clique_size[idx] = max(self.last_clique_size[idx], len(clq))
 
         if not maximal_cliques:
             return []
