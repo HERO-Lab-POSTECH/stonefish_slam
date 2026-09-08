@@ -78,6 +78,10 @@ All notable changes to this project will be documented in this file.
   도 같은 파일을 읽을 수 있게 됐다(전엔 노드명이 달라 dict 로만 받았다). 2D standalone 은
   항상 쓰던 0.1 m/px 를 launch 오버라이드로 유지(slam_node 의 0.2 는 메시지 크기 상한).
   3D standalone launch 의 bare `update_method` 키(선언 안 돼 조용히 버려짐)도 정정
+  (같은 파일이 `default_update_method` 를 아직 `slam_node` 키로 읽고 있었다 — `.get()`
+  체인이라 예외 없이 폴백 `'log_odds'` 로 떨어져 yaml 의 `iwlo` 가 무시됐다. 직접
+  인덱싱으로 바꿔 키가 어긋나면 KeyError 로 터지게 하고, `test_mapping_3d_param_wiring.py`
+  가 launch 전체에서 옛 루트 키 참조를 금지한다)
 - **거짓말하던 설정 두 건을 살린다**: `mapping_2d.map_2d_resolution` 은 yaml 이 0.1 을
   광고했지만 아무도 읽지 않았고 `slam.py` 가 0.2 를 하드코딩했다 — 이제 파라미터를
   읽고 yaml 값은 실제 값 0.2(동작 불변). `mapping_3d.propagation_radius/sigma` 는 선언만

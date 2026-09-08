@@ -250,3 +250,26 @@ def test_ray_processor_default_matches_the_python_default():
         reason="ray_processor extension not staged",
     )
     assert ray_processor.RayProcessorConfig().gaussian_sigma_factor == pytest.approx(2.5)
+
+
+def test_no_launch_file_reads_the_yaml_by_the_old_root_key():
+    """config/slam.yaml 의 루트는 `/**` — `slam_node` 로 읽으면 조용히 폴백으로 떨어진다.
+
+    config 6 → 1 통합에서 루트 키가 `slam_node:` 에서 `/**:` 로 바뀌었다.
+    `.get('slam_node', {})` 는 예외 없이 `{}` 를 내므로 뒤따르는 폴백 기본값이
+    yaml 의 실제 값을 조용히 이긴다 — mapping_3d_standalone 에서 실제로
+    `update_method` 가 'iwlo' 대신 'log_odds' 로 떨어졌다.
+
+    값이 아니라 *읽는 경로* 를 가드한다. launch 파일은 import 시점에
+    get_package_share_directory 를 부르므로 테스트에서 로드할 수 없다.
+    """
+    offenders = []
+    for launch_file in sorted((REPO_ROOT / "launch").glob("*.launch.py")):
+        source = launch_file.read_text()
+        for pattern in ("get('slam_node'", 'get("slam_node"',
+                        "['slam_node']", '["slam_node"]'):
+            if pattern in source:
+                offenders.append(f"{launch_file.name}: {pattern}")
+    assert not offenders, (
+        "launch 가 yaml 을 옛 루트 키로 읽는다 (루트는 `/**`): " + ", ".join(offenders)
+    )
