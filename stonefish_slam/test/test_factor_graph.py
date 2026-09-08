@@ -443,3 +443,91 @@ def test_verify_pcm_mahalanobis_solve_matches_inv(load_factor_graph):
     assert np.isclose(md_inv, md_solve, rtol=1e-9), (
         f"inv and solve quadratic forms must match: {md_inv} vs {md_solve}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 5: pose refresh window (which keyframes get ISAM2's estimate written back)
+# ---------------------------------------------------------------------------
+
+
+class _FakeEstimateISAM:
+    """Delegates to the real ISAM2 but returns a known estimate.
+
+    The real optimizer barely moves old poses on a clean odometry chain, so the
+    refresh window would be unobservable against it. Substituting the estimate
+    isolates the window's selection logic, which is what these tests cover.
+    gtsam's pybind11 object rejects attribute assignment, hence a wrapper.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def calculateEstimate(self):
+        v = gtsam.Values()
+        for i in range(self._inner.calculateEstimate().size()):
+            v.insert(gtsam.symbol('x', i), gtsam.Pose2(1000.0 + i, 0.0, 0.0))
+        return v
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+def _fg_with_chain(load_factor_graph, n):
+    """A prior + n-1 odometry keyframes, all registered in ISAM2."""
+    fg = _make_fg(load_factor_graph)
+    kf0 = _keyframe(load_factor_graph, 0, 0.0)
+    fg.add_prior_factor(kf0)
+    fg.update_graph(kf0)
+    for i in range(1, n):
+        kf = _keyframe(load_factor_graph, i, float(i))
+        fg.add_odometry_factor(kf)
+        fg.update_graph(kf)
+    return fg
+
+
+def _refresh_with_window(load_factor_graph, window, n=15):
+    """Feed update_graph a fabricated estimate and report which keyframes moved.
+
+    The real ISAM2 barely moves old poses on a clean odometry chain, so the
+    window itself would be unobservable. Substituting the estimate isolates the
+    selection logic, which is the thing under test.
+    """
+    fg = _fg_with_chain(load_factor_graph, n)
+    fg.pose_refresh_window = window
+    before = [kf.pose.x() for kf in fg.keyframes]
+
+    fg.isam = _FakeEstimateISAM(fg.isam)
+    kf = _keyframe(load_factor_graph, n, float(n))
+    fg.add_odometry_factor(kf)
+    fg.update_graph(kf)
+    return [i for i, b in enumerate(before) if fg.keyframes[i].pose.x() != b]
+
+
+def test_pose_refresh_window_leaves_old_keyframes_stale(load_factor_graph):
+    """The default window writes ISAM2's estimate back to the tail only, so an
+    older keyframe keeps whatever pose it had — this is what makes NSSM select
+    its target against stale poses."""
+    moved = _refresh_with_window(load_factor_graph, 10, n=15)
+    assert 0 not in moved, "keyframe 0 was refreshed; the window is not in effect"
+    assert moved, "no keyframe refreshed at all — the fake estimate never landed"
+    assert min(moved) >= 6, f"window of 10 refreshed too far back: {moved}"
+
+
+def test_pose_refresh_window_zero_refreshes_the_whole_history(load_factor_graph):
+    """<= 0 is the escape hatch the A/B needs: every keyframe follows ISAM2."""
+    moved = _refresh_with_window(load_factor_graph, 0, n=15)
+    assert 0 in moved, "keyframe 0 stayed stale with the window disabled"
+
+
+def test_a_pending_loop_closure_overrides_the_window(load_factor_graph):
+    """A non-empty nssm_queue must force the full refresh regardless of window —
+    that is the only path by which a loop closure reaches old keyframe poses."""
+    fg = _fg_with_chain(load_factor_graph, 12)
+    fg.pose_refresh_window = 10
+    fg.nssm_queue = [_candidate(11, 0, _identity_cov())]
+    before = fg.keyframes[0].pose.x()
+
+    fg.isam = _FakeEstimateISAM(fg.isam)
+    kf = _keyframe(load_factor_graph, 12, 12.0)
+    fg.add_odometry_factor(kf)
+    fg.update_graph(kf)
+    assert fg.keyframes[0].pose.x() != before

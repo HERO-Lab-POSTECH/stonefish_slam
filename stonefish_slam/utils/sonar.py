@@ -33,6 +33,11 @@ class OculusProperty(object):
         self.tilt_angle_deg = tilt_angle_deg
         self.tilt_angle_rad = np.deg2rad(tilt_angle_deg)
 
+        # 경사거리 → 수평거리 투영 방식과 그 입력(고도계). slam_node 가 설정한다.
+        # 'legacy' 는 아무도 설정하지 않았을 때의 기존 동작이다.
+        self.projection = 'legacy'
+        self.altitude_m = None
+
     def __str__(self):
         d = dict(self.__dict__)
         d["angular_resolution"] = np.degrees(d["angular_resolution"])

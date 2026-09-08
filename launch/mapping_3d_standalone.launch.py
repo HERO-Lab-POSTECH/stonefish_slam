@@ -20,7 +20,9 @@ def generate_launch_description():
     mapping_yaml_path = config_dir / 'slam.yaml'
     with open(mapping_yaml_path, 'r') as f:
         mapping_config = yaml.safe_load(f)
-    default_update_method = mapping_config.get('slam_node', {}).get('ros__parameters', {}).get('mapping_3d', {}).get('update_method', 'log_odds')
+    # 루트 키는 `/**` 다. `.get()` 체인으로 읽으면 키가 어긋나도 예외 없이 폴백으로
+    # 떨어져 yaml 의 실제 값이 조용히 무시된다 — 직접 인덱싱해 KeyError 로 터뜨린다.
+    default_update_method = mapping_config['/**']['ros__parameters']['mapping_3d']['update_method']
 
     # Declare launch arguments
     update_method_arg = DeclareLaunchArgument(

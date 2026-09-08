@@ -27,7 +27,7 @@ class Mapping3DStandaloneNode(Node):
     """3D Mapping Standalone Node - Time-synchronized sonar + odometry processing"""
 
     def __init__(self):
-        super().__init__('slam_node')  # Must match yaml namespace (slam_node.ros__parameters)
+        super().__init__('slam_node')  # config/slam.yaml 의 루트는 `/**` 라 노드 이름 제약이 없다
 
         # Declare parameters
         self.declare_parameter('resolution', 0.2)  # Test 3: 0.3 → 0.2

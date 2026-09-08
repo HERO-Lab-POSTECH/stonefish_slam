@@ -54,6 +54,10 @@ class Localization:
         self.keyframe_duration_max = None  # None = no forced-keyframe cadence
         self.keyframe_translation = None
         self.keyframe_rotation = None
+        # 모션블러 배제 임계 [rad/s]. 0 = 끔.
+        # 2026-09-02 까지 이 조건은 죽어 있었다 — slam.py 가 is_keyframe() 를 부른 뒤에야
+        # frame.twist 를 대입해서 항상 None 이었다(PLAN-PHASE2 §하네스 구축 중 나온 결함).
+        self.keyframe_max_angular_vel = 0.0
 
         # Current (non-key) frame
         self.current_frame: Keyframe = None
@@ -69,6 +73,7 @@ class Localization:
         self.ssm_params.min_st_sep = 1
         self.ssm_params.min_points = 50
         self.ssm_params.max_translation = 2.0
+        self.ssm_params.max_icp_move = 0.0   # m; 0 = off. gate_icp_move 참조
         self.ssm_params.max_rotation = np.pi / 6
         self.ssm_params.target_frames = 3
         self.ssm_params.cov_samples = 0
@@ -97,6 +102,22 @@ class Localization:
         self.save_fig = False
         self.save_data = False
 
+    @staticmethod
+    def gate_icp_move(initial: gtsam.Pose2, estimated: gtsam.Pose2, max_move: float):
+        """ICP 결과가 시드에서 max_move(m) 보다 멀리 갔으면 시드를 돌려준다.
+
+        tilt 30° 의 바닥 반사 띠는 전진 이동에 거의 불변이라 ICP 가 띠를 따라 미끄러져
+        전진 노름을 무너뜨린다 — shallow 34 런 11,881 스텝에서 시드 대비 0.3 m 초과
+        이동의 90% 가 노름 하한만으로도 시드보다 나빴다(finding/044). 시드는 FFT 결과라
+        (seed_dr=0) 되돌려도 DR 궤적이 되지 않는다. max_move <= 0 이면 끈다.
+
+        Returns (transform, move, rejected).
+        """
+        move = float(np.linalg.norm(initial.between(estimated).translation()))
+        if max_move > 0 and move > max_move:
+            return initial, move, True
+        return estimated, move, False
+
     def is_keyframe(self, frame: Keyframe) -> bool:
         """Determine if a frame should be a keyframe.
 
@@ -117,10 +138,8 @@ class Localization:
             return True
 
         # Reject if angular velocity too high (motion blur prevention)
-        if frame.twist is not None:
-            angular_vel_z = abs(frame.twist.angular.z)
-            max_angular_vel = 0.1  # rad/s (~6°/s)
-            if angular_vel_z > max_angular_vel:
+        if frame.twist is not None and self.keyframe_max_angular_vel > 0.0:
+            if abs(frame.twist.angular.z) > self.keyframe_max_angular_vel:
                 return False
 
         # Check time duration (ROS2: Time has sec and nanosec fields)

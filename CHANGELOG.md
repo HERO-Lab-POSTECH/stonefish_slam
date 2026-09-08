@@ -4,7 +4,58 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **FFT 회전을 후보 K 개 중에서 병진 상관으로 고른다** (`exp/tilt30-localization`):
+  `fft_localization.rotation_candidates` 신설, 기본 9. 극좌표 위상상관면의 전역 최대만
+  쓰던 것을 상위 K 개 봉우리로 넓히고, 각 가설로 병진을 푼 뒤 **병진 상관 피크가 가장
+  강한 회전**을 채택한다. tilt 30° 에서 전역 최대가 정답 회전인 쌍은 43% 뿐이었다 —
+  극좌표 상관면 하나가 거리 변위와 방위 변위를 동시에 설명해야 해서 피크가 거리축으로
+  끌려간다(188쌍 중 94.7% 에서 행 변위 0 아님, 중앙 6.6 px). 정답은 상위 피크 안에 있고,
+  어느 것인지는 그 회전으로 병진을 풀어 봐야 답이 나온다.
+
+  캐시된 188 키프레임쌍 오프라인 측정(`experiments/slam-tilt30/offline/eval_fft.py`,
+  생산 경로 그대로):
+
+  | `rotation_candidates` | 병진 중앙 오차 | 게이트 0.25 m | 0.5 m | 회전 중앙 오차 |
+  |:--|--:|--:|--:|--:|
+  | 1 (옛 동작) | 0.364 m | 33.0% | 64.9% | 2.081° |
+  | 9 | **0.152 m** | **83.0%** | **93.1%** | **0.288°** |
+
+  반증 대조군이 선택자를 확증한다 — 같은 후보 집합에서 병진 피크가 가장 **낮은** 것을
+  고르면 1.291 m / 1.1%, 무작위면 0.504 m / 29.3% 다. 피크값이 실제로 정답을 가리킨다.
+  K 는 9 에서 무릎이다: K=15 는 0.139 m / 84.0% 로 미미하게 낫지만 비용이 1.5배고,
+  K=25 는 게이트가 83.5% 로 내려가며 회전 오차가 0.288 → 0.480° 로 악화된다 — 후보를
+  늘리면 정답이 집합에 들 확률과 가짜 고피크가 섞일 확률이 같이 오른다.
+
+버릴 후보에는 서브픽셀 보간과 피크 분산을 돌리지
+  않는다(`estimate_translation(refine=False)`) — `peak_value` 는 상관면의 최대값이라
+  보간 *전에* 정해지므로 선택 결과가 자릿수까지 같은데 100배 업샘플 DFT 만 물게 된다.
+  이 게이트로 188쌍 945 s → 405 s (2.33배), 결과는 완전 동일. 그래도 K=1 대비 2.5배라
+  (쌍당 0.87 → 2.16 s) 실시간 여유가 크지 않다 — bag 재생에서 최적화 전 K=9 런은
+  rclpy 단일 스레드 실행기가 막혀 pose 발행이 10배 줄고 자동 폐기됐다.
+
+  선택된 후보의 회전 분산이 공분산에 들어간다. 전역 최대의 분산을 그대로 쓰면 다른
+  피크를 골랐을 때 팩터 그래프가 엉뚱한 신뢰도를 받는다.
+  `rotation_candidates: 1` 은 옛 동작과 정확히 같고, `use_dr_rotation`(회전 override)은
+  탐색을 건너뛴다. 근거·측정 전문은 `.hq/community/posts/finding/019`.
+
 ### Changed
+
+- **tilt 30° 위치인식 확정값 2건을 config 에 반영** (`exp/tilt30-localization`):
+  `sonar.projection` `legacy` → `altitude`, `icp.yaml` 의 `TrimmedDistOutlierFilter.ratio`
+  `0.8` → `0.4`. tilt30 bag 재생에서 2D mean err 19.888 → 2.741 m (7.3배). 8개 축 30여
+  런 중 개선을 만든 것은 이 둘뿐이고 나머지는 전부 동률이거나 악화였다. 지금까지 이
+  값들은 런마다 주입만 됐고 repo 에는 없었다. `slam.py`·`feature_extraction_node.py` 의
+  `sonar.projection` 선언 기본값도 함께 옮긴다 — `test_standalone_node_defaults.py` 가
+  yaml 과의 drift 를 막는다
+
+  `altitude` 인데 고도계 값이 없을 때 FFT 직교변환만 `legacy` 로 떨어지던 것을 점군과
+  같은 `inv_cos_tilt` 로 맞춘다 — 시드는 r·cos τ (0.866배), 점군은 r/cos τ (1.155배)라
+  τ=30° 에서 1.333 배가 어긋난 채 로그는 `proj=altitude` 라고 정직하게 찍혔다. tilt30
+  런은 bag 에 `/altitude` 가 있어 전 구간 `alt_missing=0` 이므로 위 측정치는 영향받지
+  않는다 — 발동 조건은 `/altitude` 가 없는 bag(실해역 `gucki_merge`)과 런 시작 레이스다.
+  `test_fft_p2c_projection_cache.py` 가 가드한다
 
 - **config 6 → 1, launch 10 → 8, launch 인자 17 → 10** (`refactor/config-consolidation`):
   `sonar.yaml`·`feature.yaml`·`localization.yaml`·`factor_graph.yaml`·`mapping.yaml`·
@@ -27,6 +78,10 @@ All notable changes to this project will be documented in this file.
   도 같은 파일을 읽을 수 있게 됐다(전엔 노드명이 달라 dict 로만 받았다). 2D standalone 은
   항상 쓰던 0.1 m/px 를 launch 오버라이드로 유지(slam_node 의 0.2 는 메시지 크기 상한).
   3D standalone launch 의 bare `update_method` 키(선언 안 돼 조용히 버려짐)도 정정
+  (같은 파일이 `default_update_method` 를 아직 `slam_node` 키로 읽고 있었다 — `.get()`
+  체인이라 예외 없이 폴백 `'log_odds'` 로 떨어져 yaml 의 `iwlo` 가 무시됐다. 직접
+  인덱싱으로 바꿔 키가 어긋나면 KeyError 로 터지게 하고, `test_mapping_3d_param_wiring.py`
+  가 launch 전체에서 옛 루트 키 참조를 금지한다)
 - **거짓말하던 설정 두 건을 살린다**: `mapping_2d.map_2d_resolution` 은 yaml 이 0.1 을
   광고했지만 아무도 읽지 않았고 `slam.py` 가 0.2 를 하드코딩했다 — 이제 파라미터를
   읽고 yaml 값은 실제 값 0.2(동작 불변). `mapping_3d.propagation_radius/sigma` 는 선언만
