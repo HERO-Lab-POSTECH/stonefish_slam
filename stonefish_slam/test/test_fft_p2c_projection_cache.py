@@ -90,3 +90,22 @@ def test_small_altitude_drift_reuses_the_cache(localizer):
     f.oculus.altitude_m = 4.60
     f.polar_to_cartesian(_polar())
     assert f.p2c_cache["map_x"] is first, "같은 칸 안의 0.05 m 차이로 사상표를 다시 지었다"
+
+
+def test_altitude_without_altimeter_falls_back_to_inv_cos_tilt(localizer):
+    """고도계 값이 없으면 점군과 같은 inv_cos_tilt 로 물러나야 한다.
+
+    `feature_extraction._project_range` 는 altitude 모드에서 고도가 없으면
+    ``range_m * self._inv_cos_tilt`` 를 낸다. 여기가 legacy(r·cos tau)로
+    떨어지면 시드는 0.866 배, 점군은 1.155 배라 tau=30° 에서 1.333 배가
+    어긋난 채 로그는 proj=altitude 라고 정직하게 찍힌다 — 조용히 틀린다.
+    """
+    f = localizer("inv_cos_tilt")
+    expected = f.polar_to_cartesian(_polar()).shape
+
+    f = localizer("altitude", altitude=None)
+    actual = f.polar_to_cartesian(_polar()).shape
+
+    assert actual == expected, (
+        f"고도계 없는 altitude 가 inv_cos_tilt {expected} 가 아니라 {actual} 로 갔다"
+    )

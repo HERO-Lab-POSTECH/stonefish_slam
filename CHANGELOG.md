@@ -50,6 +50,13 @@ All notable changes to this project will be documented in this file.
   `sonar.projection` 선언 기본값도 함께 옮긴다 — `test_standalone_node_defaults.py` 가
   yaml 과의 drift 를 막는다
 
+  `altitude` 인데 고도계 값이 없을 때 FFT 직교변환만 `legacy` 로 떨어지던 것을 점군과
+  같은 `inv_cos_tilt` 로 맞춘다 — 시드는 r·cos τ (0.866배), 점군은 r/cos τ (1.155배)라
+  τ=30° 에서 1.333 배가 어긋난 채 로그는 `proj=altitude` 라고 정직하게 찍혔다. tilt30
+  런은 bag 에 `/altitude` 가 있어 전 구간 `alt_missing=0` 이므로 위 측정치는 영향받지
+  않는다 — 발동 조건은 `/altitude` 가 없는 bag(실해역 `gucki_merge`)과 런 시작 레이스다.
+  `test_fft_p2c_projection_cache.py` 가 가드한다
+
 - **config 6 → 1, launch 10 → 8, launch 인자 17 → 10** (`refactor/config-consolidation`):
   `sonar.yaml`·`feature.yaml`·`localization.yaml`·`factor_graph.yaml`·`mapping.yaml`·
   `slam.yaml` 은 전부 `slam_node.ros__parameters` 하나였고 launch 가 항상 여섯을 같이

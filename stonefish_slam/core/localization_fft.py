@@ -329,13 +329,15 @@ class FFTLocalizer:
             #   legacy       C = r*cos(tau)      원본. dC/drho = cos(theta)cos(tau) 로 압축된다
             #   inv_cos_tilt C = r/cos(tau)      dC/drho = cos(theta)/cos(tau), tau 근처에서 1
             #   altitude     C = sqrt(r^2-h^2)   평평한 바닥에서 정확히 1
-            # feature_extraction._project_range 와 같은 규약을 쓴다.
+            # feature_extraction._project_range 와 같은 규약을 쓴다 — 고도계 값이
+            # 없을 때 altitude 가 inv_cos_tilt 로 물러나는 것까지 같아야 시드와
+            # 점군이 한 좌표계에 있다.
             cos_tilt = float(np.cos(self.oculus.tilt_angle_rad))
             if projection == 'altitude' and altitude and altitude > 0.0:
                 h_sq = float(altitude) ** 2
                 fwd = lambda r: np.sqrt(np.maximum(np.square(r) - h_sq, 0.0))
                 inv = lambda c: np.sqrt(np.square(c) + h_sq)
-            elif projection == 'inv_cos_tilt' and cos_tilt > 1e-6:
+            elif projection in ('inv_cos_tilt', 'altitude') and cos_tilt > 1e-6:
                 fwd = lambda r: r / cos_tilt
                 inv = lambda c: c * cos_tilt
             else:
