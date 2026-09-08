@@ -48,7 +48,6 @@ def generate_launch_description():
             'use_sim_time': 'true',
             'override_config': override_config,
             'icp_config_file': 'icp_real_bag.yaml',
-            'ssm_enable': 'true',
             'rviz': 'false',
         }.items()
     )

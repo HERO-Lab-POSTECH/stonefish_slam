@@ -46,22 +46,22 @@ ros2 launch stonefish_control control.launch.py
 
 ## 모드 변형
 
-`slam.launch.py`에 인자를 넘기거나 다른 launch 파일을 사용해 동작을 바꾼다.
+`slam.launch.py` 하나가 `mode` 인자로 세 구성을 낸다(이전의 `localization.launch.py`·`mapping.launch.py` 래퍼는 2026-09-02에 이 preset으로 흡수됐다).
 
-### localization / mapping 전용 launch
+### mode 인자
 
-| launch 파일 | 용도 |
+| `mode:=` | 구성 |
 |---|---|
-| `slam.launch.py` | 통합 SLAM(localization + mapping) |
-| `localization.launch.py` | localization 위주 실행 |
-| `mapping.launch.py` | mapping 위주 실행 |
+| `slam` (기본) | `config/slam.yaml` 그대로 — ICP + 루프클로저 + 2D/3D 매핑 |
+| `localization` | ICP만(`ssm.enable=true`, `nssm.enable=false`), 매핑 off |
+| `mapping` | 스캔매칭 off(`ssm/nssm.enable=false`), odometry로 매핑 |
 
 ```bash
 # localization 전용
-ros2 launch stonefish_slam localization.launch.py
+ros2 launch stonefish_slam slam.launch.py mode:=localization
 
 # mapping 전용
-ros2 launch stonefish_slam mapping.launch.py
+ros2 launch stonefish_slam slam.launch.py mode:=mapping
 ```
 
 ### launch 인자
@@ -70,20 +70,24 @@ ros2 launch stonefish_slam mapping.launch.py
 
 | 인자 | 기본값 | 효과 |
 |---|---|---|
-| `enable_2d_mapping` | `true` | 2D 점유그리드 매핑 on/off |
-| `ssm_enable` | 빈 값(yaml 기본 `false`) | 연속 스캔매칭(SSM) 활성화 |
-| `nssm_enable` | 빈 값(yaml 기본 `false`) | 비연속 스캔매칭(NSSM, 루프클로저) 활성화 |
+| `mode` | `slam` | `slam` / `localization` / `mapping` preset(위 표) |
+| `enable_2d_mapping`, `enable_3d_mapping` | 빈 값(= `config/slam.yaml`) | 2D/3D 매핑 on/off. 빈 값이면 yaml(또는 mode preset)을 따른다 |
+| `update_method` | `config/slam.yaml`의 값 | 3D 갱신법 `log_odds`/`weighted_avg`/`iwlo` → `config/mapping/method_<name>.yaml` |
+| `icp_config_file` | `icp.yaml` | libpointmatcher 체인(`icp_real_bag.yaml` 등) |
+| `override_config` | 빈 값 | `config/slam.yaml` 뒤에 로드할 프로파일(예: `config/real_bag_overrides.yaml`) |
+| `evaluate` | `true` | 정확도 모니터·2D 궤적 오차 누적기 동시 실행 |
 | `vehicle_name` | `bluerov2` | 토픽 네임스페이스 차량 이름 |
+| `use_sim_time` | `false` | `/clock`을 내는 게 있을 때만 `true`(`ros2 bag play --clock`). Stonefish 시뮬은 `/clock`을 내지 않는다 |
 | `rviz` | `true` | RViz 동시 실행 여부 |
 
-`enable_2d_mapping`(기본 `true`), `ssm.enable`(기본 `false`), `nssm.enable`(기본 `false`), `vehicle_name`(기본 `bluerov2`) 등은 `slam.py:44-154`의 `declare_parameter`로 선언되어 있으며 launch에서 오버라이드된다. `ssm_enable`·`nssm_enable` launch 인자는 기본이 빈 값이라 명시하지 않으면 yaml 기본값(둘 다 `false`)을 그대로 쓴다.
+우선순위(뒤가 이김): `config/slam.yaml` < `method_*.yaml` < `override_config` < `mode` preset < 명시 인자. `ssm.enable`·`nssm.enable`·`fft_localization.enable` 같은 세부 스위치는 launch 인자가 아니라 `config/slam.yaml`에서 바꾼다.
 
 ```bash
 # 2D 매핑 끄기
 ros2 launch stonefish_slam slam.launch.py enable_2d_mapping:=false
 
-# 연속/비연속 스캔매칭 켜기 (SSM + 루프클로저)
-ros2 launch stonefish_slam slam.launch.py ssm_enable:=true nssm_enable:=true
+# 스캔매칭 없이 매핑만
+ros2 launch stonefish_slam slam.launch.py mode:=mapping
 
 # 다른 차량 네임스페이스
 ros2 launch stonefish_slam slam.launch.py vehicle_name:=x500
@@ -92,8 +96,8 @@ ros2 launch stonefish_slam slam.launch.py vehicle_name:=x500
 ros2 launch stonefish_slam slam.launch.py rviz:=false
 ```
 
-!!! tip "스캔매칭 기본 비활성"
-    `ssm.enable`과 `nssm.enable`은 기본값이 모두 `false`다(`slam.yaml`). 스캔매칭 기반 보정과 루프클로저를 쓰려면 위처럼 명시적으로 켜야 한다.
+!!! tip "스캔매칭 기본 활성"
+    `ssm.enable`·`nssm.enable`·`fft_localization.enable`은 기본값이 모두 `true`다(`config/slam.yaml`, 2026-09-02 복원 — 그전 두 달은 매핑 커밋에 딸려 꺼져 있어 ICP가 한 번도 돌지 않았다). 끄려면 yaml을 바꾸거나 `mode:=mapping`을 쓴다.
 
 !!! warning "vehicle_name 변경 시 토픽"
     `vehicle_name`을 바꾸면 구독 토픽 네임스페이스가 함께 바뀐다(예: `/{v}/fls/image`, `/{v}/odometry`). 시뮬레이터가 발행하는 차량 이름과 일치시키지 않으면 입력 토픽을 받지 못한다(분석 사실 §2 구독 토픽).

@@ -1,9 +1,9 @@
 # Parameter profile for real sea-trial bag replay (KMU/LIG dataset).
-# Loaded AFTER the default config files via the override_config launch
+# Loaded AFTER config/slam.yaml via the override_config launch
 # argument (slam.launch.py / slam_real_bag.launch.py), so every value here
 # beats the sim-tuned defaults; explicit launch arguments still win.
 # Values validated on the girona500 sea-trial bag (compressed FLS + LIG nav).
-slam_node:
+/**:
   ros__parameters:
     # ---- Data source: bag topics instead of simulator topics ----
     sonar_topic: '/vehicle_synced/image/fls2/image/compressed'

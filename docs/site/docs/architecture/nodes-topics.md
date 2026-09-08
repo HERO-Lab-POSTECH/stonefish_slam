@@ -8,7 +8,7 @@
 
 | 노드 | 파일 | 역할 | launch | 구독 |
 |------|------|------|--------|------|
-| `slam_node` | `core/slam.py:35` (`SLAMNode`) | 통합 SLAM | `slam.launch.py` / `mapping.launch.py` / `localization.launch.py` | `/{v}/fls/image`, `/{v}/odometry` |
+| `slam_node` | `core/slam.py:35` (`SLAMNode`) | 통합 SLAM | `slam.launch.py` (`mode:=slam` / `localization` / `mapping`) | `/{v}/fls/image`, `/{v}/odometry` |
 | `dead_reckoning_node` | `core/dead_reckoning.py:23` (`DeadReckoningNode`) | DVL/IMU 위치추정 | `dead_reckoning.launch.py` | `/{v}/dvl`, `/{v}/imu`, `/{v}/pressure` |
 | `mapping_2d_standalone` | `nodes/mapping_2d_standalone_node.py` | 2D 매핑 전용 | `mapping_2d_standalone.launch.py` | `/{v}/fls/image`, `/{v}/odometry` |
 | `mapping_3d_standalone` | `nodes/mapping_3d_standalone_node.py` | 3D 매핑 전용 | `mapping_3d_standalone.launch.py` | `/{v}/fls/image`, `/{v}/odometry` |
@@ -16,7 +16,7 @@
 | `fft_localization_node` | `nodes/fft_localization_node.py` (P4 신규) | FFT 변환 추정 | `fft_localization_standalone.launch.py` | `/{v}/fls/image` |
 
 !!! note "`{v}`는 vehicle_name"
-    토픽 경로의 `{v}`는 `vehicle_name` 파라미터로 치환된다. 기본값은 `'bluerov2'`(`sonar.yaml`)이며, launch에서 `vehicle_name:=x500` 처럼 오버라이드할 수 있다.
+    토픽 경로의 `{v}`는 `vehicle_name` 파라미터로 치환된다. 기본값은 `'bluerov2'`(`slam.yaml`)이며, launch에서 `vehicle_name:=x500` 처럼 오버라이드할 수 있다.
 
 `feature_extraction_node`와 `fft_localization_node`는 P4에서 신규 추가된 노드로, 통합 `slam_node` 내부에서 동작하던 피처추출·FFT 위치추정 단계를 독립 실행할 수 있게 분리한 것이다.
 
@@ -35,7 +35,7 @@
 소나 입력의 QoS `BEST_EFFORT`는 `slam.py:436-437`에 하드코딩되어 있다.
 
 !!! warning "소나 이미지는 극좌표"
-    `/{v}/fls/image`는 `num_beams=512`(width) × `num_bins=500`(height)의 극좌표 이미지다(`sonar.yaml`). 매핑·피처추출 단계에서 cartesian으로 변환된다. QoS가 `BEST_EFFORT`이므로 발행 측 QoS도 일치해야 메시지가 수신된다.
+    `/{v}/fls/image`는 `num_beams=512`(width) × `num_bins=500`(height)의 극좌표 이미지다(`slam.yaml`). 매핑·피처추출 단계에서 cartesian으로 변환된다. QoS가 `BEST_EFFORT`이므로 발행 측 QoS도 일치해야 메시지가 수신된다.
 
 ## 발행 토픽 (SLAM 출력)
 

@@ -1,8 +1,8 @@
 # 위치추정·팩터그래프 파라미터
 
-이 페이지는 stonefish_slam의 위치추정·루프클로저·스캔매칭을 제어하는 세 설정 파일 `localization.yaml`(키프레임·노이즈·SSM), `factor_graph.yaml`(NSSM 루프클로저·PCM), `icp.yaml`(libpointmatcher ICP)의 모든 파라미터를 이름·기본값·정의·수정 효과까지 빠짐없이 정리하는 레퍼런스다.
+이 페이지는 stonefish_slam의 위치추정·루프클로저·스캔매칭을 제어하는 `config/slam.yaml`의 세 섹션(키프레임·노이즈, `ssm`, `nssm`/PCM)과 `icp.yaml`(libpointmatcher ICP)의 모든 파라미터를 이름·기본값·정의·수정 효과까지 빠짐없이 정리하는 레퍼런스다.
 
-이 세 파일은 SLAM 파이프라인의 `Localization → Keyframe Decision → Factor Graph` 단계를 직접 지배한다. 키프레임 생성 주기(`localization.yaml`), GTSAM 팩터그래프에 들어가는 노이즈 모델과 루프클로저 검증(`localization.yaml` + `factor_graph.yaml`), 그리고 스캔매칭의 점 정합 품질(`icp.yaml`)이 모두 여기서 결정된다.
+이 파라미터들은 SLAM 파이프라인의 `Localization → Keyframe Decision → Factor Graph` 단계를 직접 지배한다. 키프레임 생성 주기, GTSAM 팩터그래프에 들어가는 노이즈 모델과 루프클로저 검증(모두 `slam.yaml`), 그리고 스캔매칭의 점 정합 품질(`icp.yaml`)이 모두 여기서 결정된다.
 
 ```mermaid
 flowchart TD
@@ -12,14 +12,14 @@ flowchart TD
     D --> E["Factor Graph (GTSAM ISAM2)"]
     E --> F["NSSM 루프클로저 + PCM"]
     F --> G["robust Cauchy down-weight"]
-    L1["localization.yaml"] -.-> C
+    L1["slam.yaml"] -.-> C
     L1 -.-> B
     L1 -.-> E
-    L2["factor_graph.yaml"] -.-> F
+    L2["slam.yaml"] -.-> F
     L3["icp.yaml"] -.-> B
 ```
 
-## localization.yaml — 키프레임·노이즈·SSM
+## slam.yaml — 키프레임·노이즈·SSM
 
 이 파일은 키프레임을 언제 만들지(주기·이동·회전 임계값), GTSAM 팩터그래프 각 팩터의 노이즈 sigma, NSSM 루프클로저의 robust 강도, 그리고 연속 스캔매칭(SSM) 검증 기준을 정의한다. 파라미터는 `slam.py:44-154`에서 `declare_parameter`로 선언된다(분석 사실 §3).
 
@@ -84,7 +84,7 @@ w(x) = \frac{1}{1 + (x/c)^2}
 !!! tip "SSM 검증 임계값 수정 효과"
     `max_translation`/`max_rotation`을 **줄이면** 비정상적으로 큰 정합 결과를 더 엄격히 걸러내 robust해지지만, 정상적인 큰 변위까지 기각할 수 있다. **키우면** 더 큰 변위를 허용하지만 잘못된 매칭이 통과할 위험이 커진다. `target_frames`를 **늘리면** 정합 대상 점이 많아져 매칭이 안정되지만 계산량이 늘어난다.
 
-## factor_graph.yaml — NSSM 루프클로저·PCM
+## slam.yaml — NSSM 루프클로저·PCM
 
 이 파일은 비연속 스캔매칭(NSSM) 기반 루프클로저의 후보 선정·검증 기준과, Pairwise Consistency Maximization(PCM)으로 일관된 루프만 채택하는 기준을 정의한다.
 
@@ -134,4 +134,4 @@ NSSM은 현재 키프레임에서 `min_st_sep`(15) 이상 떨어진 과거 키�
 
 ## 관련 파라미터 파일
 
-SLAM 통합 플래그(`ssm.enable`, `nssm.enable`, `fft_localization.enable` 등)는 `slam.yaml`에서, ICP 입력이 되는 피처 점군 추출(CFAR)은 `feature.yaml`에서 제어된다. 이 페이지의 노이즈·루프클로저 설정은 그 위에서 동작한다.
+SLAM 통합 플래그(`ssm.enable`, `nssm.enable`, `fft_localization.enable` 등)는 `slam.yaml`에서, ICP 입력이 되는 피처 점군 추출(CFAR)은 `slam.yaml`에서 제어된다. 이 페이지의 노이즈·루프클로저 설정은 그 위에서 동작한다.

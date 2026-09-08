@@ -22,7 +22,7 @@ CFAR은 검사 대상 셀(CUT, Cell Under Test) 주변에 가드셀(guard cell)�
 (`cfar.cpp` / `cfar.py`가 CA/SOCA/GOCA/OS를 제공.)
 
 !!! note "SOCA가 기본인 이유"
-    `feature.yaml`의 `alg` 기본값은 `'SOCA'`(Smallest Of Cell Averaging)이며 분석 사실에서 robust한 선택으로 추천된다. SOCA는 CUT 양쪽 윈도우의 평균 중 **작은 값**을 배경 추정으로 쓰기 때문에, 한쪽에 강한 반사체나 잡음이 끼어 있어도 그 영향을 덜 받아 검출이 안정적이다.
+    `slam.yaml`의 `alg` 기본값은 `'SOCA'`(Smallest Of Cell Averaging)이며 분석 사실에서 robust한 선택으로 추천된다. SOCA는 CUT 양쪽 윈도우의 평균 중 **작은 값**을 배경 추정으로 쓰기 때문에, 한쪽에 강한 반사체나 잡음이 끼어 있어도 그 영향을 덜 받아 검출이 안정적이다.
 
 ## 핵심 파라미터의 의미
 
@@ -65,7 +65,7 @@ flowchart TD
 최종 출력은 local frame 기준의 `N×2` 점군이며, 이후 Localization(ICP 스캔매칭)과 Mapping의 입력이 된다.
 
 !!! note "skip 파라미터"
-    `feature.yaml`의 `filter.skip`(기본 `5`)은 매 N번째 프레임만 처리하도록 하는 다운레이트 설정으로, CFAR 처리 부하를 조절한다.
+    `slam.yaml`의 `filter.skip`(기본 `5`)은 매 N번째 프레임만 처리하도록 하는 다운레이트 설정으로, CFAR 처리 부하를 조절한다.
 
 ## 독립 실행 노드
 
@@ -75,7 +75,7 @@ P4에서 추가된 `feature_extraction_node`는 CFAR 피처 추출만 독립적�
 ros2 launch stonefish_slam feature_extraction_standalone.launch.py
 ```
 
-시각화 옵션(`feature.yaml`)으로 `coordinates`(`'cartesian'`), `radius`(`2.0`), `color`(`'green'`)가 있다.
+시각화 옵션(`slam.yaml`)으로 `coordinates`(`'cartesian'`), `radius`(`2.0`), `color`(`'green'`)가 있다.
 
 ## 관련 페이지
 

@@ -45,7 +45,7 @@ class FFTLocalizationNode(Node):
         self.declare_parameter('sonar_topic', '/bluerov2/fls/image')
         self.declare_parameter('pose_topic', '/fft_localization/transform')
 
-        # FFT localizer parameters — defaults mirror config/slam.yaml
+        # FFT localizer parameters — defaults mirror config/slam.yaml (fft_localization.*)
         # (fft_localization.*) tuning as of 2026-07-23. ⚠️ the yaml is NOT auto-loaded
         # here(노드명이 slam_node가 아님) — yaml을 재튜닝하면 여기도 갱신하거나
         # params 파일을 직접 넘겨라.
@@ -59,7 +59,7 @@ class FFTLocalizationNode(Node):
         self.declare_parameter('fft_localization.trans_gaussian_sigma', 2.0)
         self.declare_parameter('fft_localization.trans_gaussian_truncate', 3.0)
 
-        # Sonar parameters (defaults match config/sonar.yaml: sonar.*).
+        # Sonar parameters (defaults match config/slam.yaml: sonar.*).
         self.declare_parameter('sonar.horizontal_fov', 130.0)
         self.declare_parameter('sonar.vertical_fov', 20.0)
         self.declare_parameter('sonar.num_beams', 512)

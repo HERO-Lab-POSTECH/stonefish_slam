@@ -8,7 +8,7 @@ transforms (no odom validation, no DR fallback).
 Parameters are passed directly as a dict because the node name
 ('fft_localization_node') does not match the config YAML namespace
 ('slam_node'). The node's declare_parameter defaults already mirror
-config/slam.yaml (fft_localization.*) and config/sonar.yaml (sonar.*), so
+config/slam.yaml (fft_localization.* and sonar.*), so
 these values keep the launch self-documenting and parameterized by vehicle_name.
 """
 
@@ -16,6 +16,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+import os
 
 
 def generate_launch_description():
@@ -39,6 +41,7 @@ def generate_launch_description():
         executable='fft_localization_node',
         name='fft_localization_node',
         parameters=[
+            os.path.join(get_package_share_directory('stonefish_slam'), 'config', 'slam.yaml'),
             {
                 'sonar_topic': ['/', vehicle_name, '/fls/image'],
                 'pose_topic': '/fft_localization/transform',
