@@ -66,9 +66,9 @@ class SLAMNode(Node):
         self.declare_parameter('sonar.num_beams', 512)
         self.declare_parameter('sonar.num_bins', 500)
         self.declare_parameter('sonar.range_min', 0.5)
-        self.declare_parameter('sonar.range_max', 30.0)
+        self.declare_parameter('sonar.range_max', 40.0)
         self.declare_parameter('sonar.sonar_position', [0.0, 0.0, 0.0])
-        self.declare_parameter('sonar.sonar_tilt_deg', 10.0)
+        self.declare_parameter('sonar.sonar_tilt_deg', 30.0)
 
         # Feature extraction parameters (feature.yaml)
         self.declare_parameter('CFAR.Ntc', 20)

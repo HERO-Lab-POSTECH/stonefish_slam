@@ -1,13 +1,17 @@
-"""Standalone nodes claim their sonar defaults match sonar.yaml — hold them to it.
+"""Every node's sonar.* declare_parameter defaults must match sonar.yaml — hold them to it.
 
-Both mapping_2d_standalone_node.py and mapping_3d_standalone_node.py carry the
+mapping_2d_standalone_node.py and mapping_3d_standalone_node.py carry the
 comment "defaults match sonar.yaml" directly above their sonar.* declarations,
 and both shipped range_max=15.0 / sonar_tilt_deg=10.0 against sonar.yaml's
 40.0 / 30.0. Run without a parameter file — which is the whole point of a
 standalone node — that is silently wrong geometry: a 2.7x range error and a
 20 degree tilt error, with nothing in the logs to say so.
 
-Static AST rather than a runtime check: both nodes import rclpy at module top,
+core/slam.py (the main SLAM node) and the two other standalone entry points
+are held to the same yaml: on 2026-09-01 slam.py alone still declared
+range_max=30.0 / sonar_tilt_deg=10.0, a third copy of the same drift.
+
+Static AST rather than a runtime check: the nodes import rclpy at module top,
 so they cannot be loaded in this environment (CONVENTIONS.md 2.8).
 """
 import ast
@@ -18,14 +22,17 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SONAR_YAML = REPO_ROOT / "config" / "sonar.yaml"
 NODES = (
-    "mapping_2d_standalone_node.py",
-    "mapping_3d_standalone_node.py",
+    "core/slam.py",
+    "nodes/feature_extraction_node.py",
+    "nodes/fft_localization_node.py",
+    "nodes/mapping_2d_standalone_node.py",
+    "nodes/mapping_3d_standalone_node.py",
 )
 
 
 def _sonar_defaults(node_filename):
     """{'range_max': 40.0, ...} from declare_parameter('sonar.<key>', <literal>)."""
-    tree = ast.parse((REPO_ROOT / "stonefish_slam" / "nodes" / node_filename).read_text())
+    tree = ast.parse((REPO_ROOT / "stonefish_slam" / node_filename).read_text())
     defaults = {}
     for node in ast.walk(tree):
         if not (

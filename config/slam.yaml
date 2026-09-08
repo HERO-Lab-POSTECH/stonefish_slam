@@ -13,12 +13,12 @@ slam_node:
     enable_3d_mapping: true
 
     # Localization modules
-    ssm.enable: false   # Sequential Scan Matching (for localization)
-    nssm.enable: false  # Non-Sequential Scan Matching (loop closure)
+    ssm.enable: true    # Sequential Scan Matching (for localization)
+    nssm.enable: true   # Non-Sequential Scan Matching (loop closure)
 
     # FFT localization (optional)
     fft_localization:
-      enable: false    # Enable FFT-based rotation/translation estimation
+      enable: true     # Enable FFT-based rotation/translation estimation
       range_min: 0.5   # Minimum reliable range (meters)
       verbose: true    # Enable debug output for FFT localization
       trans_erosion_iterations: 2  # Erosion iterations for translation mask (0=disabled)

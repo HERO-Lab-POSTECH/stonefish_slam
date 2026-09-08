@@ -150,6 +150,25 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`ssm.enable`·`nssm.enable`·`fft_localization.enable` 을 다시 켠다**
+  (`fix/localization-config-restore`): `fc84203`(IWLO 매핑 수정)이 "설정 파일
+  최적화" 한 줄 아래 세 플래그를 껐고 — 로컬라이제이션 결정이 아니었다 — 그 뒤로
+  기본 launch 는 ICP·FFT 에 **도달조차 못 했다**(`initialize_sequential_scan_matching`
+  이 status=False 를 돌려 odometry factor 만 남김. 계측: 336 키프레임에
+  `icp_attempted=0`). 켠 뒤 lawnmower 424 s bag 재생에서 `icp_attempted=216
+  icp_converged=216 seed_fft=188 seed_dr=28 reject_pos=32`, 예외 0. 시뮬 odometry 가
+  무노이즈 GT 라 ICP 를 켜면 `2D err` 가 0→~1 m 로 커지는 것은 정상이다(이월 큐 N2 종결)
+- **`sonar.*` 코드 기본값을 `sonar.yaml` 에 맞춘다** — 이탈점은 `core/slam.py` 하나
+  (`sonar_tilt_deg` 10→30, `range_max` 30→40). `SonarMapping2D` 생성자 기본값과
+  docstring 도 정합(기준면은 **수평면 아래 각** — 코드가 `cos(tilt)` 를 수평거리 계수로
+  쓴다). `test_standalone_node_defaults` 가 `sonar.*` 를 선언하는 다섯 파일 전부를 yaml 에 묶는다
+- **소나 틸트 크로스 repo 가드** `test_sonar_tilt_matches_sim_scenario.py`:
+  `bluerov2.scn` 의 `<origin rpy>` 를 Rz·Ry·Rx 로 합성해(Stonefish
+  `ScenarioParser.cpp:4211`) 센서 +Z 시선의 하향각을 구하고 `sonar_tilt_deg` 와 비교한다.
+  .scn 의 roll 은 **연직 기준**(roll 0 = 바로 아래)이라 하향각 = 90° − roll 이고, 현재
+  시뮬은 10°(roll 80°) vs config 30° 로 어긋나 있다 — sim `54636c6` 이 roll 을 틸트로
+  오독한 결과. 정본을 정할 때(A2)까지 `xfail(strict)`; 맞춰지는 순간 XPASS 로 실패해
+  마커 제거를 강제한다. 형제 sim 체크아웃이 없으면 skip
 - **WEIGHTED_AVERAGE 3D 갱신법이 목표 확률에서 발산** (`fix/loc-critical`, 런타임 수치
   변경): `cpp/octree_mapping.cpp`가 절대 log-odds를 OctoMap의 **가산** API
   `updateNode(key, float, bool)`에 넘겨, 같은 관측을 반복하면 확률이 유지되지 않고
