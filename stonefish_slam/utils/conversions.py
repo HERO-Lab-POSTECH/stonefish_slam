@@ -10,6 +10,7 @@ import struct
 
 __all__ = [
     'X',
+    'L',
     'pose322',
     'n2g',
     'g2n',
@@ -38,6 +39,22 @@ def X(x:int) -> gtsam.symbol:
     """
 
     return gtsam.symbol("x", x)
+
+
+def L(j: int) -> gtsam.symbol:
+    """convert an integer to a gtsam landmark symbol
+
+    Landmarks live in the same Values as the poses, so they need their own
+    character; 'l' is GTSAM's own convention for a landmark variable.
+
+    Args:
+        j (int): the index of the landmark
+
+    Returns:
+        gtsam.symbol: gtsam symbol l_j
+    """
+
+    return gtsam.symbol("l", j)
 
 def pose322(pose:gtsam.Pose3) -> gtsam.Pose2:
     """Convert a gtsam.Pose3 to a gtsam.Pose2
@@ -327,6 +344,35 @@ def n2r(numpy_arr:np.array, msg:any) -> any:
             PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
             PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
             PointField(name="i", offset=12, datatype=PointField.FLOAT32, count=1),
+        ]
+        return pc2.create_cloud(header, fields, np.array(numpy_arr))
+    elif msg == "PointCloudXYZIL":
+        # XYZI plus a semantic label column. A separate type rather than a
+        # 5th field on PointCloudXYZI: consumers of /slam/cloud key off the
+        # exact field list, so the schema must not move when the semantic
+        # pipeline is off.
+        from sensor_msgs.msg import PointField
+        header = Header()
+        fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+            PointField(name="i", offset=12, datatype=PointField.FLOAT32, count=1),
+            PointField(name="label", offset=16, datatype=PointField.FLOAT32, count=1),
+        ]
+        return pc2.create_cloud(header, fields, np.array(numpy_arr))
+    elif msg == "PointCloudXYZPL":
+        # The 3D map cloud: occupancy probability plus a semantic label.
+        # OctoMap's binary message has no room for either, so the labelled 3D
+        # reconstruction goes out on its own topic.
+        from sensor_msgs.msg import PointField
+        header = Header()
+        fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+            PointField(name="prob", offset=12, datatype=PointField.FLOAT32, count=1),
+            PointField(name="label", offset=16, datatype=PointField.FLOAT32, count=1),
         ]
         return pc2.create_cloud(header, fields, np.array(numpy_arr))
     elif msg == "PointCloudXYZRGB":

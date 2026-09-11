@@ -187,6 +187,7 @@ Finer switches (`ssm.enable`, `nssm.enable`, `fft_localization.enable`, …) liv
 | `/{vehicle}/imu` | sensor_msgs/Imu | IMU data |
 | `/{vehicle}/dvl` | stonefish_msgs/DVL | DVL velocity |
 | `/{vehicle}/pressure` | sensor_msgs/FluidPressure | Depth sensor |
+| `/sonar_yolo/detections` | vision_msgs/Detection2DArray | Object detections (**only when `semantic.enable`**; published by `stonefish_sonar_yolo` in the sim repo) |
 
 ### Publications
 
@@ -198,7 +199,8 @@ Finer switches (`ssm.enable`, `nssm.enable`, `fft_localization.enable`, …) liv
 | `/stonefish_slam/mapping/map_2d_image` | sensor_msgs/Image | 2D occupancy grid |
 | `/stonefish_slam/mapping/map_3d_octomap` | octomap_msgs/Octomap | 3D OctoMap |
 | `/stonefish_slam/slam/constraint` | visualization_msgs/Marker | Loop-closure constraints |
-| `/stonefish_slam/slam/cloud` | sensor_msgs/PointCloud2 | Aggregated point cloud |
+| `/stonefish_slam/slam/cloud` | sensor_msgs/PointCloud2 | Aggregated point cloud. Fields `x, y, z, i` (i = keyframe index); with `semantic.enable` a fifth `label` field carries the detection class + 1 |
+| `/stonefish_slam/mapping/cloud_3d` | sensor_msgs/PointCloud2 | Labelled 3D map: `x, y, z, prob, label`. **Only when `semantic.enable` and `semantic.label_3d`** — OctoMap's binary message has no room for either value |
 
 ## Configuration Files
 
@@ -206,7 +208,7 @@ Located in `config/`:
 
 | File | Description |
 |------|-------------|
-| `slam.yaml` | Every `slam_node` parameter, in sections: data source, module switches, sonar hardware, CFAR feature extraction, keyframes/noise, SSM (ICP), NSSM/PCM loop closure, FFT localization, 2D/3D mapping |
+| `slam.yaml` | Every `slam_node` parameter, in sections: data source, module switches, sonar hardware, CFAR feature extraction, keyframes/noise, SSM (ICP), NSSM/PCM loop closure, FFT localization, semantic labels, 2D/3D mapping |
 | `mapping/method_*.yaml` | Per-method 3D probability-update values; `update_method` picks one |
 | `icp.yaml`, `icp_real_bag.yaml` | ICP (libpointmatcher) chains; `icp_config_file` picks one |
 | `real_bag_overrides.yaml` | Real sea-trial profile (bag topics, compressed FLS, relaxed gates); `override_config` |

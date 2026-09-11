@@ -26,10 +26,27 @@ from stonefish_slam.core.mapping_2d import SonarMapping2D
 from stonefish_slam.core.mapping_3d import SonarMapping3D
 from stonefish_slam.core.feature_extraction import FeatureExtraction
 from stonefish_slam.core.localization_fft import FFTLocalizer
+from stonefish_slam.core.semantic import (
+    PendingSemantic, aligned_labels, detection_rows,
+    labels_from_detections, landmark_pose_key_is_valid, pixel_to_bearing_range)
 from stonefish_slam.cpp import pcl
 from stonefish_slam.utils.topics import (
     LOCALIZATION_ODOM_TOPIC, SLAM_CLOUD_TOPIC, SLAM_CONSTRAINT_TOPIC,
     SLAM_NS, SLAM_ODOM_TOPIC, SLAM_POSE_TOPIC, SLAM_TRAJ_TOPIC)
+
+
+def _stamp_to_ns(stamp) -> int:
+    """builtin_interfaces/Time → 나노초 정수.
+
+    Args:
+        stamp: a `builtin_interfaces.msg.Time` (a message header's stamp).
+
+    Returns:
+        int: nanoseconds since epoch, the key the pending-semantic queue is
+        indexed by. Integers, so two headers copied from the same image compare
+        exactly.
+    """
+    return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
 
 class SLAMNode(Node):
@@ -206,6 +223,28 @@ class SLAMNode(Node):
         self.declare_parameter('fft_localization.max_rotation_error', 0.35)  # radians (~20 deg)
         self.declare_parameter('fft_localization.use_dr_rotation', False)
 
+        # Semantic (object-detection) parameters — slam.yaml `semantic:` section.
+        # Every one of these is inert while `semantic.enable` is false: no
+        # subscription, no extra publisher, no extra [INSTR] line, no
+        # vision_msgs import, and /slam/cloud keeps its 4-field XYZI schema.
+        # That run is the A/B baseline, so its OUTPUT must match the
+        # pre-semantic node (the parameter list itself does grow by these five).
+        self.declare_parameter('semantic.enable', False)
+        self.declare_parameter('semantic.detection_topic', '')   # '' = /sonar_yolo/detections
+        self.declare_parameter('semantic.max_stamp_delta', 0.05)  # s
+        self.declare_parameter('semantic.pending_timeout', 3.0)   # s
+        self.declare_parameter('semantic.min_conf', 0.25)
+        # Landmark factors: the path by which a detection actually constrains
+        # the pose graph. Sigmas are deliberately loose — the point is that the
+        # detection is used, not that it dominates ICP and odometry.
+        self.declare_parameter('semantic.landmark.enable', True)
+        self.declare_parameter('semantic.landmark.assoc_radius', 3.0)      # m
+        self.declare_parameter('semantic.landmark.range_sigma', 1.0)       # m
+        self.declare_parameter('semantic.landmark.bearing_sigma_deg', 10.0)
+        self.declare_parameter('semantic.landmark.robust_c', 3.0)
+        # 3D voxel labels + the labelled cloud topic they are published on.
+        self.declare_parameter('semantic.label_3d', True)
+
         # Initialize SLAM modules (composition instead of inheritance)
         self.fg = FactorGraph()
 
@@ -258,6 +297,9 @@ class SLAMNode(Node):
 
         # Mapping initialization (configured in init_node)
         self.mapper = None
+        # Set before init_node() so every consumer can read it; _init_semantic
+        # re-reads the parameter and is the only place that turns it on.
+        self.semantic_enable = False
         self.enable_2d_mapping = False
         self.map_update_interval = 1  # 매 키프레임마다 업데이트
         self.last_map_update_kf = 0
@@ -277,6 +319,7 @@ class SLAMNode(Node):
         self._init_mappers()
         self._init_fft_localizer()
         self._init_subscribers_and_publishers()
+        self._init_semantic()
         self._finalize_node_config()
 
     def _init_keyframe_and_noise_params(self) -> None:
@@ -665,11 +708,303 @@ class SLAMNode(Node):
                 qos_profile=qos_pointcloud_pub_profile
             )
             self.get_logger().info(f"Publishing 3D map to: {SLAM_NS}mapping/map_3d_octomap (QoS: RELIABLE)")
+        # The labelled 3D cloud is created in _init_semantic, not here: with the
+        # feature off the topic must not exist at all.
+        self.cloud_3d_pub = None
+        self.qos_pointcloud_pub_profile = qos_pointcloud_pub_profile
 
         # tf broadcaster to show pose
         self.tf = TransformBroadcaster(self)
 
         # cv bridge object
+
+    def _init_semantic(self) -> None:
+        """Wires the object-detection input, or leaves the node untouched.
+
+        Returns early — before importing vision_msgs, before creating any
+        subscription or counter — when `semantic.enable` is false, so a machine
+        without `vision_msgs` runs exactly the node it ran before.
+        """
+        self.semantic_enable = self.get_parameter('semantic.enable').value
+        if not self.semantic_enable:
+            return
+
+        # Imported here, not at module scope: the dependency must not be
+        # required by a run that has the feature switched off.
+        from vision_msgs.msg import Detection2DArray
+
+        self.semantic_min_conf = float(self.get_parameter('semantic.min_conf').value)
+        self.landmark_enable = self.get_parameter('semantic.landmark.enable').value
+        # Tied to 3D mapping on purpose: the queue below is only drained from
+        # the map tick, which lives inside `if self.enable_3d_mapping`. Leaving
+        # label_3d true without a mapper makes every detected keyframe pile up
+        # in pending_semantic_map for the life of the process.
+        self.label_3d = (self.get_parameter('semantic.label_3d').value
+                         and self.enable_3d_mapping)
+        # Keyframes whose detections are confirmed but whose voxels have not been
+        # labelled yet. NOT the same set as `new_keyframes`: a detection can land
+        # on a keyframe the mapper already consumed, and
+        # `keyframes[last_map_update_kf:]` never hands that one back.
+        self.pending_semantic_map = []
+        if self.landmark_enable:
+            self.fg.landmark_assoc_radius = float(
+                self.get_parameter('semantic.landmark.assoc_radius').value)
+            self.fg.landmark_sigmas = np.array([
+                np.radians(float(self.get_parameter('semantic.landmark.bearing_sigma_deg').value)),
+                float(self.get_parameter('semantic.landmark.range_sigma').value)])
+            self.fg.robust_landmark_c = float(
+                self.get_parameter('semantic.landmark.robust_c').value)
+        max_delta_s = float(self.get_parameter('semantic.max_stamp_delta').value)
+        timeout_s = float(self.get_parameter('semantic.pending_timeout').value)
+        self.pending_semantic = PendingSemantic(
+            int(max_delta_s * 1e9), int(timeout_s * 1e9))
+
+        # 계측 카운터 (semantic). `[INSTR] semantic` 로 따로 나간다 — 기존
+        # `[INSTR] counters` 줄은 off/on 어느 쪽에서도 형식이 그대로여야 한다.
+        self.semantic_instr = {
+            'det_received': 0,          # 구독한 Detection2DArray 메시지 수
+            'det_empty': 0,             # 그중 **발행자가** 탐지 0건으로 보낸 메시지 수
+                                        # (필터로 비워진 것은 아래 두 카운터가 센다)
+            'det_below_conf': 0,        # min_conf 미만이라 버린 탐지 수
+            'det_bad_class': 0,         # class_id 가 정수 문자열이 아니라 버린 탐지 수
+            'det_duplicate': 0,         # 같은 stamp 의 **미결** 검출을 덮어쓴 횟수
+                                        # (이미 소비된 stamp 의 재전송은 여기 안 잡힌다)
+            'kf_stamp_collision': 0,    # 같은 stamp 의 미결 키프레임을 덮어쓴 횟수
+            'det_missing': 0,           # 워터마크까지 검출이 안 온 키프레임 수
+            'det_expired': 0,           # 짝지을 키프레임 없이 만료된 검출 수
+            'det_matched': 0,           # 키프레임과 짝지어진 검출 메시지 수
+            'det_no_labeled_peaks': 0,  # 짝은 맞았으나 bbox 안 CFAR 피크가 0
+            'landmark_factors_added': 0,  # ★ "검출이 위치 추정에 쓰였다"의 유일한 증거
+            'landmarks_created': 0,     # 새로 만들어진 랜드마크 변수 수
+            'voxels_labeled': 0,        # 역투영으로 라벨이 붙은 복셀 수(누적)
+            'pose_key_mismatch': 0,     # 큐에 잡아둔 X 인덱스가 그 키프레임이 아니었다
+        }
+
+        if self.label_3d and self.enable_3d_mapping:
+            self.cloud_3d_pub = self.create_publisher(
+                PointCloud2, SLAM_NS + 'mapping/cloud_3d',
+                qos_profile=self.qos_pointcloud_pub_profile)
+            self.get_logger().info(
+                f"Publishing labelled 3D cloud to: {SLAM_NS}mapping/cloud_3d")
+
+        topic = self.get_parameter('semantic.detection_topic').value or '/sonar_yolo/detections'
+        # 깊이 10 을 **유지한다** — 얕아서 검출을 놓치는 것처럼 보이지만,
+        # 100 으로 늘려 같은 bag 을 재생한 결과 `det_missing` 이 오히려
+        # 나빠졌다(`det_matched=37` 시점에서 4 → 71, 2026-09-02 실측).
+        # 노드가 `rclpy.spin`(단일 스레드)이라 ICP 도는 수백 ms 동안 검출 콜백이
+        # 멈추는데, 큐를 깊게 잡으면 그 정체가 **유실**이 아니라 **지연**으로
+        # 바뀐다. 매칭은 `semantic.pending_timeout`(3 s) 안에서만 성립하므로
+        # 뒤늦게 꺼낸 검출은 이미 만료된 키프레임을 찾는다. 오래된 것을 버리는
+        # KEEP_LAST(10) 이 이 파이프라인에서 옳은 정책이다.
+        # ponytail: 진짜 지렛대는 큐 깊이가 아니라 검출 콜백을 별도 콜백 그룹 +
+        # MultiThreadedExecutor 로 빼는 것. `PendingSemantic` 과 `semantic_instr`
+        # 의 동시 접근 설계가 선행돼야 해서 여기서는 하지 않는다.
+        self.detection_sub = self.create_subscription(
+            Detection2DArray, topic, self.semantic_detection_callback, 10)
+        self.get_logger().info(
+            f"Semantic labelling enabled: subscribing to {topic} "
+            f"(max_stamp_delta={max_delta_s}s, pending_timeout={timeout_s}s, "
+            f"min_conf={self.semantic_min_conf}, landmark={self.landmark_enable})")
+
+    def _detections_from_msg(self, msg) -> np.ndarray:
+        """Detection2DArray → Kx6 `[class, conf, x1, y1, x2, y2]` 픽셀 배열.
+
+        Args:
+            msg (vision_msgs.msg.Detection2DArray): 구독한 메시지.
+
+        Returns:
+            np.ndarray: (K, 6) float32. `min_conf` 미만이거나 `class_id` 가
+            정수 문자열이 아닌 탐지는 카운터를 올리고 버린다 — `class_id` 는
+            `vision_msgs` 규격상 문자열이라 발행자가 이름을 실을 수도 있고,
+            그건 이 파이프라인이 라벨로 쓸 수 없는 값이다.
+        """
+        items = [
+            (det.results[0].hypothesis.class_id,
+             det.results[0].hypothesis.score,
+             det.bbox.center.position.x, det.bbox.center.position.y,
+             det.bbox.size_x, det.bbox.size_y)
+            for det in msg.detections if det.results
+        ]
+        rows, n_below_conf, n_bad_class = detection_rows(items, self.semantic_min_conf)
+        self.semantic_instr['det_below_conf'] += n_below_conf
+        self.semantic_instr['det_bad_class'] += n_bad_class
+        return rows
+
+    def semantic_detection_callback(self, msg) -> None:
+        """Detection2DArray 를 받아 같은 소나 프레임의 키프레임에 붙인다.
+
+        검출은 추론 지연 때문에 그 키프레임보다 늦게 오는 것이 정상이므로,
+        짝이 아직 없으면 큐에 남겨 두고 키프레임 쪽에서 집어 간다.
+
+        Args:
+            msg (vision_msgs.msg.Detection2DArray): 발행자가 이미지 header 를
+                복사해 둔 메시지.
+        """
+        stamp_ns = _stamp_to_ns(msg.header.stamp)
+        self.semantic_instr['det_received'] += 1
+        if not msg.detections:
+            # 발행자가 "추론했고 아무것도 없었다"로 보낸 것. 신뢰도·class_id
+            # 필터로 비워진 것과 구분해야 A/B 에서 검출기 상태를 읽을 수 있다.
+            self.semantic_instr['det_empty'] += 1
+        dets = self._detections_from_msg(msg)
+
+        if self.pending_semantic.has_detection(stamp_ns):
+            self.semantic_instr['det_duplicate'] += 1
+        pending = self.pending_semantic.offer_detection(stamp_ns, dets)
+        if pending is not None:
+            frame, peak_locs, pose_key = pending
+            self._apply_semantic(frame, peak_locs, pose_key, dets,
+                                 pre_append=False)
+            # 늦게 온 검출은 slam 콜백 밖에서 소비되므로, 여기서 요약을 내지
+            # 않으면 `det_matched` 증가가 로그에 영영 안 나타난다.
+            self._log_instrumentation()
+
+        # 키프레임이 더 안 생기는 구간(정지·특징 없음)에서도 큐가 자라지 않도록
+        # 검출 쪽에서도 워터마크를 돌린다.
+        self._expire_semantic(stamp_ns)
+
+    def _apply_semantic(self, frame: Keyframe, peak_locs, pose_key: int, dets,
+                        *, pre_append: bool) -> None:
+        """검출을 키프레임의 점 라벨과 랜드마크 factor 로 굳힌다.
+
+        Args:
+            frame (Keyframe): 짝이 맞은 키프레임.
+            peak_locs: 그 키프레임의 CFAR 피크 픽셀 (N, 2) `[row, col]`.
+            pose_key (int): 그 키프레임이 factor graph 에서 갖는 X 인덱스.
+            pre_append (bool): 키프레임 콜백 안에서 부르는가 —
+                `semantic.landmark_pose_key_is_valid` 로 그대로 넘어간다.
+            dets: `_detections_from_msg` 의 (K, 6) 배열.
+        """
+        self.semantic_instr['det_matched'] += 1
+        frame.detections = dets
+        frame.labels = labels_from_detections(peak_locs, dets)
+        if len(dets) > 0 and not frame.labels.any():
+            # bbox 는 왔는데 그 안에 CFAR 피크가 하나도 없다 — 3D 라벨이
+            # 비는 원인이라 따로 센다(랜드마크 factor 와는 무관하다).
+            self.semantic_instr['det_no_labeled_peaks'] += 1
+        if self.landmark_enable and self.mode != 'mapping-only':
+            self._add_landmark_factors(frame, pose_key, dets,
+                                       pre_append=pre_append)
+        if self.label_3d and len(dets) > 0:
+            self.pending_semantic_map.append(frame)
+
+    def _add_landmark_factors(self, frame: Keyframe, pose_key: int, dets,
+                              *, pre_append: bool) -> None:
+        """검출 하나마다 BearingRange factor 하나를 factor graph 에 넣는다.
+
+        측정값은 **bbox 중심 픽셀**이다. 라벨이 붙은 CFAR 점의 centroid 를 쓰면
+        bbox 안에 피크가 하나도 없는 프레임에서 factor 가 아예 안 생기는데, 그러면
+        "검출이 위치 추정에 쓰였는가"의 답이 검출기 성능에 의존해 버린다. bbox
+        중심을 쓰면 검출 1건 ⇒ factor 1건이 구성상 보장되고, factor 가 0 이 되는
+        원인은 검출 부재·stamp 불일치·ISAM2 실패 셋뿐이라 카운터로 갈린다.
+
+        Args:
+            frame (Keyframe): 짝이 맞은 키프레임.
+            pose_key (int): 그 키프레임의 X 인덱스.
+            pre_append (bool): 키프레임 콜백 안에서 부르는가. 늦은 검출
+                경로(False)는 append 동일성까지 확인한다.
+            dets: (K, 6) `[class, conf, x1, y1, x2, y2]`.
+        """
+        # 큐에 잡아둔 X 인덱스가 정말 이 키프레임의 것인지 확인한다
+        # (판정 근거는 `semantic.landmark_pose_key_is_valid` 의 docstring).
+        if not landmark_pose_key_is_valid(pose_key, self.fg.keyframes, frame,
+                                          pre_append=pre_append):
+            self.semantic_instr['pose_key_mismatch'] += 1
+            return
+
+        for cls, _conf, x1, y1, x2, y2 in dets:
+            col_c, row_c = 0.5 * (x1 + x2), 0.5 * (y1 + y2)
+            bearing, rng = pixel_to_bearing_range(
+                row_c, col_c,
+                num_bins=self.feature_extractor.num_bins,
+                num_beams=self.feature_extractor.num_beams,
+                range_min=self.feature_extractor.range_min,
+                range_max=self.feature_extractor.range_max,
+                horizontal_fov_deg=self.feature_extractor.horizontal_fov)
+            world_guess = frame.pose.transformFrom(
+                np.array([rng * np.cos(bearing), rng * np.sin(bearing)]))
+            try:
+                _j, is_new = self.fg.add_landmark_factor(
+                    pose_key, int(cls), float(bearing), float(rng), world_guess)
+            except Exception as e:  # noqa: BLE001 — 계측이 붙은 부가 경로다
+                # A landmark factor must never take the node down: it is the
+                # formal "detection was used" path, not the estimator itself.
+                self.get_logger().error(f"landmark factor failed: {e}")
+                continue
+            self.semantic_instr['landmark_factors_added'] += 1
+            if is_new:
+                self.semantic_instr['landmarks_created'] += 1
+
+    def _expire_semantic(self, now_ns: int) -> None:
+        """워터마크를 넘긴 미결 항목을 정리하고 센다.
+
+        키프레임 콜백과 검출 콜백 **양쪽에서** 부른다. 한쪽에서만 부르면 다른
+        쪽만 들어오는 구간(차량 정지로 키프레임이 안 생기거나, 특징이 없어
+        키프레임 판정이 계속 false 인 구간)에서 큐가 무한히 자란다.
+
+        Args:
+            now_ns (int): 방금 처리한 소나 프레임의 stamp(ns).
+        """
+        stale_kfs, stale_dets = self.pending_semantic.expire(now_ns)
+        self.semantic_instr['det_missing'] += len(stale_kfs)
+        self.semantic_instr['det_expired'] += len(stale_dets)
+
+    def _offer_keyframe_semantic(self, frame: Keyframe, peak_locs, stamp_ns: int) -> None:
+        """키프레임을 미결 큐에 넣고, 워터마크를 넘긴 항목을 정리한다.
+
+        Args:
+            frame (Keyframe): 방금 만들어진 키프레임.
+            peak_locs: 그 키프레임의 CFAR 피크 픽셀 (N, 2).
+            stamp_ns (int): 그 소나 프레임의 stamp(ns).
+        """
+        # The keyframe is offered before update_graph() appends it, so the X
+        # index it will get is the current length. Carrying it in the payload
+        # keeps the key stable for a detection that arrives several frames later.
+        pose_key = len(self.fg.keyframes)
+        if self.pending_semantic.has_keyframe(stamp_ns):
+            self.semantic_instr['kf_stamp_collision'] += 1
+        dets = self.pending_semantic.offer_keyframe(
+            stamp_ns, (frame, peak_locs, pose_key))
+        if dets is not None:
+            self._apply_semantic(frame, peak_locs, pose_key, dets,
+                                 pre_append=True)
+
+        self._expire_semantic(stamp_ns)
+
+    def _label_and_publish_cloud_3d(self) -> None:
+        """미결 키프레임의 검출을 복셀 라벨로 굳히고 라벨 점군을 발행한다.
+
+        `new_keyframes` 로는 부족하다 — 검출이 늦게 도착한 키프레임은 이미
+        `last_map_update_kf` 뒤로 지나가 다시는 목록에 안 들어온다. 그래서
+        검출이 확정된 키프레임을 따로 모아 두었다가 여기서 비운다.
+        """
+        try:
+            # 지도는 이 안에서 안 바뀌므로 점유 복셀을 한 번만 읽는다 —
+            # 프레임마다 다시 읽으면 C++ 옥트리 순회가 M+1 번 돈다.
+            cloud = self.mapper_3d.get_point_cloud()
+            for frame in self.pending_semantic_map:
+                self.semantic_instr['voxels_labeled'] += \
+                    self.mapper_3d.label_voxels_from_keyframe(
+                        self.mapper_3d.keyframe_pose_dict(frame), frame.detections,
+                        points=cloud['points'])
+
+            points, probs = cloud['points'], cloud['probabilities']
+            if len(points) == 0:
+                return
+            labels = self.mapper_3d.labels_for_points(points)
+            msg = n2r(np.c_[points, probs.reshape(-1, 1),
+                            labels.reshape(-1, 1).astype(np.float64)],
+                      "PointCloudXYZPL")
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = "world_ned"
+            self.cloud_3d_pub.publish(msg)
+        except Exception as e:  # noqa: BLE001 — 부가 산출물이 매핑을 못 죽인다
+            import traceback
+            self.get_logger().error(
+                f"labelled 3D cloud failed: {e}\n{traceback.format_exc()}")
+        finally:
+            # 실패한 프레임을 큐에 남기면 매 틱마다 같은 예외가 다시 난다.
+            self.pending_semantic_map.clear()
 
     def _finalize_node_config(self) -> None:
         """Loads ICP config, extracts the robot ID, and calls configure() to finish init."""
@@ -840,9 +1175,17 @@ class SLAMNode(Node):
         # 1. Extract features internally using FeatureExtraction module
         # (ICP, mapping, keyframe 판단 등에 모두 필요 - 항상 수행)
         try:
-            points = self.feature_extractor.extract_features(sonar_msg)
+            if self.semantic_enable:
+                points, peak_locs = \
+                    self.feature_extractor.extract_features_with_pixels(sonar_msg)
+            else:
+                # Unchanged call on the off path — extract_features delegates,
+                # so the baseline run executes exactly what it did before.
+                points = self.feature_extractor.extract_features(sonar_msg)
+                peak_locs = None
             # I8 — 프레임당 피처 수의 평균을 카운터 줄에 싣는다. 위의 info 로그는
-            # 1 Hz throttle 이라 CFAR 설정 비교의 분모로 쓸 수 없다.
+            # 1 Hz throttle 이라 CFAR 설정 비교의 분모로 쓸 수 없다. 두 경로가
+            # 같은 피처 배열을 내므로 분기 밖에서 한 번만 센다.
             self.instr['feat_frames'] += 1
             self.instr['feat_points_sum'] += len(points)
             self.get_logger().info(
@@ -909,11 +1252,21 @@ class SLAMNode(Node):
         if frame.status:
             # Add points
             frame.points = points
+            # Keep the label array the same length as the points it indexes;
+            # the Keyframe was constructed before the points were known.
+            frame.labels = np.zeros(len(points), np.uint8)
 
             # Add sonar image to frame
             if sonar_image is not None:
                 frame.image = sonar_image
                 frame.sonar_time = sonar_msg.header.stamp
+
+            # Pair this keyframe with its detection. The detection normally
+            # arrives later (YOLO inference lag), so this only queues it; the
+            # detection callback finishes the job when it lands.
+            if self.semantic_enable:
+                self._offer_keyframe_semantic(
+                    frame, peak_locs, _stamp_to_ns(sonar_msg.header.stamp))
 
             # FFT localization (only for keyframes)
             if self.fft_enable and self.prev_polar_sonar is not None and polar_sonar is not None:
@@ -1081,6 +1434,9 @@ class SLAMNode(Node):
                                     self.get_logger().info(
                                         f"Published 3D octomap: {len(octomap_msg.data)} bytes"
                                     )
+
+                                if self.semantic_enable and self.label_3d:
+                                    self._label_and_publish_cloud_3d()
                             except Exception as e:
                                 import traceback
                                 self.get_logger().error(f"3D mapping update failed: {e}\n{traceback.format_exc()}")
@@ -1229,6 +1585,9 @@ class SLAMNode(Node):
         # List of keyframe ids
         all_keys = []
 
+        # Semantic labels, collected in lock-step with the keys (on only).
+        all_labels = []
+
         # 2. Transform each keyframe's points to global coordinate system
         for key in range(len(self.fg.keyframes)):
 
@@ -1243,6 +1602,10 @@ class SLAMNode(Node):
             # append
             all_points.append(transf_points)
             all_keys.append(key * np.ones((len(transf_points), 1)))
+            if self.semantic_enable:
+                all_labels.append(
+                    aligned_labels(self.fg.keyframes[key].labels, len(transf_points))
+                    .reshape(-1, 1).astype(np.float64))
 
         if not all_keys:
             return
@@ -1256,19 +1619,32 @@ class SLAMNode(Node):
             point_resolution = self.localization.point_resolution
         else:
             point_resolution = 0.5  # Default resolution for mapping-only mode
-        sampled_points, sampled_keys = pcl.downsample(
-            all_points, all_keys, point_resolution
-        )
+        if self.semantic_enable:
+            # The label rides through the same descriptor channel as the
+            # keyframe index. downsample() picks a medoid, not a centroid, so
+            # an integer label survives as that integer (probe 2026-09-02).
+            sampled_points, sampled_desc = pcl.downsample(
+                all_points, np.c_[all_keys, np.concatenate(all_labels)],
+                point_resolution
+            )
+            sampled_cloud = np.c_[
+                sampled_points, np.zeros((len(sampled_points), 1)), sampled_desc]
+            cloud_type = "PointCloudXYZIL"
+        else:
+            sampled_points, sampled_keys = pcl.downsample(
+                all_points, all_keys, point_resolution
+            )
+            sampled_cloud = np.c_[
+                sampled_points, np.zeros_like(sampled_keys), sampled_keys]
+            cloud_type = "PointCloudXYZI"
 
         # 5. Convert to ROS message and publish
-        sampled_xyzi = np.c_[sampled_points, np.zeros_like(sampled_keys), sampled_keys]
-
         # if there are no points return and do nothing
-        if len(sampled_xyzi) == 0:
+        if len(sampled_cloud) == 0:
             return
 
         # convert the point cloud to a ros message and publish
-        cloud_msg = n2r(sampled_xyzi, "PointCloudXYZI")
+        cloud_msg = n2r(sampled_cloud, cloud_type)
         cloud_msg.header.stamp = self.fg.current_keyframe.time
         # Global frame for RViz (see publish pose note).
         cloud_msg.header.frame_id = "world_ned"
@@ -1503,6 +1879,14 @@ class SLAMNode(Node):
             f"alt_missing={getattr(self.feature_extractor, 'proj_alt_missing', -1)} "
             f"icp_inert={i['icp_inert']} icp_move_rej={i['icp_move_rejected']}"
         )
+        if self.semantic_enable:
+            # A separate line: the counters line above is the A/B baseline's
+            # format and must not move when semantic labelling is switched on.
+            si = self.semantic_instr
+            self.get_logger().info(
+                "[INSTR] semantic " + " ".join(f"{k}={v}" for k, v in si.items())
+                + f" pending={len(self.pending_semantic)}"
+            )
 
     def add_nonsequential_scan_matching(self) -> bool:
         """Perform non-sequential scan matching (loop closure detection).

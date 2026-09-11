@@ -62,11 +62,20 @@ def downsample(points, descriptors_or_resolution=None, resolution=None):
     for i in range(len(unique_keys)):
         mask = inverse_indices == i
         # Take centroid of points in this voxel
-        downsampled_points.append(np.mean(points[mask], axis=0))
+        centroid = np.mean(points[mask], axis=0)
+        downsampled_points.append(centroid)
 
         if descriptors is not None:
-            # Take mean of descriptors
-            downsampled_descriptors.append(np.mean(descriptors[mask], axis=0))
+            # Take the descriptor of the point nearest the centroid, NOT their
+            # mean. Descriptors carry integers here (keyframe index, semantic
+            # class label); averaging two labels 1 and 2 yields 1.5, which a
+            # consumer casting to int reads as class 1 with nothing to warn it.
+            # libpointmatcher's OctreeGrid filter (samplingMethod=3, the C++
+            # path this file falls back for) picks a medoid for the same reason.
+            member = np.flatnonzero(mask)
+            nearest = member[np.argmin(
+                np.linalg.norm(points[mask] - centroid, axis=1))]
+            downsampled_descriptors.append(descriptors[nearest])
 
     downsampled_points = np.array(downsampled_points, dtype=np.float32)
 

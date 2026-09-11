@@ -94,6 +94,11 @@ def launch_setup(context, *args, **kwargs):
         if value:
             param_dict[arg] = _as_bool(value)
 
+    # The node parameter is nested, so it cannot ride the loop above.
+    semantic = LaunchConfiguration('semantic').perform(context)
+    if semantic:
+        param_dict['semantic.enable'] = _as_bool(semantic)
+
     parameters = [
         SLAM_YAML,
         os.path.join(PKG_SHARE, 'config', 'mapping', f'method_{update_method}.yaml'),
@@ -190,6 +195,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'enable_3d_mapping', default_value='',
             description='true/false; empty = config/slam.yaml (or the mode preset)'),
+        DeclareLaunchArgument(
+            'semantic', default_value='',
+            description='true/false; empty = config/slam.yaml. true subscribes to the '
+                        'detection topic, labels cloud points and adds landmark factors'),
         DeclareLaunchArgument(
             'update_method', default_value=_yaml_default_update_method(),
             description='3D probability update: log_odds | weighted_avg | iwlo '

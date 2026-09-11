@@ -118,6 +118,232 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **목표물 검출 라벨 채널 (`feat/semantic-labels`, Stage 2/4)**: sim 의
+  `stonefish_sonar_yolo` 가 내는 `vision_msgs/Detection2DArray` 를 구독해
+  CFAR 피크 픽셀마다 라벨(=클래스 인덱스+1)을 붙이고, 그 라벨을 `/slam/cloud`
+  에 다섯 번째 필드로 실어 보낸다(요청의 "PCL XYZI 처럼 3D 좌표에 index 를
+  추가"에 해당). 새 ROS-free 모듈 `core/semantic.py` 가 순수 로직을 갖는다 —
+  `labels_from_detections`(bbox 안 픽셀에 라벨, 겹치면 나중 것이 이김),
+  `detection_rows`(중심+크기 → 모서리, 신뢰도·비정수 class_id 필터),
+  `pixel_to_bearing_range`/`sonar_to_pixel`/`slant_range_bearing`(좌표 변환),
+  `PendingSemantic`(검출↔키프레임 stamp 짝짓기 큐).
+  `feature_extraction` 안에 두지 않은 이유는 그 모듈이 상단에서 `cv_bridge`·
+  `cfar` 를 끌어와 `load_module` 로 못 열기 때문이다 — ROS 없는 CI 에서 테스트가
+  통째로 빠진다. 대신 `extract_features_with_pixels()` 를 더해 점과 그 점이 나온
+  픽셀을 같이 돌려준다(`extract_features` 는 이를 호출하는 얇은 껍데기).
+
+  **검출은 그 키프레임보다 늦게 온다.** YOLO 는 추론 중 프레임을 드랍하므로
+  `ApproximateTimeSynchronizer` 로는 멈춘다. 대신 stamp 로 색인한 미결 큐를 두고
+  검출 콜백·slam 콜백 **양쪽에서** 짝을 찾아 정확히 한 번 소비한다. 짝을 못 찾은
+  항목은 `semantic.pending_timeout`(기본 3 s = 키프레임 간격 × 3) 워터마크를
+  넘길 때 만료되며, 그 전까지는 "아직 안 옴"이지 유실이 아니다.
+
+  계측은 `[INSTR] semantic` 한 줄로 따로 나간다(카운터 9종:
+  `det_received`·`det_empty`·`det_below_conf`·`det_bad_class`·`det_duplicate`·
+  `det_missing`·`det_expired`·`det_matched`·`det_no_labeled_peaks`).
+
+  **`semantic.enable: false` 는 semantic 이전과 같은 산출물을 낸다** — 구독도,
+  새 토픽도, 새 `[INSTR]` 줄도 생기지 않고 `/slam/cloud` 는 4필드(XYZI) 스키마를
+  유지한다. `vision_msgs` import 조차 `_init_semantic()` 의 조기 return 뒤에
+  있어, 그 패키지가 없는 머신에서도 off 런은 그대로 뜬다. (프로세스가 바이트
+  단위로 같다는 뜻은 아니다: `semantic.*` 파라미터 5개가 선언되므로
+  `ros2 param list` 는 달라지고 `Keyframe` 에 필드 둘이 는다.) 이 동일성이
+  A/B 기준선이므로 `test_semantic_off_identity.py` 가 AST 로 못 박는다 —
+  PointField 골든 표, `PointCloudXYZIL`·`PointCloudXYZPL` 게이트,
+  `[INSTR] semantic` 게이트, 구독·발행자 위치, 기본값, 그리고 **게이트 자신이
+  부정 조건에 속지 않는지**(`if not semantic_enable:` 로 뒤집어도 통과하면
+  회귀 테스트가 아무것도 안 지킨다).
+
+  검증용 주입기 `scripts/fake_detection_publisher.py` 를 함께 둔다 — 시뮬 씬에
+  학습된 클래스(sofa) 자산이 없어 진짜 YOLO 로는 소비 경로를 검증할 수 없다.
+  이미지 header 를 그대로 복사해 되쏘므로 `det_missing`/`det_expired` 가 0 이
+  아니면 그건 타이밍이 아니라 큐 버그다.
+
+  크로스 repo: 발행자는 `stonefish_sim` 의 `feat/sonar-yolo-detection2d`
+  (상대 PR 상호 링크는 본 PR 본문 — `CONTRIBUTING.md` §5).
+  `package.xml` 에 `vision_msgs` 를 `exec_depend` 로 추가했다.
+
+- **검출을 pose graph 가 소비한다 — 랜드마크 factor (Stage 4)**: 검출 하나마다
+  `BearingRangeFactor2D(X(k), L(j))` 를 ICP·odometry factor 와 **같은 그래프**에
+  넣는다. 이것이 "검출 결과가 위치 인식에 사용된다"의 실제 코드 경로이고, 증거는
+  `[INSTR] semantic` 의 `landmark_factors_added` 다.
+
+  측정값은 **bbox 중심 픽셀**이다(라벨이 붙은 CFAR 점의 centroid 가 아니라).
+  centroid 를 쓰면 bbox 안에 CFAR 피크가 하나도 없는 프레임에서 factor 가 아예
+  안 생겨, "검출이 쓰였는가"의 답이 검출기 성능에 의존한다. bbox 중심이면
+  **검출 1건 ⇒ factor 1건이 구성상 보장**되고 factor 가 0 이 되는 원인은 검출
+  부재·stamp 불일치·ISAM2 실패 셋뿐이라 카운터로 갈린다.
+
+  - `utils/conversions.py` 에 `L(j)` 심볼 추가.
+  - `FactorGraph.add_landmark_factor()` — 같은 클래스가 `assoc_radius` 안이면
+    재사용, 아니면 새 변수. 한 tick 에 두 검출이 같은 새 랜드마크로 연관돼도
+    `values.insert` 는 한 번만 한다(두 번이면 gtsam 이 죽는다).
+  - `create_landmark_noise_model()` 신설 — `create_robust_full_noise_model` 은
+    covariance 를 받고 `robust_loop_c` 를 고정으로 쓰므로 재사용할 수 없다.
+    시그마는 `[bearing_rad, range_m]` 순서(BearingRange2D 의 측정 순서)이고,
+    Cauchy c 는 loop closure 와 **독립 파라미터**다 — 오검출률과 오루프율은
+    다른 값이다.
+  - **원자성**: 새 랜드마크 메타데이터는 `pending_landmarks` 에 두었다가
+    `isam.update` 가 성공한 뒤에만 `landmarks` 로 옮긴다. 실패한 tick 의
+    id 가 남으면 다음 관측이 존재하지 않는 변수에 연관된다. id 는 재사용하지
+    않는다.
+  - **`update_graph` 의 키프레임 개수**: `values.size()` → `len(self.keyframes)`.
+    랜드마크가 pose 와 같은 `Values` 에 들어가므로 `size()` 는 더 이상 키프레임
+    수가 아니고, 검출이 **한 번이라도** 쓰이는 순간
+    `atPose2(X(size-1))` 이 존재하지 않는 키를 물어 노드가 죽는다. 포즈 갱신
+    루프에는 `values.exists(X(x))` 가드를 둬서, 실패한 tick 때문에 변수가 없는
+    키프레임은 dead-reckoning pose 를 유지하고 넘어간다.
+  - 랜드마크 위치는 매 tick 최적화 결과로 갱신해 연관 반경이 현재 추정치를
+    기준으로 재도록 한다.
+  - `semantic.landmark.enable: false` 면 라벨 채널만 돌고 factor 는 안 생긴다.
+    `mapping-only` 모드에서도 안 생긴다(factor graph 자체가 안 돈다).
+
+- **3D 복원에 라벨을 얹는다 — 복셀 역투영과 `mapping/cloud_3d` (Stage 3)**:
+  점유 복셀을 검출이 그려진 이미지로 **되쏘아** bbox 안에 떨어지는 것에 클래스를
+  붙이고, `[x, y, z, prob, label]` PointCloud2 로 발행한다. 요청의 "3D 복원 후
+  그 정보를 위치 인식에 사용"에서 3D 산출물에 해당한다.
+
+  C++ 경로를 안 건드리는 이유: `ray_processor` 는 픽셀 인덱스를 C++ 밖으로
+  내보내지 않고 OctoMap 노드에는 라벨 슬롯이 없다. 갱신 시점에 라벨을 붙이려면
+  `VoxelUpdate`·옥트리 노드·pybind 세 층을 같이 고쳐야 하는데, 역투영은 파이썬
+  40여 줄로 같은 결과를 낸다.
+
+  - **경사거리로 역산한다.** `ray_processor.cpp` 는 복셀을
+    `x=r·cos(v)·cos(b), y=r·cos(v)·sin(b), z=r·sin(v)` 로 놓으므로 `|P|=r` 이다.
+    `mapping_3d._voxel_to_sonar_coords` 는 `sqrt(x²+y²)`(수평거리)를 내므로
+    앙각이 0 이 아닌 복셀에서 range bin 이 어긋난다 — 그래서 쓰지 않는다.
+    C++ 이 실제로 그 자리에 놓는지는 `test_cpp_extensions.py` 의 왕복 케이스가
+    스테이징된 `.so` 로 확인한다.
+  - **복셀 중심에는 정확한 픽셀 역산이 없다**(격자에 스냅된 자리라서). 허용
+    오차는 복셀 반대각선(`voxel_resolution·√3/2`)을 픽셀로 환산한 pad 다.
+  - **수명**: `max_frames` 리셋으로 지도가 비면 라벨도 같이 비운다. 출력은 항상
+    **현재 점유 복셀과의 교집합**이라, 점유가 풀린 셀의 라벨은 소비자에게
+    도달하지 않는다. 충돌은 나중 관측이 이긴다.
+  - **재투영 큐**: `keyframes[last_map_update_kf:]` 는 늦게 검출이 붙은
+    키프레임을 다시 돌려주지 않는다. 그래서 검출이 확정된 키프레임을
+    `pending_semantic_map` 에 모아 두었다가 map tick 에서 비운다.
+  - `⚠️ max_frames` 리셋이 **C++ 옥트리는 안 지운다**는 기존 결함을 이 자리에서
+    발견했다 — 배포 기본값(`use_cpp_backend: true`)에서 `max_frames` 가 사실상
+    동작하지 않는다. 매핑 정책 결정이라 범위 밖으로 두고 `P4_FLAGS.md` 에 적었다.
+
+- **2차 적대 검증 지적 6건 반영** (agy oracle, ground 4 — codex 는 사용량 한도로
+  중단돼 다른 벤더로 다시 돌렸다):
+  - **MAJOR**: `semantic.enable: true` + `enable_3d_mapping: false` 조합에서
+    `pending_semantic_map` 이 영원히 안 비워져 검출이 붙은 모든 키프레임(점군·
+    이미지 포함)이 쌓였다 — 큐를 비우는 곳이 3D map tick 안에만 있었기 때문이다.
+    `label_3d` 를 `enable_3d_mapping` 과 묶었다. 라벨링 중 예외가 나도 큐가
+    막히지 않도록 `clear()` 를 `finally` 로 옮겼다(안 그러면 다음 틱마다 같은
+    예외가 재발한다).
+  - **MINOR**: 한 map tick 에서 키프레임이 M 개면 C++ 옥트리를 M+1 번 걸었다 →
+    점유 복셀을 한 번만 읽어 넘긴다(`label_voxels_from_keyframe(points=...)`,
+    `labels_for_points()` 분리).
+  - **MINOR**: 콜백이 `update_graph` 에 닿기 전에 예외로 끊기면 그 키프레임은
+    append 되지 않고 다음 키프레임이 같은 X 인덱스를 받는다. 그 상태로 늦은
+    검출이 오면 **엉뚱한 pose** 를 조용히 구속했다 → 랜드마크 factor 를 붙이기
+    전에 `landmark_pose_key_is_valid()` 로 확인하고, 어긋나면
+    `pose_key_mismatch` 로 센다. ⚠️ 이 가드의 첫 판이 **정상 경로까지 막았다**:
+    검출이 먼저 와 있으면 키프레임은 아직 append 전이라
+    `pose_key == len(keyframes)` 가 맞는데, 동일성만 보면 전부 걸러진다. bag
+    재생에서 `landmark_factors_added=0` · `pose_key_mismatch=19` 로 드러났고,
+    판정을 순수 함수로 떼어 네 케이스를 테스트로 고정했다 — 단위 테스트 195건이
+    이 구멍을 못 잡았다는 뜻이라 그 자체를 기록으로 남긴다.
+  - **NIT**: `add_landmark_factor` 가 검출마다 `calculateEstimate()` 로 전체
+    Bayes tree 를 다시 풀었다 → `isam.valueExists()`(O(1) theta_ 조회).
+  - **NIT**: `config/slam.yaml` 의 `semantic:` 블록에 `label_3d` 가 빠져 있었다
+    (선언·문서에는 있는데 파라미터 카탈로그에만 없었다) → 추가하고, 블록이
+    선언된 키를 다 담는지 테스트로 고정했다.
+  - **NIT**: off 동일성 docstring 의 "파라미터 5개" 를 실제 11개로 정정.
+
+- **bag 재생 A/B 실측** (`data/bags/2026-09-02-bluerov2-lawnmower-tilt10`,
+  `--rate 1.0`, `sonar.sonar_tilt_deg:=10.0` 로 bag 에 맞춤, 주입기
+  `scripts/fake_detection_publisher.py`). 절차는 `docs/RUN_TEST.md` §4b.
+
+  | 지표 | off | on |
+  |:--|:--|:--|
+  | `icp_attempted` / `icp_converged` | 112 / 112 (rate 1.000) | 159 / 159 (rate 1.000) |
+  | `factor_icp` / `factor_odom` | 111 / 1 | 159 / 0 |
+  | `landmark_factors_added` | — | **118** (= `det_matched` 118) |
+  | `landmarks_created` | — | 34 |
+  | `voxels_labeled` | — | 734,942 |
+  | `pose_key_mismatch` · `det_duplicate` · `kf_stamp_collision` | — | 0 · 0 · 0 |
+  | `ISAM2 update failed` · `[ERROR]` | 0 · 0 | 0 · 0 |
+  | 토픽 | 기존 그대로 | `+/sonar_yolo/detections`, `+/mapping/cloud_3d` |
+  | `/slam/cloud` 필드 | `x, y, z, i` (4) | `x, y, z, i, label` (5) |
+  | `[INSTR] semantic` 줄 | 0건 | 매 키프레임 |
+
+  **"검출이 위치 인식에 쓰였다"의 증거는 `landmark_factors_added = 118` 이고,
+  그 값이 `det_matched` 와 정확히 같다** — bbox 중심을 측정값으로 쓰므로 검출
+  1건이 factor 1건이 되는 것이 구성상 보장된다는 설계가 실측으로 확인됐다.
+
+  ⚠️ **절대 개수는 off/on 사이에 비교하면 안 된다.** 소나 구독이
+  BEST_EFFORT(depth 20)라 재생 속도·CPU 부하에 따라 프레임이 떨어져
+  `icp_attempted` 가 런마다 흔들린다(같은 off 설정을 `--rate 2.0` 으로 돌리면
+  60, `--rate 1.0` 이면 112). 회귀 판정은 **수렴률**(양쪽 1.000)과 위 카운터로
+  한다. `det_expired=2178` 도 정상이다 — 주입기는 모든 이미지에 검출을 내지만
+  SLAM 은 `filter.skip` 을 통과해 키프레임이 된 프레임만 큐에 넣는다.
+  `det_missing=47` 의 원인은 **구독 큐가 얕아서가 아니다** — 그 가설로 깊이를
+  10 → 100 으로 올려 같은 bag 을 재생한 결과 매칭률이 72 %(118/165) 에서
+  31 %(40/128) 로 **떨어졌다**(2026-09-02 실측). 주입기 발행 7,328 건 중 slam
+  도달은 두 설정 모두 2.3~2.9 k 로 거의 같다(발행자 history 도 깊이 10 이라
+  거기가 상한이다) — 깊이가 바꾸는 것은 전달률이 아니라 **지연**이다. 노드가
+  단일 스레드 executor 라 ICP 도는 동안 검출 콜백이 멈추는데, 큐를 깊게 잡으면
+  그 정체가 유실이 아니라 지연이 되고, 뒤늦게 꺼낸 검출은 `pending_timeout`
+  (3 s) 을 넘긴 키프레임을 찾는다. 오래된 것을 버리는 KEEP_LAST(10) 이 이
+  파이프라인에서 옳은 정책이라 **깊이 10 을 유지한다**. 진짜 지렛대는 검출
+  콜백을 별도 콜백 그룹 + `MultiThreadedExecutor` 로 빼는 것이고, 그건
+  `PendingSemantic`·`semantic_instr` 동시 접근 설계가 선행돼야 한다.
+  `det_missing` 은 회귀 지표가 아니라 executor 점유 시간의 대리 지표로 읽는다.
+  반증 런 원본은 `.hq/work/project/plan-2026-09-02-semantic-localization/
+  ab-2026-09-02-depth100/`.
+
+  주입기의 `every_n` 을 `filter.skip` 과 맞추라던 이전 안내도 **철회한다** —
+  주입기와 SLAM 이 각자의 첫 수신 프레임부터 세므로 위상이 맞는다는 보장이 없고,
+  한 프레임만 어긋나면 매칭이 0 이 된다. 전 프레임 발행(`every_n:=1`)이 정합을
+  보장하는 유일한 설정이다.
+
+  진짜 검출(YOLO)로 하는 데모는 별도 마일스톤이다 — 시뮬 씬에 학습된 클래스
+  (sofa) 자산이 없다.
+
+- **`cpp/pcl.py` fallback 의 descriptor 집계를 C++ 과 맞췄다**: 순수 파이썬
+  `downsample` 은 descriptor 를 **평균**냈다. 이 채널로 keyframe index 와
+  semantic 라벨이 나가므로, 한 복셀에 라벨 1·2 가 섞이면 1.5 가 되고 소비자가
+  정수로 자르면 경고 없이 클래스 1 이 된다. C++ 경로(libpointmatcher OctreeGrid,
+  `samplingMethod=3`)는 medoid 를 고르므로 정수가 보존되는데, fallback 만 달라서
+  `.so` 유무로 라벨이 갈렸다 — 이제 대표점(centroid 최근접)의 descriptor 를
+  그대로 쓴다. 점 좌표는 종전대로 centroid 라 ICP 동작은 그대로다
+  (`docs/CONVENTIONS.md` §2.9 "C++ 동작을 바꾸면 fallback 도 동기화한다").
+
+- **적대 검증 지적 9건 반영** (codex oracle, ground 4):
+  - **BLOCKER**: mapping-only + semantic on 에서 두 번째 키프레임부터 점군 발행이
+    `ValueError` 로 죽었다. `frame.update()` 가 점을 넣기 **전에** 불려
+    `transf_points` 가 (0,2) 로 굳는데 `labels` 는 N 이라 `np.c_` 가 터진다.
+    `aligned_labels()` 로 길이를 `transf_points` 에 맞춘다(ISAM2 실패 tick 도 같은
+    불일치를 만든다).
+  - **MAJOR**: 워터마크를 키프레임 콜백에서만 돌려, 키프레임이 안 생기는
+    구간(정지·특징 없음)에서 큐가 무한히 자랐다 → 검출 콜백에서도 돌린다.
+    `/clock` 이 크게 뒤로 뛰면(bag 루프) cutoff 가 후퇴해 이전 epoch 항목이
+    영원히 안 만료되므로, 그때는 큐를 통째로 비운다.
+  - **MAJOR**: 짝짓기 동률에서 dict 순회 순서가 결과를 갈랐다 → 엄격한 개선일
+    때만 갱신해 **먼저 들어온 쪽**이 이기게 했다. 같은 stamp 의 키프레임이
+    덮어써지는 사건은 `kf_stamp_collision` 으로 센다.
+  - **MAJOR**: 늦게 온 검출이 계측 로그에 안 나타났다 → 매칭 성공 시 검출
+    콜백에서도 요약을 낸다. (점군은 다음 키프레임 발행에 실린다 — 전체를 매번
+    다시 만드는 함수라 검출마다 부르면 비용이 감당이 안 된다.)
+  - **MAJOR**: A/B 절차의 `-p semantic.enable:=true` 는 launch 문법이 아니었다 →
+    `slam.launch.py` 에 `semantic:=true|false` 인자를 넣었다. 주입기 문서의
+    "`det_expired` 가 0 이 아니면 큐 버그" 도 **거짓**이었다 — SLAM 은
+    `filter.skip` 을 통과해 키프레임이 된 프레임만 큐에 넣으므로 나머지 검출은
+    정상적으로 만료된다. 판정 기준을 `det_missing == 0` 과
+    `landmark_factors_added ≈ det_matched` 로 고쳤다.
+  - **MINOR**: off 동일성 주장의 범위를 산출물(알고리즘·토픽·스키마·로그)로
+    좁혔다 — 파라미터 5개는 off 에서도 선언되고 `Keyframe` 필드도 는다.
+  - **MINOR**: AST 게이트가 `if not semantic_enable:` 로 뒤집어도 통과했다 →
+    부정 조건을 거부하고, 그 성질 자체를 테스트로 고정했다.
+  - **MINOR**: `class_id` 가 `-1`(라벨 0 과 구분 불가)·`255`(uint8 wrap)여도
+    통과했다 → 0..254 범위 밖은 `det_bad_class` 로 버린다.
+  - **MINOR**: `det_empty` 가 필터 **뒤** 값을 세어 "검출기가 빈 결과를 냈다"로
+    읽을 수 없었다 → 발행자가 보낸 탐지 0건만 센다.
+
 - **위치 추정 파이프라인 계측 I1~I11** (`feat/loc-instrumentation`): "icp 0%" 도
   "DR seed 17%" 도 **분모가 없는 보고**였다 — 어느 경로를 몇 번 탔는지 세는 곳이
   하나도 없었다. 판정은 그대로 두고 세기만 한다. `Localization.ssm_disabled_count`
@@ -153,6 +379,50 @@ All notable changes to this project will be documented in this file.
 - `keyframe_duration_max` 파라미터 — 초과 시 이동량 무관 keyframe 강제(저속 구간
   cadence 유지). 기본 0.0(비활성)으로 기존 동작 불변
 - slam.launch.py에 `override_config`(프로파일 yaml 후순위 로드)·`icp_config_file` 인자 추가
+
+### Fixed
+
+- **`use_cpp_backend` 에서 `self.octree` 가 `None` 이라 죽던 두 자리**
+  (`core/mapping_3d.py`). 둘 다 `config/slam.yaml` 노브만으로 도달하는 크래시였고,
+  같은 사실 하나에서 나온다 — C++ 백엔드를 쓰면 파이썬 옥트리는 아예 만들어지지
+  않는다(`self.octree = None`).
+  - `use_cpp_backend: true` + `use_cpp_ray_processor: false` → 파이썬 광선 경로가
+    `self.octree.update_voxel` 을 불러 **첫 프레임**에서 `AttributeError`. C++
+    RayProcessor 초기화가 실패했을 때(확장 부재·생성자 예외) 타는 폴백 경로도
+    같은 곳으로 떨어졌으므로, "C++ 이 없으면 파이썬으로 폴백한다"는 문서화된
+    동작이 실제로는 한 번도 성립하지 않았다. 이제 광선 처리기가 빠지면 백엔드까지
+    같이 내린다(파이썬 갱신분을 C++ 옥트리에 넣는 경로는 존재하지 않으므로 절반만
+    내리는 상태는 표현할 수 없다).
+  - `use_cpp_backend: true` + `max_frames > 0` → 프레임 상한 리셋이 무조건
+    `self.octree.clear()` 를 불러 **`max_frames + 1` 번째 프레임**에서
+    `AttributeError`. `_reset_map_if_frame_limit()` 로 떼어내 살아있는 백엔드를
+    지운다(`voxel_labels` 는 그대로 함께 비운다).
+  - `P4_FLAGS.md` 의 이 항목은 증상을 "지도가 계속 누적된다"로 적고 있었다 —
+    **정정**: 누적이 아니라 크래시다. 실측으로 확인하고 항목에 정정 배너를 달았다.
+  - 회귀 가드 `test/test_mapping_3d_backend_fallback.py` 6케이스. 두 수정을 각각
+    되돌리는 뮤테이션으로 실효를 확인했다(각각 2건·1건 red). C++ 확장이 없는 CI
+    에서도 `max_frames` 쪽은 스텁으로 판정이 서고, 폴백 쪽은 확장이 없으면 어차피
+    생성자가 파이썬으로 떨어지므로 그 환경에서는 vacuous 하게 통과한다.
+
+- **런타임에 C++ RayProcessor 가 던지면 노드가 죽던 것**
+  (`core/mapping_3d.py` `_process_all_rays`). 그 `except` 는 "이 프레임만
+  파이썬으로 폴백한다"고 적혀 있었지만, C++ 백엔드에서는 flush 대상
+  `self.octree` 가 없어 `_apply_octree_updates` 가 `NoneType.update_voxel` 로
+  죽었다 — 프레임 단위 실패가 노드 사망이 됐다. 파이썬 옥트리가 없으면
+  폴백하지 않고 그 프레임의 지도 갱신만 버린다(지도는 C++ 옥트리에 남는다).
+  위의 초기화 시점 폴백과 **다른 자리**다(그쪽은 `__init__`, 이쪽은 매 프레임).
+  agy 적대 검증(ground 4) MAJOR 2.
+- **늦게 온 검출이 다음 키프레임의 X 인덱스를 빌려 쓸 수 있던 것**
+  (`core/semantic.py` `landmark_pose_key_is_valid`). 이 술어는 두 호출 맥락을
+  `pose_key == len(keyframes)` 라는 **길이 하나로 추론**하고 있었다. 키프레임
+  콜백 안에서는 그것이 정상 신호(곧 append 된다)지만, 늦은 검출 경로에서는
+  정반대 — 콜백이 append 전에 끊긴 키프레임의 검출이 그 인덱스를 물려받을
+  **다음** 키프레임을 구속한다. 구분을 docstring 이 이미 설명하고 있었는데
+  코드에는 없었다. 이제 호출부가 `pre_append` 로 맥락을 명시한다. 현재 코드에서
+  offer 와 append 사이에는 early return 이 없어 실제 도달에는 예외가 필요하고
+  그러면 노드가 죽지만, 이 술어는 이미 한 번 정반대 방향으로 프로덕션 결함을
+  냈으므로 거리로 지켜지던 불변식을 검사되는 불변식으로 바꾼다.
+  agy 적대 검증(ground 4) MAJOR 1. 케이스 2건 추가.
 
 ### Removed
 

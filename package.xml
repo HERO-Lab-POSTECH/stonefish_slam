@@ -33,6 +33,9 @@
   <exec_depend>message_filters</exec_depend>
   <exec_depend>sensor_msgs_py</exec_depend>
   <exec_depend>tf_transformations</exec_depend>
+  <!-- Object-detection input (semantic.enable). Imported lazily inside
+       _init_semantic(), so a run with the feature off does not need it. -->
+  <exec_depend>vision_msgs</exec_depend>
 
   <!-- Factor-graph backend: ROS-packaged GTSAM (apt: ros-${ROS_DISTRO}-gtsam) -->
   <exec_depend>gtsam</exec_depend>

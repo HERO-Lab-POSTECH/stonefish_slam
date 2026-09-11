@@ -157,6 +157,27 @@
                                      # 못 본다. 근거는 finding/027 — 올리기 전에 그걸 읽을 것.
       use_dr_rotation: false         # false: FFT estimates rotation too; true: rotation from DR, FFT supplies translation only
 
+    # ==================== Semantic labels (object detection → SLAM) ====================
+    # off = semantic 이전과 같은 산출물: 구독도 발행자도 카운터도 생기지 않고,
+    # /slam/cloud 는 4필드(XYZI) 스키마를, [INSTR] 은 기존 형식을 유지하며
+    # vision_msgs 를 import 조차 하지 않는다. A/B 의 기준선이다.
+    # (파라미터 목록에는 아래 키들이 선언되므로 `ros2 param list` 는 달라진다.)
+    semantic:
+      enable: false
+      detection_topic: ''      # '' = /sonar_yolo/detections (vision_msgs/Detection2DArray)
+      max_stamp_delta: 0.05    # s, 검출↔소나 프레임을 같은 프레임으로 볼 stamp 오차 상한
+      pending_timeout: 3.0     # s, 이 시간까지 검출이 안 오면 det_missing 확정 (키프레임 1 s × 3)
+      min_conf: 0.25           # 이 미만 신뢰도의 탐지는 버린다
+      landmark:
+        enable: true           # 검출을 BearingRange factor 로 pose graph 에 넣는다
+        assoc_radius: 3.0      # m, 같은 클래스를 같은 물체로 볼 반경
+        range_sigma: 1.0       # m   — 형식적 사용: 크게 잡아 궤적을 거의 안 끈다
+        bearing_sigma_deg: 10.0
+        robust_c: 3.0          # Cauchy c (loop closure 의 slam_loop_robust_c 와 독립)
+      # 3D 복셀 라벨 + mapping/cloud_3d 발행. enable_3d_mapping 이 false 면
+      # 이 값과 무관하게 꺼진다(라벨 큐를 비우는 곳이 3D map tick 뿐이다).
+      label_3d: true
+
     # ==================== 2D mapping (occupancy grid) ====================
     mapping_2d:
       map_2d_resolution: 0.2    # m/pixel. 0.2 keeps the grid message ~1 MB; 0.1 would be 4x (this key was
