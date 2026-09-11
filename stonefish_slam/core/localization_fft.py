@@ -1079,7 +1079,6 @@ class FFTLocalizer:
         """
         if self.use_roi:
             return None
-        import cv2
         kw = dict(erosion_iterations=self.trans_erosion_iterations,
                   gaussian_sigma=self.trans_gaussian_sigma,
                   gaussian_truncate=self.trans_gaussian_truncate)
@@ -1089,14 +1088,12 @@ class FFTLocalizer:
         pad = self._calculate_padding_size(m1.shape)
         p1 = self._apply_cartesian_padding(m1, pad)
         p2 = self._apply_cartesian_padding(m2, pad)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         n1 = self._trans_prep(p1)
         return {
             'img1_norm': n1,
             'f1': _sfft.fft2(n1, workers=-1),
             'img2_padded': p2,
             'center': (h - 1 + pad, w // 2 + pad),
-            'clahe': clahe,
         }
 
     def estimate_translation(self,
@@ -1128,7 +1125,6 @@ class FFTLocalizer:
                 'variance_y': float (meters^2)
                 'success': bool
         """
-        import cv2
 
         if prep is None:
             # Apply erosion mask
@@ -1184,9 +1180,6 @@ class FFTLocalizer:
         else:
             img1_roi = img1_padded
             img2_roi = img2_rotated
-
-        clahe = prep['clahe'] if prep is not None else cv2.createCLAHE(
-            clipLimit=2.0, tileGridSize=(8, 8))
 
         # img1 쪽은 회전이 안 걸리므로 prep 이 있으면 이미 만들어져 있다.
         if prep is not None:

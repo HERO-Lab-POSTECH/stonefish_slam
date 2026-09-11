@@ -94,6 +94,28 @@ All notable changes to this project will be documented in this file.
   메시지에도 TF 에도 없다(시뮬은 `world_ned→base_link` 만 발행) — 크로스 repo 가드
   `test_sonar_tilt_matches_sim_scenario.py` 가 그 자리를 맡는다
 
+### Removed
+
+- **한 번도 성립한 적 없는 CLAHE 재사용 배선을 지운다** (`refactor/dead-clahe-local`):
+  `prepare_translation` 이 `cv2.createCLAHE` 를 만들어 `prep['clahe']` 로 넘기고
+  `estimate_translation` 이 지역변수로 받았지만, 받아만 두고 아무 데서도 쓰지 않았다 —
+  실제 CLAHE 는 `_trans_prep` 가 호출마다 자기 안에서 새로 만든다. 즉 이 배선이 약속한
+  후보 간 재사용은 한 번도 일어난 적이 없다. pyflakes 가 `local variable 'clahe' is
+  assigned to but never used` 로 잡던 줄이다. 죽은 세 곳과, 그 탓에 미사용이 된 지역
+  `import cv2` 두 줄까지 7 줄을 지운다.
+
+  **재사용을 배선하지 않고 지우기만 한다.** 재사용 자체는 수치적으로 항등이다(공유
+  CLAHE 와 매번 새로 만든 것이 byte-identical, 순서 무관). 그런데도 켜지 않는 이유는
+  이 파이프라인에서 비용이 중립이 아니기 때문이고, `finding/027` 이 그 전례다 — K=15 는
+  오프라인에서 분명히 나았는데 온라인에선 무승부였다. 추가 비용이 프레임 드롭을 만들고
+  드롭이 키프레임 간격을 넓혀 이득을 정확히 상쇄했다. 속도 향상은 같은 되먹임의 부호를
+  뒤집은 것이라, 재사용을 켜면 측정 조건이 바뀐다 — 오프라인 하네스는 쌍 집합이 고정이라
+  구조적으로 그 차이를 못 본다. 실제 재사용은 CLAHE 생성 ~K 배 절약으로 값어치가 있으니
+  기준선 팔을 붙인 별도 변경으로 다룬다(`finding/059` 가 지적한 누락).
+
+  delta 0 은 실측했다 — `trans_clahe` on/off × `prep` 있음/없음 4 조합 전부에서 삭제
+  전후 `estimate_translation` 출력이 완전히 같고, `prep` 은 `clahe` 키만 빠진다
+
 ### Added
 
 - **위치 추정 파이프라인 계측 I1~I11** (`feat/loc-instrumentation`): "icp 0%" 도
