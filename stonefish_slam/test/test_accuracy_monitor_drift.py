@@ -149,3 +149,48 @@ def test_too_few_samples_stays_nan(monitor_module):
     gt = _straight_leg(5)
     rmse, drift, acc = _monitor(monitor_module, _with_drift(gt, 1.0), gt, 10.0)
     assert np.isnan(rmse) and np.isnan(drift) and np.isnan(acc)
+
+
+# ---------------------------------------------------------------------------
+# Estimated path length vs GT (len_ratio).
+#
+# Nothing else in the pipeline sees the length of the SLAM trajectory itself:
+# `[INSTR] scale ratio` in slam.py compares ICP against its own seed, and
+# total_distance accumulates GT. A translation estimate that comes out short
+# every keyframe is therefore invisible in the logs. Worse, it is invisible in
+# the DRIFT metric too — umeyama_se2 is a rigid alignment, so a uniformly
+# shrunken path still rotates/translates onto GT and reports a modest RMSE.
+# ---------------------------------------------------------------------------
+
+
+def test_polyline_length_of_a_straight_leg_is_its_span(monitor_module):
+    xy = np.asarray(_straight_leg(11, step=1.0), dtype=np.float64)
+    assert monitor_module.polyline_length_2d(xy) == pytest.approx(10.0)
+
+
+def test_polyline_length_is_undefined_below_two_points(monitor_module):
+    """NaN, not 0.0 — a zero would read as 'the vehicle did not move'."""
+    assert np.isnan(monitor_module.polyline_length_2d(np.zeros((1, 2))))
+    assert np.isnan(monitor_module.polyline_length_2d(np.zeros((0, 2))))
+
+
+def test_uniform_translation_compression_shows_up_as_the_length_ratio(monitor_module):
+    """A 7% short step every keyframe must read as len_ratio 0.93.
+
+    This is the quantity the tilt30 programme could not see. The estimate here
+    is a straight line like GT, just scaled — exactly the failure mode that a
+    rigid-alignment drift score under-reports.
+    """
+    gt = np.asarray(_straight_leg(101, step=1.0), dtype=np.float64)
+    est = gt * 0.93
+
+    ratio = monitor_module.polyline_length_2d(est) / monitor_module.polyline_length_2d(gt)
+    assert ratio == pytest.approx(0.93, abs=1e-9)
+
+    # And the guard this metric exists for: the drift score does NOT flag it.
+    rmse, drift, _acc = _monitor(monitor_module, [tuple(p) for p in est],
+                                 [tuple(p) for p in gt], total_distance=100.0)
+    assert drift < 100.0 * (1.0 - ratio), (
+        f"drift={drift:.2f}% already exposes a {100 * (1 - ratio):.0f}% "
+        "compression — then len_ratio would be redundant"
+    )

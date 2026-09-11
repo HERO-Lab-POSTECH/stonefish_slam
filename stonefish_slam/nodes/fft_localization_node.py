@@ -58,6 +58,7 @@ class FFTLocalizationNode(Node):
         self.declare_parameter('fft_localization.trans_erosion_iterations', 2)
         self.declare_parameter('fft_localization.trans_gaussian_sigma', 2.0)
         self.declare_parameter('fft_localization.trans_gaussian_truncate', 3.0)
+        self.declare_parameter('fft_localization.rotation_candidates', 9)
 
         # Sonar parameters (defaults match config/slam.yaml: sonar.*).
         self.declare_parameter('sonar.horizontal_fov', 130.0)
@@ -97,13 +98,15 @@ class FFTLocalizationNode(Node):
         fft_erosion = self.get_parameter('fft_localization.trans_erosion_iterations').value
         fft_gaussian_sigma = self.get_parameter('fft_localization.trans_gaussian_sigma').value
         fft_gaussian_truncate = self.get_parameter('fft_localization.trans_gaussian_truncate').value
+        fft_rotation_candidates = self.get_parameter('fft_localization.rotation_candidates').value
         self.fft_localizer = FFTLocalizer(
             oculus=oculus,
             range_min=fft_range_min,
             verbose=fft_verbose,
             trans_erosion_iterations=fft_erosion,
             trans_gaussian_sigma=fft_gaussian_sigma,
-            trans_gaussian_truncate=fft_gaussian_truncate
+            trans_gaussian_truncate=fft_gaussian_truncate,
+            rotation_candidates=fft_rotation_candidates
         )
 
         # Previous polar sonar image (consecutive-frame pairing; first frame is skipped).

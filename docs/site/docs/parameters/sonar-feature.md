@@ -31,6 +31,7 @@ flowchart TD
 | `range_max` | `40.0` | float (m) | slam.yaml | 측정 최대 거리 | 이미지 세로축의 최대 거리. range bin당 거리 해상도 = `range_max / num_bins` |
 | `sonar_position` | `[0, 0, 0]` | float[3] (m) | slam.yaml | base_link FRD 기준 소나 장착 위치 | 점군을 차체 프레임으로 변환할 때의 오프셋. 실제 장착 위치와 맞춰야 정합 |
 | `sonar_tilt_deg` | `30.0` | float (deg) | slam.yaml | 소나가 아래로 향하는 틸트 각 | 극좌표→world_ned 변환 시 반영(2D 매핑의 cartesian 재정렬에 사용). 해저 스캔 각도 결정 |
+| `projection` | `altitude` | str | slam.yaml | 경사거리 → 수평거리 투영 규약. `legacy`(점군은 r 그대로·FFT 는 r·cos(tilt)) / `inv_cos_tilt`(r÷cos(tilt), 상수 근사) / `altitude`(√(r²−h²), h=`/{vehicle}/altitude`) | ICP 점군과 FFT 직교영상이 같은 규약을 쓴다. 정본 설명은 `core/feature_extraction.py:_project_range` |
 
 !!! note "이미지 차원과의 정합"
     `num_beams`(512)는 입력 소나 이미지의 width, `num_bins`(500)는 height에 정확히 대응한다. 이 값들이 실제 발행되는 `/{v}/fls/image`의 해상도와 어긋나면 극좌표 해석이 틀어지므로, 시뮬레이터/하드웨어의 이미지 크기와 반드시 일치시켜야 한다. range bin당 거리 해상도는 \( \text{range\_max} / \text{num\_bins} = 40.0 / 500 = 0.08\,\text{m} \)이다.
