@@ -139,3 +139,103 @@ def test_beam_azimuth_leaves_bearing_alone_without_altitude(extractor):
     assert fe._beam_azimuth(0.5, 12.0) == pytest.approx(0.5)
     fe_legacy = extractor("legacy", tilt_deg=30.0, altitude=6.4)
     assert fe_legacy._beam_azimuth(0.5, 12.0) == pytest.approx(0.5)
+
+
+# --- 배선: 두 보정이 실제 점군 경로에 붙어 있는가 -----------------------------
+# 위 테스트들은 `_project_range`·`_beam_azimuth` 를 *직접* 부르므로, 두 메서드를
+# 점 변환 루프에서 통째로 떼어내도 전부 통과한다(실측: 떼고도 273 passed).
+# 여기서는 `extract_features_with_pixels` 를 끝에서 끝까지 돌려 두 보정이 그
+# 경로에 실제로 붙어 있는지를 고정한다 — semantic 브랜치의 튜플 반환과 main 의
+# 투영 배선을 한 함수 안에 합친 머지 해소가 지켜야 하는 계약이 이것이다.
+
+@pytest.fixture
+def polar_extractor(load_module):
+    """합성 극좌표 프레임 한 장을 통과시킬 수 있는 FeatureExtraction."""
+    preexisting = set(sys.modules)
+    stubs = dict(_STUBS)
+    stubs["sensor_msgs"] = {}
+    stubs["sensor_msgs.msg"] = {"CompressedImage": type("CompressedImage", (), {})}
+    for name, attrs in stubs.items():
+        if name not in sys.modules:
+            mod = types.ModuleType(name)
+            for k, v in attrs.items():
+                setattr(mod, k, v)
+            sys.modules[name] = mod
+    try:
+        module = load_module(REL, "feature_extraction_pipeline")
+
+        def make(row, col, projection="altitude", tilt_deg=30.0, altitude=6.4):
+            fe = module.FeatureExtraction.__new__(module.FeatureExtraction)
+            fe.frame_count = 0
+            fe.skip = 1
+            fe.threshold = 0
+            fe.alg = "SOCA"
+            fe.range_min, fe.range_max = 0.1, 30.0
+            fe.num_bins, fe.num_beams = 256, 512
+            fe.horizontal_fov = 130.0
+            fe.projection = projection
+            fe.sonar_tilt_rad = float(np.radians(tilt_deg))
+            fe._inv_cos_tilt = 1.0 / float(np.cos(np.radians(tilt_deg)))
+            fe.proj_dropped = 0
+            fe.proj_alt_missing = 0
+            fe.node = types.SimpleNamespace(
+                altitude_m=altitude,
+                get_logger=lambda: types.SimpleNamespace(debug=lambda *a, **k: None),
+            )
+
+            polar = np.zeros((fe.num_bins, fe.num_beams), dtype=np.uint8)
+            polar[row, col] = 255
+            peaks = polar > 0
+            fe.BridgeInstance = types.SimpleNamespace(
+                imgmsg_to_cv2=lambda msg, desired_encoding=None: polar)
+            fe.detector = types.SimpleNamespace(detect=lambda img, alg: peaks)
+            return fe, object()
+
+        yield make
+    finally:
+        for name in set(sys.modules) - preexisting:
+            del sys.modules[name]
+
+
+def _decode_bin(fe, row, col):
+    """루프가 쓰는 것과 같은 bin -> (경사거리, 빔방위) 사상."""
+    range_m = fe.range_max - (row / (fe.num_bins - 1)) * (fe.range_max - fe.range_min)
+    bearing_rad = np.radians(-fe.horizontal_fov / 2.0 +
+                             (col / (fe.num_beams - 1)) * fe.horizontal_fov)
+    return float(range_m), float(bearing_rad)
+
+
+@pytest.mark.parametrize("row,col", [(60, 140), (90, 256), (120, 400)])
+def test_point_cloud_carries_the_range_projection(polar_extractor, row, col):
+    """점의 노름은 경사거리가 아니라 수평거리여야 한다."""
+    h = 6.4
+    fe, msg = polar_extractor(row, col, altitude=h)
+    points, peak_locs = fe.extract_features_with_pixels(msg)
+
+    assert peak_locs.tolist() == [[row, col]], "peak_locs 가 튜플 반환에서 빠졌다"
+    range_m, _ = _decode_bin(fe, row, col)
+    norm = float(np.hypot(*points[0]))
+
+    assert norm == pytest.approx(np.sqrt(range_m ** 2 - h ** 2), abs=1e-9), (
+        f"수평거리 {np.sqrt(range_m**2 - h**2):.3f} m 대신 {norm:.3f} m 가 나왔다 — "
+        "_project_range 가 변환 루프에서 빠졌다"
+    )
+    assert norm != pytest.approx(range_m, abs=1e-3), "경사거리가 그대로 실렸다"
+
+
+@pytest.mark.parametrize("row,col", [(60, 140), (120, 400)])
+def test_point_cloud_carries_the_azimuth_correction(polar_extractor, row, col):
+    """점을 순방향 사상에 다시 넣으면 원래 빔 방위가 나와야 한다."""
+    h, tilt_deg = 6.4, 30.0
+    fe, msg = polar_extractor(row, col, tilt_deg=tilt_deg, altitude=h)
+    points, _ = fe.extract_features_with_pixels(msg)
+    x, y = (float(v) for v in points[0])
+    _, bearing_rad = _decode_bin(fe, row, col)
+
+    assert _true_beam_bearing(x, y, h, tilt_deg) == pytest.approx(bearing_rad, abs=1e-9), (
+        "점을 관측 사상에 되넣어도 빔 방위가 복원되지 않는다 — "
+        "_beam_azimuth 가 변환 루프에서 빠졌다"
+    )
+    assert np.arctan2(y, x) != pytest.approx(bearing_rad, abs=1e-6), (
+        "빔 방위가 보정 없이 그대로 수평 방위로 쓰였다"
+    )
